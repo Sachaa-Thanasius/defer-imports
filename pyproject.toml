@@ -1,0 +1,172 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "deferred"
+version = "0.0.1"
+description = "At implementing lazy imports in Python with compile-time and runtime import hooks."
+requires-python = ">=3.9"
+license = "MIT"
+authors = [
+    { name = "Sachaa-Thanasius", email = "111999343+Sachaa-Thanasius@users.noreply.github.com" },
+]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Utilities",
+    "Typing :: Typed",
+]
+
+[project.optional-dependencies]
+dev = ["typing-extensions"]
+benchmark = ["slothy"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/deferred"]
+
+# NOTE: The last thing to fix.
+# [tool.hatch.build.targets.wheel.hooks.autorun]
+# # Install the import hook at startup to register deferred's finder.
+# dependencies = ["hatch-autorun"]
+# code = """
+# try:
+#     import deferred
+# except ImportError:
+#     pass
+# else:
+#     deferred.install_defer_import_hook()
+# """
+
+
+# -------- Linting config
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+
+[tool.ruff.lint]
+select = [
+    "F",
+    "E",
+    "I",
+    "UP",
+    "YTT",
+    "ANN",
+    "S",
+    "BLE",
+    "B",
+    "A",
+    "COM",
+    "C4",
+    "DTZ",
+    "EM",
+    "ISC",
+    "G",
+    "INP",
+    "PIE",
+    "T20",
+    "PYI",
+    "PT",
+    "RSE",
+    "RET",
+    "SIM",
+    "TID",
+    "PTH",
+    "ERA",
+    "PL",
+    "TRY",
+    "RUF",
+]
+extend-ignore = [
+    # ---- General ignores
+    "S101",    # Use of assert here is a known quantity for typing cases. All uses should be safe to optimize out.
+    "SIM105",  # Suppressable exception. contextlib.suppress is a stylistic choice with overhead.
+    "C90",     # McCabe complexity.
+    "ANN101",  # Type of Self for self is usually implicit and/or known by the type-checker.
+    "ANN102",  # Type of type[Self] for cls is usually implicit and/or known by the type-checker.
+    "ANN204",  # Special method return types are usually implicit and/or known by type checker.
+    "ANN401",  # Any is needed for some parameters.
+    "UP038",   # isinstance performs better with tuples than unions.
+    "PT001",   # pytest recommends against empty parentheses on pytest.fixture.
+    "PD011",   # Erroneous issue that triggers for any .values attribute access at all.
+    "RUF002",  # Leave ambiguous characters alone.
+    "PLR2004", # Leave magic numbers alone.
+    # ---- Recommended by Ruff when using Ruff format
+    "E111",
+    "E114",
+    "E117",
+    "COM812",
+    "COM819",
+    "E501",
+    "ISC001",
+    "ISC002",
+    # ---- Project-specific rules
+    # -- Readability
+    # Allow else and elif after return, raise, and continue.
+    "RET505",
+    "RET506",
+    "RET507",
+    "SIM108", # Don't shorten if-else to ternary.
+]
+unfixable = [
+    "ERA", # Prevent unlikely erroneous deletion.
+]
+
+[tool.ruff.lint.isort]
+lines-after-imports = 2
+combine-as-imports = true
+
+[tool.ruff.lint.pyupgrade]
+keep-runtime-typing = true
+
+[tool.ruff.lint.per-file-ignores]
+# ---- Package code
+"**/__init__.py" = [
+    # Ruff doesn't understand using wildcard imports to export names in a package.
+    "F403",
+    "F405",
+]
+"src/deferred/*.py" = [
+    # Allow some builtin name shadowing.
+    "A001",
+    "A002",
+    # Allow fewer annotations.
+    "ANN001",
+    "ANN202",
+]
+# ---- Test code
+"tests/**/test_*.py" = [
+    # Allow printing.
+    "T201",
+    "T203",
+    # Allow fewer annotations.
+    "ANN201",
+]
+"tests/stdlib/**/test_*.py" = ["F401"]
+
+
+# -------- Type-checking config
+
+[tool.pyright]
+include = ["src/deferred"]
+pythonVersion = "3.9"
+pythonPlatform = "All"
+typeCheckingMode = "strict"
+
+defineConstant = { "TYPING" = true }
+
+reportUnnecessaryIsInstance = "information"
+reportCallInDefaultInitializer = "warning"
+reportImportCycles = "information"
+reportPropertyTypeMismatch = "error"
+reportShadowedImports = "error"
+reportUnnecessaryTypeIgnoreComment = "warning"

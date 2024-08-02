@@ -1,0 +1,68 @@
+deferred
+========
+
+An pure-Python implementation of PEP 690–esque lazy imports, but at a user's behest within the ``defer_imports_until_use`` context manager.
+
+
+Installation
+------------
+
+**Python 3.9+ is required.**
+
+The easiest way to install this is with pip:
+.. code:: sh
+
+    python -m pip install git@https://github.com/Sachaa-Thanasius/deferred
+
+
+Documentation
+-------------
+
+Mostly limited to docstrings and comments in the package code.
+
+
+Features and Caveats
+^^^^^^^^^^^^^^^^^^^^
+- Python implementation–agnostic, in theory
+    - The only dependency is on globals() at module scope to maintain its current API: specifically, that its return value will be a read-through, *write-through*, dict-like view of the module globals
+- Not that slow, especially with support from bytecode caching
+- Only works at module scope
+- Doesn't support wildcard imports
+
+
+TODO
+----
+- [ ] Investigate if this package would benefit from a custom optimization suffix for bytecode. Signs point to yes, but I'm not a fan of the monkeypatching seemingly involved.
+    - Ref: typeguard
+        - https://github.com/agronholm/typeguard/commit/4f948d05e135ff8ed76be459b8232d730a6a3e06
+        - https://github.com/agronholm/typeguard/commit/1715bd780156d1f689ffbe865b751d3a756ef46c
+    - Ref: beartype
+        - https://github.com/beartype/beartype/blob/e9eeb4e282f438e770520b99deadbe219a1c62dc/beartype/claw/_importlib/clawimpcache.py#L205
+    - Ref: importlib docs
+        - https://docs.python.org/3/library/importlib.html#importlib.util.cache_from_source
+- [ ] Fix subpackage imports being broken if done within defer_imports_until_use like this:
+
+    .. code:: python
+
+        import asyncio
+        import asyncio.base_events
+        import asyncio.base_futures
+
+- [ ] Add tests for the following:
+    - [ ] Relative imports
+    - [ ] Combinations of different import types
+    - [ ] True circular imports
+    - [ ] Thread safety (see importlib.util.LazyLoader for reference?)
+    - [ ] Other python implementations/platforms
+- [ ] Make this able to import the entire standard library, including all the subpackage imports uncommented (see benchmark/all_stdlib_modules.py)
+- [ ] Make this be able to run on normal code. It currently breaks pip, readline, and who knows what else in the standard library, possibly because of the subpackage imports issue.
+
+
+Acknowledgements
+----------------
+
+- This wouldn't have been possible without using PEP 690 and two other pieces of code as starting points.
+    - `PEP 690 <https://peps.python.org/pep-0690/>`_
+    - `Jelle's lazy gist <https://gist.github.com/JelleZijlstra/23c01ceb35d1bc8f335128f59a32db4c>`_
+    - `slothy <https://github.com/bswck/slothy>`_ (also based on the previous gist)
+- Thanks to Sinbad for the feedback and for unintentionally pushing me towards this approach.
