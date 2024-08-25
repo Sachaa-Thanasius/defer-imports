@@ -71,13 +71,15 @@ def calc_package(globals: dict[str, object]):
     Slightly modified version of importlib._bootstrap._calc___package__.
     """
 
+    # TODO: Keep the warnings up to date.
     package = globals.get("__package__")
     spec = globals.get("__spec__")
     if package is not None:
         if spec is not None and package != spec.parent:
+            category = DeprecationWarning if sys.version_info >= (3, 12) else ImportWarning
             warnings.warn(
                 f"__package__ != __spec__.parent ({package!r} != {spec.parent!r})",
-                ImportWarning,
+                category,
                 stacklevel=3,
             )
         return package

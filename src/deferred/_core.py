@@ -221,9 +221,6 @@ class DeferredFileLoader(SourceFileLoader):
     def _check_for_defer_usage(data: ReadableBuffer) -> tuple[str, bool]:
         """Get the encoding of the code and also check if it uses "with defer_imports_until_use"."""
 
-        if not bool(data):
-            return "utf-8", False
-
         token_stream = tokenize.tokenize(io.BytesIO(data).readline)
         encoding = next(token_stream).string
         uses_defer = any(
@@ -244,9 +241,11 @@ class DeferredFileLoader(SourceFileLoader):
         *,
         _optimize: int = -1,
     ) -> CodeType:
+        if not bool(data):
+            return super().source_to_code(data, path, _optimize=_optimize)  # pyright: ignore
+
         encoding, uses_defer = self._check_for_defer_usage(data)
         if not uses_defer:
-            # The default pathway for code that doesn't use defer_imports_until_use.
             return super().source_to_code(data, path, _optimize=_optimize)  # pyright: ignore
 
         transformer = DeferredInstrumenter(str(path), data, encoding)

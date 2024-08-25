@@ -2,11 +2,15 @@
 
 Notes
 -----
-sys.modules.pop(module_name) before exec_module is prevalent to ensure that cached modules don't interfere with some
-testing.
+sys.modules.pop(module_name) before exec_module is prevalent to ensure that cached modules don't interfere, since the
+deferred import hooks return cached modules if available instead of proxies in some cases.
+
+A proxy's presence in a namespace is checked via stringifying the namespace and then substring matching with the
+expected proxy repr, as that's the only way to inspect it without causing it to resolve.
 """
 
 import ast
+import importlib.machinery
 import importlib.util
 import io
 import sys
@@ -95,6 +99,30 @@ del @DeferredImportKey
 del @DeferredImportProxy
 """,
             id="mixed import 1",
+        ),
+        pytest.param(
+            """\
+from deferred import defer_imports_until_use
+
+with defer_imports_until_use:
+    from . import a
+""",
+            """\
+from deferred._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+from deferred import defer_imports_until_use
+with defer_imports_until_use:
+    @global_ns = globals()
+    @temp_proxy = None
+    from . import a
+    if type(a) is @DeferredImportProxy:
+        @temp_proxy = @global_ns.pop('a')
+        @global_ns[@DeferredImportKey('a', @temp_proxy)] = @temp_proxy
+    del @temp_proxy
+    del @global_ns
+del @DeferredImportKey
+del @DeferredImportProxy
+""",
+            id="relative import 1",
         ),
     ],
 )
@@ -588,8 +616,69 @@ assert "<key for 'asyncio' import>: <proxy for 'import asyncio'>" not in repr(va
 
 
 class TestRelativeImports:
-    # TODO
-    pass
+    def test_relative_imports_1(self, tmp_path: Path):
+        """Test a synthetic package that uses relative imports within defer_imports_until_use blocks.
+
+        The package has the following structure:
+
+            sample_package
+            ├───__init__.py
+            ├───a.py
+            └───b.py
+        """
+
+        sample_package_path = tmp_path / "sample_package"
+        sample_package_path.mkdir()
+        sample_package_path.joinpath("__init__.py").write_text(
+            """\
+from deferred import defer_imports_until_use
+
+with defer_imports_until_use:
+    from . import a
+    from .a import A
+    from .b import B
+
+__all__ = ("A", "B")
+"""
+        )
+        sample_package_path.joinpath("a.py").write_text(
+            """\
+class A:
+    def __init__(self, val: object):
+        self.val = val
+"""
+        )
+        sample_package_path.joinpath("b.py").write_text(
+            """\
+class B:
+    def __init__(self, val: object):
+        self.val = val
+"""
+        )
+
+        package_name = "sample_package"
+        init_path = str(sample_package_path / "__init__.py")
+
+        loader = DeferredFileLoader(package_name, init_path)
+        spec = importlib.util.spec_from_file_location(
+            package_name,
+            init_path,
+            loader=loader,
+            submodule_search_locations=[],
+        )
+        assert spec
+        assert spec.loader
+
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        module_vars = repr(vars(module))
+
+        assert "<key for 'a' import>: <proxy for 'from sample_package import a'>" in module_vars
+        assert "<key for 'A' import>: <proxy for 'from sample_package.a import A'>" in module_vars
+        assert "<key for 'B' import>: <proxy for 'from sample_package.b import B'>" in module_vars
+
+        # FIXME: Why can't the original __import__ find sample_package? Is it a sys.path issue?
+        assert module.A
 
 
 class TestFalseCircularImports:
