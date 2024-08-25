@@ -620,11 +620,11 @@ class TestRelativeImports:
         """Test a synthetic package that uses relative imports within defer_imports_until_use blocks.
 
         The package has the following structure:
-
-            sample_package
-            ├───__init__.py
-            ├───a.py
-            └───b.py
+            .
+            └───sample_package
+                ├───__init__.py
+                ├───a.py
+                └───b.py
         """
 
         sample_package_path = tmp_path / "sample_package"
@@ -638,7 +638,7 @@ with defer_imports_until_use:
     from .a import A
     from .b import B
 
-__all__ = ("A", "B")
+# A
 """
         )
         sample_package_path.joinpath("a.py").write_text(
@@ -657,27 +657,28 @@ class B:
         )
 
         package_name = "sample_package"
-        init_path = str(sample_package_path / "__init__.py")
+        package_init_path = str(sample_package_path / "__init__.py")
 
-        loader = DeferredFileLoader(package_name, init_path)
+        loader = DeferredFileLoader(package_name, package_init_path)
         spec = importlib.util.spec_from_file_location(
             package_name,
-            init_path,
+            package_init_path,
             loader=loader,
-            submodule_search_locations=[],
+            submodule_search_locations=[],  # A signal that this is a package.
         )
         assert spec
         assert spec.loader
 
         module = importlib.util.module_from_spec(spec)
+        # Is sample_package maybe not being manually put in sys.modules a problem?
         spec.loader.exec_module(module)
-        module_vars = repr(vars(module))
 
-        assert "<key for 'a' import>: <proxy for 'from sample_package import a'>" in module_vars
-        assert "<key for 'A' import>: <proxy for 'from sample_package.a import A'>" in module_vars
-        assert "<key for 'B' import>: <proxy for 'from sample_package.b import B'>" in module_vars
+        module_locals_repr = repr(vars(module))
+        print(module_locals_repr)
+        assert "<key for 'a' import>: <proxy for 'from sample_package import a'>" in module_locals_repr
+        assert "<key for 'A' import>: <proxy for 'from sample_package.a import A'>" in module_locals_repr
+        assert "<key for 'B' import>: <proxy for 'from sample_package.b import B'>" in module_locals_repr
 
-        # FIXME: Why can't the original __import__ find sample_package? Is it a sys.path issue?
         assert module.A
 
 

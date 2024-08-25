@@ -451,26 +451,11 @@ def _deferred_import(  # noqa: ANN202
 ):
     """An limited replacement for __import__ that supports deferred imports by returning proxies."""
 
-    # Attempt to return cached modules, but only if the requested import meets the following conditions:
-    # 1. It isn't a "from" import.
-    #   - Doing fromlist checking/verification is out of scope.
-    # 2. It isn't a submodule import.
-    #   - Checking that the submodule will be imported by the parent module (or doing that import ourselves) is out of
-    #     scope.
-    # 3. It's an import that's only possible with normal import syntax (e.g. not "import .a").
-    #   - Directly using __import__ within a defer_imports_until_use context is currently invalid.
-    #
-    # Thus, the only imports that qualify are absolute, top-level, non-nested imports.
-    if not fromlist and level == 0 and ("." not in name):
-        try:
-            return sys.modules[name]
-        except KeyError:
-            pass
-
     # Resolve the names of relative imports.
     if level > 0:
         package = calc_package(locals)
         name = resolve_name(name, package, level)  # pyright: ignore [reportArgumentType]
+        level = 0
 
     # Handle submodule imports if relevant top-level imports already occurred in the call site's module.
     if not fromlist and ("." in name):
