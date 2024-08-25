@@ -22,6 +22,7 @@ else:
 
 
 TYPING = False
+"""Constant that is True at type-checking time but False at runtime. Similar to typing.TYPE_CHECKING."""
 
 StrPath = str
 ReadableBuffer = "bytes | bytearray | memoryview"

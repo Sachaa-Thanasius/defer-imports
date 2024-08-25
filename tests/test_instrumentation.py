@@ -42,8 +42,8 @@ from deferred import defer_imports_until_use
 
 
 with defer_imports_until_use:
-    import asyncio
-    import asyncio.base_events
+    import importlib
+    import importlib.abc
 """,
             """\
 from deferred._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
@@ -51,14 +51,14 @@ from deferred import defer_imports_until_use
 with defer_imports_until_use:
     @global_ns = globals()
     @temp_proxy = None
-    import asyncio
-    if type(asyncio) is @DeferredImportProxy:
-        @temp_proxy = @global_ns.pop('asyncio')
-        @global_ns[@DeferredImportKey('asyncio', @temp_proxy)] = @temp_proxy
-    import asyncio.base_events
-    if type(asyncio) is @DeferredImportProxy:
-        @temp_proxy = @global_ns.pop('asyncio')
-        @global_ns[@DeferredImportKey('asyncio', @temp_proxy)] = @temp_proxy
+    import importlib
+    if type(importlib) is @DeferredImportProxy:
+        @temp_proxy = @global_ns.pop('importlib')
+        @global_ns[@DeferredImportKey('importlib', @temp_proxy)] = @temp_proxy
+    import importlib.abc
+    if type(importlib) is @DeferredImportProxy:
+        @temp_proxy = @global_ns.pop('importlib')
+        @global_ns[@DeferredImportKey('importlib', @temp_proxy)] = @temp_proxy
     del @temp_proxy
     del @global_ns
 del @DeferredImportKey

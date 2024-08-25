@@ -20,7 +20,7 @@ This can be installed via pip:
 Documentation
 =============
 
-Mostly limited to docstrings and comments in the package code.
+See this README as well as docstrings and comments in the code.
 
 
 Features and Caveats
@@ -42,7 +42,7 @@ These are quite rough. At the moment, time to import is being measured with the 
 
 .. code:: sh
 
-    python -X importtime -c "import benchmark.bench_lazy"
+    python -X importtime -c "import benchmark.bench_defer"
 
 
 TODO
@@ -56,13 +56,13 @@ TODO
 - [ ] Fix subpackage imports being broken if done within ``defer_imports_until_use`` like this:
 
     .. code:: python
-        
+
         from deferred import defer_imports_until_use
 
         with defer_imports_until_use:
-            import asyncio
-            import asyncio.base_events
-            import asyncio.base_futures
+            import importlib
+            import importlib.abc
+            import importlib.util
 
 - [ ] Add tests for the following:
 

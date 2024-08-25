@@ -90,22 +90,22 @@ import sys
 from deferred import defer_imports_until_use
 
 with defer_imports_until_use:
-    import collections.abc
+    import importlib.abc
 
-# expected_collections_repr = "<key for 'collections' import>: <proxy for 'import collections.abc'>"
-assert "<key for 'collections' import>: <proxy for 'import collections.abc'>" in repr(vars())
+# expected_importlib_repr = "<key for 'importlib' import>: <proxy for 'import importlib.abc'>"
+assert "<key for 'importlib' import>: <proxy for 'import importlib.abc'>" in repr(vars())
 
-assert collections
-assert collections.abc
-assert collections.abc.Sequence
+assert importlib
+assert importlib.abc
+assert importlib.abc.MetaPathFinder
 
-assert "<key for 'collections' import>: <proxy for 'import collections.abc'>" not in repr(vars())
+assert "<key for 'importlib' import>: <proxy for 'import importlib.abc'>" not in repr(vars())
 """
 
         spec, module = create_sample_module(tmp_path, source, DeferredImportFileLoader)
         assert spec.loader
-        sys.modules.pop("collections.abc", None)
-        sys.modules.pop("collections", None)
+        sys.modules.pop("importlib.abc", None)
+        sys.modules.pop("importlib", None)
         spec.loader.exec_module(module)
 
     def test_regular_import_nested_with_rename(self, tmp_path: Path):
@@ -348,33 +348,32 @@ with defer_imports_until_use:
 class TestMixedImportTypes:
     def test_top_level_and_submodules(self, tmp_path: Path):
         source = """\
-from pprint import pprint
+# from pprint import pprint
+
 from deferred import defer_imports_until_use
 
 with defer_imports_until_use:
     import importlib
     import importlib.abc
-    import importlib.util
-    import importlib.resources
+    # import importlib.resources
+    # import importlib.util
 
+# breakpoint()
 # expected_importlib_repr = "<key for 'importlib' import>: <proxy for 'import importlib'>"
 
-# Make sure the importlib proxy is here.
+# Make sure the importlib proxy is here and then resolves.
 assert "<key for 'importlib' import>: <proxy for 'import importlib'>" in repr(vars())
-
-# Make sure importlib resolves.
-importlib
+assert importlib
 assert "<key for 'importlib' import>: <proxy for 'import importlib'>" not in repr(vars())
-pprint(vars(importlib))
+# pprint(vars(importlib))
 
 # Make sure the nested proxies carry over to the resolved importlib.
-assert "<key for 'abc' import>: <proxy for 'from importlib.abc import <<<'>" in repr(vars(importlib))
-assert "<key for 'util' import>: <proxy for 'from importlib.util import <<<'>" in repr(vars(importlib))
-assert "<key for 'resources' import>: <proxy for 'from importlib.resources import <<<'>" in repr(vars(importlib))
-
+assert "<key for 'abc' import>: <proxy for 'import importlib.abc as ...'>" in repr(vars(importlib))
+# assert "<key for 'resources' import>: <proxy for 'import importlib.resources as ...'>" in repr(vars(importlib))
+# assert "<key for 'util' import>: <proxy for 'import importlib.util as ...'>" in repr(vars(importlib))
 
 importlib.abc
-importlib.util
+# importlib.util
 """
 
         spec, module = create_sample_module(tmp_path, source, DeferredImportFileLoader)

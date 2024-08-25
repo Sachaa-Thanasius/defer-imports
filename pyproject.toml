@@ -173,9 +173,6 @@ keep-runtime-typing = true
     # Allow some builtin name shadowing.
     "A001",
     "A002",
-    # Allow fewer annotations.
-    "ANN001",
-    "ANN202",
 ]
 # ---- Test code
 "tests/**/*.py" = [
@@ -195,8 +192,6 @@ include = ["src/deferred"]
 pythonVersion = "3.9"
 pythonPlatform = "All"
 typeCheckingMode = "strict"
-
-defineConstant = { "TYPING" = true }
 
 reportUnnecessaryIsInstance = "information"
 reportCallInDefaultInitializer = "warning"
