@@ -8,110 +8,25 @@ import io
 import sys
 import tokenize
 
-
-# region -------- Expensive-import-avoidance hacks
-
-
-TYPING = False
-
-if TYPING:
-    import os
-    from collections.abc import Generator, Iterable, Sequence
-    from typing import Final, Protocol, TypeVar, Union, final
-
-    if sys.version_info >= (3, 12):
-        from typing import Buffer as ReadableBuffer
-    else:
-        from typing_extensions import Buffer as ReadableBuffer
-
-    if sys.version_info >= (3, 10):
-        from itertools import pairwise
-    else:
-
-        def pairwise(iterable: Iterable[_T]) -> zip[tuple[_T, _T]]: ...
-
-    _T = TypeVar("_T")
-
-    StrPath = Union[str, os.PathLike[str]]
-
-    class HasLocationAttributes(Protocol):
-        lineno: int
-        col_offset: int
-        end_lineno: int | None
-        end_col_offset: int | None
-
-    def reverse_enumerate(sequence: Sequence[_T], start: int = -1) -> Generator[tuple[int, _T]]:
-        """Yield index-value pairs from the given sequence, but in reverse. This generator defaults to starting at the end
-        of the sequence unless the start index is given.
-        """
-        ...  # noqa: PIE790
-else:
-    from itertools import tee
-
-    StrPath = str
-    ReadableBuffer = "bytes | bytearray | memoryview"
-
-    def final(f):
-        """Placeholder for typing.final. Copied from typing with minimal changes."""
-
-        try:
-            f.__final__ = True
-        except (AttributeError, TypeError):
-            # Skip the attribute silently if it is not writable.
-            # AttributeError: if the object has __slots__ or a read-only property
-            # TypeError: if it's a builtin class
-            pass
-        return f
-
-    class Final:
-        """Placeholder for typing.Final."""
-
-    class HasLocationAttributes:
-        """Placeholder for protocol representing an ast node's location attributes."""
-
-    def pairwise(iterable) -> zip[tuple[object, object]]:
-        """Pairwise recipe copied from itertools."""
-        # pairwise('ABCDEFG') --> AB BC CD DE EF FG
-
-        a, b = tee(iterable)
-        next(b, None)
-        return zip(a, b)
-
-    def reverse_enumerate(sequence: list, start: int = -1):
-        """Yield index-value pairs from the given sequence, but in reverse. This generator defaults to starting at the end
-        of the sequence unless the start index is given.
-        """
-
-        if start == -1:
-            start = len(sequence) - 1
-
-        for i in range(start, -1, -1):
-            yield i, sequence[i]
-
-
-def decode_source(source_bytes: ReadableBuffer) -> str:
-    """Slightly modified copy of importlib.util.decode_source."""
-
-    source_bytes_readline = io.BytesIO(source_bytes).readline
-    encoding = tokenize.detect_encoding(source_bytes_readline)
-    newline_decoder = io.IncrementalNewlineDecoder(None, True)
-    return newline_decoder.decode(source_bytes.decode(encoding[0]))  # pyright: ignore
-
-
-# endregion
+from ._utils import Final, HasLocationAttributes, ReadableBuffer, StrPath, final, pairwise
 
 
 # region -------- Compile-time hook
 
 
-class DeferredImportFixer(ast.NodeTransformer):
+BYTECODE_HEADER = b"deferred0.0.1"
+"""Custom header for deferred-instrumented bytecode files. Should be updated with every version release."""
+
+
+class DeferredImportInstrumenter(ast.NodeTransformer):
     """AST transformer that "instruments" imports within "with defer_imports_until_use: ..." blocks so that their
     results are assigned to custom keys in the global namespace.
     """
 
-    def __init__(self, filename: str, source: str) -> None:
+    def __init__(self, filename: str, data: ReadableBuffer, encoding: str) -> None:
         self.filename = filename
-        self.source = source
+        self.data = data
+        self.encoding = encoding
         self.scope_depth = 0
 
     def _visit_scope(self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda | ast.ClassDef) -> ast.AST:
@@ -128,12 +43,16 @@ class DeferredImportFixer(ast.NodeTransformer):
     visit_Lambda = _visit_scope
     visit_ClassDef = _visit_scope
 
+    def _decode_source(self) -> str:
+        newline_decoder = io.IncrementalNewlineDecoder(None, translate=True)
+        return newline_decoder.decode(self.data.decode(self.encoding))  # pyright: ignore
+
     def _get_node_context(self, node: HasLocationAttributes):
         """Get the location context for a node. That context will be used as an argument to SyntaxError."""
 
         assert isinstance(node, ast.AST)
 
-        text = ast.get_source_segment(self.source, node, padded=True)
+        text = ast.get_source_segment(self._decode_source(), node, padded=True)
         context = (self.filename, node.lineno, node.col_offset + 1, text)
         if sys.version_info >= (3, 10):
             context += (node.end_lineno, node.end_col_offset + 1)
@@ -141,15 +60,11 @@ class DeferredImportFixer(ast.NodeTransformer):
 
     @staticmethod
     def _create_import_name_replacement(name: str) -> ast.If:
-        """Create a tuple of AST equivalent to the following statements (slightly simplified):
+        """Create an AST equivalent to the following statements (slightly simplified):
 
+        if type(name) is DeferredProxy:
             temp_proxy = global_ns.pop(name)
             global_ns(DeferredImportKey(name, temp_proxy)) = temp_proxy
-
-        Notes
-        -----
-        temp_proxy is a temporary reference to the current proxy being "fixed". It is deleted at the end of the "with"
-        block to avoid polluting the namespace.
         """
 
         if "." in name:
@@ -190,13 +105,11 @@ class DeferredImportFixer(ast.NodeTransformer):
         )
 
     @staticmethod
-    def _create_global_ns_assignment() -> ast.Assign:
+    def _create_global_ns_var() -> ast.Assign:
         """Create an AST that's equivalent to "@global_ns = globals()".
 
-        Notes
-        -----
-        @global_ns will serve as a temporary reference to the module globals to avoid calling globals() repeatedly.
-        It is deleted at the end of the "with" block to avoid polluting the namespace.
+        The created @global_ns variable will be used as a temporary reference to the result of globals() to avoid
+        calling globals() repeatedly.
         """
 
         return ast.Assign(
@@ -204,12 +117,23 @@ class DeferredImportFixer(ast.NodeTransformer):
             value=ast.Call(ast.Name("globals", ctx=ast.Load()), args=[], keywords=[]),
         )
 
+    @staticmethod
+    def _create_temp_proxy_var() -> ast.Assign:
+        """Create an AST that's equivalent to "@temp_proxy = None".
+
+        The created @temp_proxy variable will be used as a temporary reference to the current proxy being "fixed".
+        """
+
+        return ast.Assign(targets=[ast.Name("@temp_proxy", ctx=ast.Store())], value=ast.Constant(None))
+
     def _substitute_import_keys(self, import_nodes: list[ast.stmt]) -> list[ast.stmt]:
         """Instrument the list of imports."""
 
         new_import_nodes: list[ast.stmt] = list(import_nodes)
 
-        for i, sub_node in reverse_enumerate(import_nodes):
+        for i in range(len(import_nodes) - 1, -1, -1):
+            sub_node = import_nodes[i]
+
             if not isinstance(sub_node, (ast.Import, ast.ImportFrom)):
                 msg = "with defer_imports_until_use blocks must only contain import statements"
                 raise SyntaxError(msg, self._get_node_context(sub_node))  # noqa: TRY004
@@ -221,14 +145,9 @@ class DeferredImportFixer(ast.NodeTransformer):
 
                 new_import_nodes.insert(i + 1, self._create_import_name_replacement(alias.asname or alias.name))
 
-        # A temporary reference to globals().
-        new_import_nodes.insert(0, self._create_global_ns_assignment())
-        # A temporary variable for proxies to reside in.
-        new_import_nodes.insert(
-            1, ast.Assign(targets=[ast.Name("@temp_proxy", ctx=ast.Store())], value=ast.Constant(None))
-        )
+        new_import_nodes[0:0] = (self._create_global_ns_var(), self._create_temp_proxy_var())
 
-        # Delete temporary variables after all is said and done.
+        # Delete temporary variables after all is said and done to avoid namespace pollution.
         temp_proxy_deletion = ast.Delete(targets=[ast.Name("@temp_proxy", ctx=ast.Del())])
         new_import_nodes.append(temp_proxy_deletion)
         global_ns_deletion = ast.Delete(targets=[ast.Name("@global_ns", ctx=ast.Del())])
@@ -237,8 +156,7 @@ class DeferredImportFixer(ast.NodeTransformer):
         return new_import_nodes
 
     def visit_With(self, node: ast.With) -> ast.AST:
-        """Check that "with defer_imports_until_use" blocks are being used correctly and if so, hook all imports
-        within.
+        """Check that "with defer_imports_until_use" blocks are valid and if so, hook all imports within.
 
         Raises
         ------
@@ -246,8 +164,8 @@ class DeferredImportFixer(ast.NodeTransformer):
             If any of the following conditions are met, in order of priority:
 
                 1. "defer_imports_until_use" is being used in a non-module scope.
-                2. "defer_imports_until_use" contains a statement that isn't an import.
-                3. "defer_imports_until_use" contains a wildcard import.
+                2. "defer_imports_until_use" block contains a statement that isn't an import.
+                3. "defer_imports_until_use" block contains a wildcard import.
         """
 
         if not (
@@ -300,27 +218,32 @@ class DeferredImportFixer(ast.NodeTransformer):
 
         deferred_key_deletion = ast.Delete(targets=[ast.Name("@DeferredImportKey", ctx=ast.Del())])
         node.body.append(deferred_key_deletion)
+        deferred_proxy_deletion = ast.Delete(targets=[ast.Name("@DeferredImportProxy", ctx=ast.Del())])
+        node.body.append(deferred_proxy_deletion)
 
         return self.generic_visit(node)
 
 
-class DeferredImportFixLoader(importlib.machinery.SourceFileLoader):
+class DeferredImportFileLoader(importlib.machinery.SourceFileLoader):
     """A file loader that instruments modules that are using "with defer_imports_until_use: ..."."""
 
     @staticmethod
-    def _check_for_defer_usage(data: ReadableBuffer) -> bool:
-        """Check that "with defer_imports_until_use" is actually used in the code."""
+    def _check_for_defer_usage(data: ReadableBuffer) -> tuple[str, bool]:
+        """Get the encoding of the code and also check if it uses "with defer_imports_until_use"."""
 
-        return any(
+        token_stream = tokenize.tokenize(io.BytesIO(data).readline)
+        encoding = next(token_stream).string
+        uses_defer = any(
             first_tok.type == tokenize.NAME
             and first_tok.string == "with"
             and second_tok.type == tokenize.NAME
             and second_tok.string == "defer_imports_until_use"
-            for first_tok, second_tok in pairwise(tokenize.tokenize(io.BytesIO(data).readline))
+            for first_tok, second_tok in pairwise(token_stream)
         )
+        return encoding, uses_defer
 
     # InspectLoader is the virtual superclass of SourceFileLoader thanks to ABC registration, so typeshed reflects
-    # that. However, in reality, it has a slightly different source_to_code signature.
+    # that. However, it has a slightly different source_to_code signature.
     def source_to_code(  # pyright: ignore [reportIncompatibleMethodOverride]
         self,
         data: ReadableBuffer,
@@ -328,16 +251,52 @@ class DeferredImportFixLoader(importlib.machinery.SourceFileLoader):
         *,
         _optimize: int = -1,
     ):
-        if not self._check_for_defer_usage(data):
+        encoding, uses_defer = self._check_for_defer_usage(data)
+        if not uses_defer:
             return compile(data, path, "exec", dont_inherit=True, optimize=_optimize)
 
-        # Get the source to make better error messages.
-        source = decode_source(data)
-        orig_tree = ast.parse(data, path, "exec")
+        transformer = DeferredImportInstrumenter(str(path), data, encoding)
+        instrumented_tree = ast.fix_missing_locations(transformer.visit(ast.parse(data, path, "exec")))
+        return compile(instrumented_tree, path, "exec", dont_inherit=True, optimize=_optimize)
 
-        # NOTE: Locations could be fixed where needed to avoid full tree traversal, but that ruins the error messages.
-        new_tree = ast.fix_missing_locations(DeferredImportFixer(str(path), source).visit(orig_tree))
-        return compile(new_tree, path, "exec", dont_inherit=True, optimize=_optimize)
+    def get_data(self, path: str) -> bytes:
+        """Return the data from path as raw bytes.
+
+        If the path points to a bytecode file, check for a deferred-specific header. If the header is invalid, raising
+        OSError will invalidate the bytecode.
+
+        Source: https://gregoryszorc.com/blog/2017/03/13/from-__past__-import-bytes_literals/
+        """
+
+        data = super().get_data(path)
+
+        if not path.endswith(tuple(importlib.machinery.BYTECODE_SUFFIXES)):
+            return data
+
+        if not data.startswith(b"deferred"):
+            msg = "No deferred header"
+            raise OSError(msg)
+
+        if not data.startswith(BYTECODE_HEADER):
+            msg = "deferred header mismatch"
+            raise OSError(msg)
+
+        return data[len(BYTECODE_HEADER) :]
+
+    def set_data(self, path: str, data: ReadableBuffer, *, _mode: int = 0o666) -> None:
+        """Write bytes data to a file.
+
+        If the file is a bytecode one, prepend a deferred-specific header to it. That way, we can identify our
+        instrumented bytecode and invalidate it if necessary. An alternative way to go about this is to monkeypatch
+        importlib._bootstrap_external.cache_from_source, as beartype and typeguard do, but that seems more annoying.
+
+        Source: https://gregoryszorc.com/blog/2017/03/13/from-__past__-import-bytes_literals/
+        """
+
+        if path.endswith(tuple(importlib.machinery.BYTECODE_SUFFIXES)):
+            data = BYTECODE_HEADER + data
+
+        return super().set_data(path, data, _mode=_mode)
 
 
 # endregion
@@ -348,30 +307,30 @@ class DeferredImportFixLoader(importlib.machinery.SourceFileLoader):
 
 _MISSING = object()
 
-original_import = contextvars.ContextVar("original_import", default=builtins.__import__)
+original_import = contextvars.ContextVar("current_import", default=builtins.__import__)
 """A contextvar for tracking what builtins.__import__ currently is."""
+
+is_deferred = contextvars.ContextVar("is_deferred", default=False)
+"""A contextvar for determining if executing code is currently within defer_imports_until_use."""
 
 
 class DeferredImportProxy:
     """Proxy for a deferred __import__ call."""
 
-    __slots__ = (
-        "defer_proxy_name",
-        "defer_proxy_global_ns",
-        "defer_proxy_local_ns",
-        "defer_proxy_fromlist",
-        "defer_proxy_level",
-        "defer_proxy_requested_attrs",
-    )
-
-    def __init__(self, name: str, global_ns, local_ns, fromlist: tuple[str, ...] = (), level: int = 0) -> None:
+    def __init__(
+        self,
+        name: str,
+        global_ns: dict[str, object],
+        local_ns: dict[str, object],
+        fromlist: tuple[str, ...] = (),
+        level: int = 0,
+    ) -> None:
         self.defer_proxy_name = name
-        self.defer_proxy_global_ns: dict[str, object] = global_ns
-        self.defer_proxy_local_ns: dict[str, object] | None = local_ns
+        self.defer_proxy_global_ns = global_ns
+        self.defer_proxy_local_ns = local_ns
         self.defer_proxy_fromlist = fromlist
         self.defer_proxy_level = level
-
-        self.defer_proxy_requested_attrs: list[str] = []
+        self.defer_proxy_sub: str | None = None
 
     @property
     def defer_proxy_import_args(self):
@@ -385,23 +344,22 @@ class DeferredImportProxy:
             self.defer_proxy_level,
         )
 
-    @property
-    def defer_proxy_namespace(self):
-        """The "closest" existing namespace between the passed-in locals and globals, with a preference for locals."""
-
-        return self.defer_proxy_local_ns if (self.defer_proxy_local_ns is not None) else self.defer_proxy_global_ns
-
     def __repr__(self) -> str:
-        return f"<proxy for {self.defer_proxy_name!r} import>"
+        if self.defer_proxy_fromlist:
+            stmt = f"from {self.defer_proxy_name} import {', '.join(self.defer_proxy_fromlist)}"
+        elif self.defer_proxy_sub:
+            stmt = f"import {self.defer_proxy_name} as ..."
+        else:
+            stmt = f"import {self.defer_proxy_name}"
+
+        return f"<proxy for {stmt!r}>"
 
     def __getattr__(self, attr: str):
         sub_proxy = type(self)(*self.defer_proxy_import_args)
-
         if attr in self.defer_proxy_fromlist:
             sub_proxy.defer_proxy_fromlist = (attr,)
         else:
-            sub_proxy.defer_proxy_requested_attrs = [*self.defer_proxy_requested_attrs, attr]
-
+            sub_proxy.defer_proxy_sub = attr
         return sub_proxy
 
 
@@ -411,53 +369,78 @@ class DeferredImportKey:
     When referenced, the key will replace itself in the namespace with the resolved import or the right name from it.
     """
 
-    __slots__ = ("key", "proxy")
+    __slots__ = ("defer_key_key", "defer_key_proxy")
 
     def __init__(self, key: str, proxy: DeferredImportProxy) -> None:
-        self.key = key
-        self.proxy = proxy
+        self.defer_key_key = key
+        self.defer_key_proxy = proxy
 
     def __repr__(self) -> str:
-        return f"<key for {self.key!r} import>"
+        return f"<key for {self.defer_key_key!r} import>"
 
     def __eq__(self, value: object) -> bool:
         if not isinstance(value, str):
             return NotImplemented
-        if self.key != value:
+        if self.defer_key_key != value:
             return False
 
-        self._resolve()
+        if not is_deferred.get():
+            self._resolve()
+
         return True
 
     def __hash__(self) -> int:
-        return hash(self.key)
+        return hash(self.defer_key_key)
 
-    def _resolve(self):
+    def _resolve(self) -> None:
         """Perform an actual import for the given proxy and bind the result to the relevant namespace."""
 
-        proxy = self.proxy
-        namespace = proxy.defer_proxy_namespace
+        key = self.defer_key_key
+        proxy = self.defer_key_proxy
+        namespace = proxy.defer_proxy_local_ns
         module = original_import.get()(*proxy.defer_proxy_import_args)
 
         # Replace the proxy on the namespace with the resolved module or module attribute in the namespace.
         del namespace[self]
 
+        # if any((type(attr) is DeferredImportKey) for attr in vars(proxy)):
         if proxy.defer_proxy_fromlist:
-            namespace[self.key] = getattr(module, proxy.defer_proxy_fromlist[0])
-        elif proxy.defer_proxy_requested_attrs:
-            namespace[self.key] = getattr(module, proxy.defer_proxy_requested_attrs[0])
+            namespace[key] = getattr(module, proxy.defer_proxy_fromlist[0])
+        elif proxy.defer_proxy_sub is not None:
+            namespace[key] = getattr(module, proxy.defer_proxy_sub)
         else:
-            namespace[self.key] = module
+            namespace[key] = module
 
 
-def _deferred_import(name: str, globals=None, locals=None, fromlist=None, level: int = 0):
+def _deferred_import(
+    name: str,
+    globals: dict[str, object] = None,
+    locals: dict[str, object] | None = None,
+    fromlist: tuple[str, ...] | None = None,
+    level: int = 0,
+):
     """The implementation of __import__ supporting defer imports."""
 
+    # A few sanity checks in case someone uses __import__ within defer_imports_until_use.
+    if locals is None:
+        msg = "deferred import machinery only allowed at module level"
+        raise DeferredImportError(msg)
+
+    if fromlist == ("*",):
+        msg = "import * not allowed within deferred import machinery"
+        raise DeferredImportError(msg)
+
+    # Return cached modules for absolute imports. Relative imports are harder.
     if level == 0 and (module := sys.modules.get(name, _MISSING)) is not _MISSING:
         return module
 
-    globals = globals if (globals is not None) else {}
     fromlist = fromlist if (fromlist is not None) else ()
+
+    base_name, *rest_name = name.split(".")
+    if not fromlist and len(rest_name) and (base_name in globals):
+        proxy = DeferredImportProxy(name, globals, locals, ("__name__",), level)
+        setattr(globals[name], DeferredImportKey(rest_name[0], proxy), proxy)
+
     return DeferredImportProxy(name, globals, locals, fromlist, level)
 
 
@@ -465,6 +448,10 @@ def _deferred_import(name: str, globals=None, locals=None, fromlist=None, level:
 
 
 # region -------- Public API
+
+
+class DeferredImportError(ImportError):
+    """Exception raised when an import goes awry while using the deferred import machinery."""
 
 
 def install_defer_import_hook() -> None:
@@ -475,9 +462,9 @@ def install_defer_import_hook() -> None:
 
     for i, hook in enumerate(sys.path_hooks):
         if "FileFinder.path_hook" in hook.__qualname__:
-            supported_file_loader = (DeferredImportFixLoader, importlib.machinery.SOURCE_SUFFIXES)
+            supported_file_loader = (DeferredImportFileLoader, importlib.machinery.SOURCE_SUFFIXES)
             new_hook = importlib.machinery.FileFinder.path_hook(supported_file_loader)
-            new_hook._deferred_import_hook = True  # pyright: ignore # Runtime attribute assignment.
+            new_hook.is_deferred_import_hook = True  # pyright: ignore # Runtime attribute assignment.
             sys.path_hooks.insert(i, new_hook)
             sys.path_importer_cache.clear()
             return
@@ -487,7 +474,7 @@ def uninstall_defer_import_hook() -> None:
     """Remove deferred's path hook if it's in sys.path_hooks."""
 
     for i, hook in enumerate(sys.path_hooks):
-        if "FileFinder.path_hook" in hook.__qualname__ and getattr(hook, "_deferred_import_hook", False):
+        if "FileFinder.path_hook" in hook.__qualname__ and getattr(hook, "is_deferred_import_hook", False):
             del sys.path_hooks[i]
             sys.path_importer_cache.clear()
             return
@@ -499,18 +486,20 @@ class DeferContext:
     defer_imports_until_use.
     """
 
-    __slots__ = ("_token",)
+    __slots__ = ("_import_ctx_token", "_defer_ctx_token")
 
-    def __enter__(self):
-        self._token = original_import.set(builtins.__import__)
+    def __enter__(self) -> None:
+        self._defer_ctx_token = is_deferred.set(True)
+        self._import_ctx_token = original_import.set(builtins.__import__)
         builtins.__import__ = _deferred_import
 
     def __exit__(self, *exc_info: object) -> None:
-        original_import.reset(self._token)
+        original_import.reset(self._import_ctx_token)
+        is_deferred.reset(self._defer_ctx_token)
         builtins.__import__ = original_import.get()
 
 
-defer_imports_until_use: Final = DeferContext()
+defer_imports_until_use: Final[DeferContext] = DeferContext()
 """A context manager within which imports occur lazily. Reentrant.
 
 Raises

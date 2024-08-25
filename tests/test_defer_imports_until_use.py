@@ -11,10 +11,12 @@ import sys
 from pathlib import Path
 
 import pytest
-from deferred._core import DeferredImportFixLoader
+from deferred._core import DeferredImportFileLoader
 
 
 def create_sample_module(path: Path, source: str, loader_type: type):
+    """Utility function for creating a sample module with the given path, source code, and loader."""
+
     tmp_file = path / "sample.py"
     tmp_file.write_text(source, encoding="utf-8")
 
@@ -37,15 +39,15 @@ from deferred import defer_imports_until_use
 with defer_imports_until_use:
     import inspect
 
-assert "<key for 'inspect' import>: <proxy for 'inspect' import>" in repr(vars())
+assert "<key for 'inspect' import>: <proxy for 'import inspect'>" in repr(vars())
 assert inspect
-assert "<key for 'inspect' import>: <proxy for 'inspect' import>" not in repr(vars())
+assert "<key for 'inspect' import>: <proxy for 'import inspect'>" not in repr(vars())
 
 assert inspect is sys.modules["inspect"]
 assert str(inspect.signature(lambda a, c: c)) == "(a, c)"
 """
 
-        spec, module = create_sample_module(tmp_path, source, DeferredImportFixLoader)
+        spec, module = create_sample_module(tmp_path, source, DeferredImportFileLoader)
         assert spec.loader
         sys.modules.pop("inspect", None)  # Ensure it's fresh.
         spec.loader.exec_module(module)
@@ -53,7 +55,6 @@ assert str(inspect.signature(lambda a, c: c)) == "(a, c)"
     def test_regular_import_with_rename(self, tmp_path: Path):
         source = """\
 import sys
-from pprint import pprint
 
 import pytest
 from deferred import defer_imports_until_use
@@ -62,20 +63,20 @@ from deferred import defer_imports_until_use
 with defer_imports_until_use:
     import inspect as gin
 
-assert "<key for 'gin' import>: <proxy for 'inspect' import>" in repr(vars())
+assert "<key for 'gin' import>: <proxy for 'import inspect'>" in repr(vars())
 
 with pytest.raises(NameError):
     inspect
 
 
-assert "<key for 'gin' import>: <proxy for 'inspect' import>" in repr(vars())
+assert "<key for 'gin' import>: <proxy for 'import inspect'>" in repr(vars())
 assert gin
-assert "<key for 'gin' import>: <proxy for 'inspect' import>" not in repr(vars())
+assert "<key for 'gin' import>: <proxy for 'import inspect'>" not in repr(vars())
 assert sys.modules["inspect"] is gin
 assert str(gin.signature(lambda a, b: b)) == "(a, b)"
 """
 
-        spec, module = create_sample_module(tmp_path, source, DeferredImportFixLoader)
+        spec, module = create_sample_module(tmp_path, source, DeferredImportFileLoader)
         assert spec.loader
         sys.modules.pop("inspect", None)
         spec.loader.exec_module(module)
@@ -90,16 +91,16 @@ from deferred import defer_imports_until_use
 with defer_imports_until_use:
     import collections.abc
 
-assert "<key for 'collections' import>: <proxy for 'collections.abc' import>" in repr(vars())
+assert "<key for 'collections' import>: <proxy for 'import collections.abc'>" in repr(vars())
 
 assert collections
 assert collections.abc
 assert collections.abc.Sequence
 
-assert "<key for 'collections' import>: <proxy for 'collections.abc' import>" not in repr(vars())
+assert "<key for 'collections' import>: <proxy for 'import collections.abc'>" not in repr(vars())
 """
 
-        spec, module = create_sample_module(tmp_path, source, DeferredImportFixLoader)
+        spec, module = create_sample_module(tmp_path, source, DeferredImportFileLoader)
         assert spec.loader
         sys.modules.pop("collections.abc", None)
         sys.modules.pop("collections", None)
@@ -117,7 +118,7 @@ with defer_imports_until_use:
     import collections.abc as xyz
 
 # Make sure the right proxy is in the namespace.
-assert "<key for 'xyz' import>: <proxy for 'collections.abc' import>" in repr(vars())
+assert "<key for 'xyz' import>: <proxy for 'import collections.abc as ...'>" in repr(vars())
 
 # Make sure the intermediate imports or proxies for them aren't in the namespace.
 with pytest.raises(NameError):
@@ -127,9 +128,9 @@ with pytest.raises(NameError):
     collections.abc
 
 # Make sure xyz resolves properly.
-assert "<key for 'xyz' import>: <proxy for 'collections.abc' import>" in repr(vars())
+assert "<key for 'xyz' import>: <proxy for 'import collections.abc as ...'>" in repr(vars())
 assert xyz
-assert "<key for 'xyz' import>: <proxy for 'collections.abc' import>" not in repr(vars())
+assert "<key for 'xyz' import>: <proxy for 'import collections.abc as ...'>" not in repr(vars())
 assert xyz is sys.modules["collections"].abc
 
 # Make sure only the resolved xyz remains in the namespace.
@@ -140,7 +141,7 @@ with pytest.raises(NameError):
     collections.abc
 """
 
-        spec, module = create_sample_module(tmp_path, source, DeferredImportFixLoader)
+        spec, module = create_sample_module(tmp_path, source, DeferredImportFileLoader)
         assert spec.loader
         sys.modules.pop("collections.abc", None)
         sys.modules.pop("collections", None)
@@ -149,7 +150,6 @@ with pytest.raises(NameError):
     def test_from_import(self, tmp_path: Path):
         source = """\
 import sys
-from pprint import pprint
 
 import pytest
 from deferred import defer_imports_until_use
@@ -158,25 +158,24 @@ from deferred import defer_imports_until_use
 with defer_imports_until_use:
     from inspect import isfunction, signature
 
-pprint(vars())
-assert "<key for 'isfunction' import>: <proxy for 'inspect' import>" in repr(vars())
-assert "<key for 'signature' import>: <proxy for 'inspect' import>" in repr(vars())
+assert "<key for 'isfunction' import>: <proxy for 'from inspect import isfunction'>" in repr(vars())
+assert "<key for 'signature' import>: <proxy for 'from inspect import signature'>" in repr(vars())
 
 with pytest.raises(NameError):
     inspect
 
-assert "<key for 'isfunction' import>: <proxy for 'inspect' import>" in repr(vars())
+assert "<key for 'isfunction' import>: <proxy for 'from inspect import isfunction'>" in repr(vars())
 assert isfunction
-assert "<key for 'isfunction' import>: <proxy for 'inspect' import>" not in repr(vars())
+assert "<key for 'isfunction' import>: <proxy for 'from inspect import isfunction'>" not in repr(vars())
 assert isfunction is sys.modules["inspect"].isfunction
 
-assert "<key for 'signature' import>: <proxy for 'inspect' import>" in repr(vars())
+assert "<key for 'signature' import>: <proxy for 'from inspect import signature'>" in repr(vars())
 assert signature
-assert "<key for 'signature' import>: <proxy for 'inspect' import>" not in repr(vars())
+assert "<key for 'signature' import>: <proxy for 'from inspect import signature'>" not in repr(vars())
 assert signature is sys.modules["inspect"].signature
 """
 
-        spec, module = create_sample_module(tmp_path, source, DeferredImportFixLoader)
+        spec, module = create_sample_module(tmp_path, source, DeferredImportFileLoader)
         assert spec.loader
         sys.modules.pop("inspect", None)
         spec.loader.exec_module(module)
@@ -192,7 +191,7 @@ from deferred import defer_imports_until_use
 with defer_imports_until_use:
     from inspect import Signature as MySignature
 
-assert "<key for 'MySignature' import>: <proxy for 'inspect' import>" in repr(vars())
+assert "<key for 'MySignature' import>: <proxy for 'from inspect import Signature'>" in repr(vars())
 
 with pytest.raises(NameError):
     inspect
@@ -200,13 +199,13 @@ with pytest.raises(NameError):
 with pytest.raises(NameError):
     Signature
 
-assert "<key for 'MySignature' import>: <proxy for 'inspect' import>" in repr(vars())
+assert "<key for 'MySignature' import>: <proxy for 'from inspect import Signature'>" in repr(vars())
 assert str(MySignature) == "<class 'inspect.Signature'>"  # Resolves on use.
-assert "<key for 'MySignature' import>: <proxy for 'inspect' import>" not in repr(vars())
+assert "<key for 'MySignature' import>: <proxy for 'from inspect import Signature'>" not in repr(vars())
 assert MySignature is sys.modules["inspect"].Signature
 """
 
-        spec, module = create_sample_module(tmp_path, source, DeferredImportFixLoader)
+        spec, module = create_sample_module(tmp_path, source, DeferredImportFileLoader)
         assert spec.loader
         sys.modules.pop("inspect", None)
         spec.loader.exec_module(module)
@@ -229,7 +228,7 @@ with defer_imports_until_use:
         path = tmp_file.resolve()
 
         spec = importlib.util.spec_from_file_location(
-            module_name, path, loader=DeferredImportFixLoader(module_name, str(path))
+            module_name, path, loader=DeferredImportFileLoader(module_name, str(path))
         )
 
         assert spec
@@ -262,7 +261,7 @@ class Example:
         path = tmp_file.resolve()
 
         spec = importlib.util.spec_from_file_location(
-            module_name, path, loader=DeferredImportFixLoader(module_name, str(path))
+            module_name, path, loader=DeferredImportFileLoader(module_name, str(path))
         )
 
         assert spec
@@ -297,7 +296,7 @@ def test():
         path = tmp_file.resolve()
 
         spec = importlib.util.spec_from_file_location(
-            module_name, path, loader=DeferredImportFixLoader(module_name, str(path))
+            module_name, path, loader=DeferredImportFileLoader(module_name, str(path))
         )
 
         assert spec
@@ -329,7 +328,7 @@ with defer_imports_until_use:
         path = tmp_file.resolve()
 
         spec = importlib.util.spec_from_file_location(
-            module_name, path, loader=DeferredImportFixLoader(module_name, str(path))
+            module_name, path, loader=DeferredImportFileLoader(module_name, str(path))
         )
 
         assert spec
@@ -346,30 +345,36 @@ with defer_imports_until_use:
         assert exc_info.value.text == "from typing import *"
 
 
-class TestMultipleSubmoduleImports:
-    @pytest.mark.xfail(reason="Proxies haven't been adjusted to handle this yet.")
+class TestMixedImportTypes:
     def test_top_level_and_submodules(self, tmp_path: Path):
         source = """\
+from pprint import pprint
+
 from deferred import defer_imports_until_use
 
+
 with defer_imports_until_use:
-    import asyncio
-    import asyncio.base_events
+    import importlib
+    import importlib.abc
+    import importlib.util
+    import importlib.resources
+
+print()
+importlib
+importlib.abc
+importlib.util
 """
 
-        spec, module = create_sample_module(tmp_path, source, DeferredImportFixLoader)
+        spec, module = create_sample_module(tmp_path, source, DeferredImportFileLoader)
         assert spec.loader
         for key in list(sys.modules):
-            if key == "asyncio" or key.startswith("asyncio."):
+            if key == "importlib" or key.startswith("importlib."):
                 sys.modules.pop(key)
         spec.loader.exec_module(module)
 
-
-class TestMixedImportTypes:
-    def test_mixed_from_same_module_1(self, tmp_path: Path):
+    def test_mixed_from_same_module(self, tmp_path: Path):
         source = """\
 import sys
-from pprint import pprint
 
 from deferred import defer_imports_until_use
 
@@ -380,31 +385,31 @@ with defer_imports_until_use:
     from asyncio import base_futures
 
 # Make sure the right proxies are present.
-assert "<key for 'asyncio' import>: <proxy for 'asyncio' import>" in repr(vars())
-assert "<key for 'base_events' import>: <proxy for 'asyncio' import>" in repr(vars())
-assert "<key for 'base_futures' import>: <proxy for 'asyncio' import>" in repr(vars())
+assert "<key for 'asyncio' import>: <proxy for 'import asyncio'>" in repr(vars())
+assert "<key for 'base_events' import>: <proxy for 'from asyncio import base_events'>" in repr(vars())
+assert "<key for 'base_futures' import>: <proxy for 'from asyncio import base_futures'>" in repr(vars())
 
 # Make sure resolving one proxy doesn't resolve or void the others.
 assert base_futures
 assert base_futures is sys.modules["asyncio.base_futures"]
-assert "<key for 'base_futures' import>: <proxy for 'asyncio' import>" not in repr(vars())
-assert "<key for 'base_events' import>: <proxy for 'asyncio' import>" in repr(vars())
-assert "<key for 'asyncio' import>: <proxy for 'asyncio' import>" in repr(vars())
+assert "<key for 'base_futures' import>: <proxy for 'from asyncio import base_futures'>" not in repr(vars())
+assert "<key for 'base_events' import>: <proxy for 'from asyncio import base_events'>" in repr(vars())
+assert "<key for 'asyncio' import>: <proxy for 'import asyncio'>" in repr(vars())
 
 assert base_events
 assert base_events is sys.modules["asyncio.base_events"]
-assert "<key for 'base_events' import>: <proxy for 'asyncio' import>" not in repr(vars())
-assert "<key for 'base_futures' import>: <proxy for 'asyncio' import>" not in repr(vars())
-assert "<key for 'asyncio' import>: <proxy for 'asyncio' import>" in repr(vars())
+assert "<key for 'base_events' import>: <proxy for 'from asyncio import base_events'>" not in repr(vars())
+assert "<key for 'base_futures' import>: <proxy for 'from asyncio import base_futures'>" not in repr(vars())
+assert "<key for 'asyncio' import>: <proxy for 'import asyncio'>" in repr(vars())
 
 assert asyncio
 assert asyncio is sys.modules["asyncio"]
-assert "<key for 'base_events' import>: <proxy for 'asyncio' import>" not in repr(vars())
-assert "<key for 'base_futures' import>: <proxy for 'asyncio' import>" not in repr(vars())
-assert "<key for 'asyncio' import>: <proxy for 'asyncio' import>" not in repr(vars())
+assert "<key for 'base_events' import>: <proxy for 'from asyncio import base_events'>" not in repr(vars())
+assert "<key for 'base_futures' import>: <proxy for 'from asyncio import base_futures'>" not in repr(vars())
+assert "<key for 'asyncio' import>: <proxy for 'import asyncio'>" not in repr(vars())
 """
 
-        spec, module = create_sample_module(tmp_path, source, DeferredImportFixLoader)
+        spec, module = create_sample_module(tmp_path, source, DeferredImportFileLoader)
         assert spec.loader
         for key in list(sys.modules):
             if key == "asyncio" or key.startswith("asyncio."):

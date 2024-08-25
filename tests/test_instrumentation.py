@@ -1,19 +1,24 @@
-"""Tests for the compile-time hook part of deferred."""
+"""Tests for deferred's compile-time transformations."""
 
 import ast
+import io
+import tokenize
 
-from deferred._core import DeferredImportFixer
+import pytest
+from deferred._core import DeferredImportInstrumenter
 
 
-def test_regular_import():
-    regular_case = """\
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        pytest.param(
+            """\
 from deferred import defer_imports_until_use
 
 with defer_imports_until_use:
     import inspect
-"""
-
-    expected = """\
+""",
+            """\
 from deferred._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
 from deferred import defer_imports_until_use
 with defer_imports_until_use:
@@ -26,24 +31,20 @@ with defer_imports_until_use:
     del @temp_proxy
     del @global_ns
 del @DeferredImportKey
-"""
-
-    tree = ast.parse(regular_case)
-    modified_tree = ast.fix_missing_locations(DeferredImportFixer("<string>", regular_case).visit(tree))
-    assert f"{ast.unparse(modified_tree)}\n" == expected
-
-
-def test_mixed_import_1():
-    regular_case = """\
+del @DeferredImportProxy
+""",
+            id="regular import",
+        ),
+        pytest.param(
+            """\
 from deferred import defer_imports_until_use
 
 
 with defer_imports_until_use:
     import asyncio
     import asyncio.base_events
-"""
-
-    expected = """\
+""",
+            """\
 from deferred._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
 from deferred import defer_imports_until_use
 with defer_imports_until_use:
@@ -60,8 +61,17 @@ with defer_imports_until_use:
     del @temp_proxy
     del @global_ns
 del @DeferredImportKey
-"""
+del @DeferredImportProxy
+""",
+            id="mixed import 1",
+        ),
+    ],
+)
+def test_instrumentation(before: str, after: str):
+    before_bytes = before.encode()
+    encoding, _ = tokenize.detect_encoding(io.BytesIO(before_bytes).readline)
 
-    tree = ast.parse(regular_case)
-    modified_tree = ast.fix_missing_locations(DeferredImportFixer("<string>", regular_case).visit(tree))
-    assert f"{ast.unparse(modified_tree)}\n" == expected
+    transformer = DeferredImportInstrumenter("<unknown>", before_bytes, encoding)
+    transformed_tree = ast.fix_missing_locations(transformer.visit(ast.parse(before)))
+
+    assert f"{ast.unparse(transformed_tree)}\n" == after

@@ -1,7 +1,7 @@
 # pyright: reportUnusedImport=none
 import __future__
 
-import _bootlocale
+# import _bootlocale
 import _collections_abc
 import _compat_pickle
 import _compression

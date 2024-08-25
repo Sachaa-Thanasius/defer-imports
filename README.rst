@@ -31,7 +31,7 @@ Features and Caveats
     - The only dependency is on globals() at module scope to maintain its current API: specifically, that its return value will be a read-through, *write-through*, dict-like view of the module globals
 
 - Not that slow, especially with support from bytecode caching
-- Only works at module scope
+- Doesn't support lazy importing in class or function scope
 - Doesn't support wildcard imports
 
 
@@ -48,8 +48,9 @@ These are quite rough. At the moment, time to import is being measured with the 
 TODO
 ====
 
-- [ ] Investigate if this package would benefit from a custom optimization suffix for bytecode. Signs point to yes, but I'm not a fan of the monkeypatching seemingly involved, nor of having to import ``importlib.util``.
+- [x] Investigate if this package would benefit from a custom optimization suffix for bytecode. UPDATE: Added in a different way without monkeypatching, thanks to `this blog post <https://gregoryszorc.com/blog/2017/03/13/from-__past__-import-bytes_literals/>`_.
 
+    - Signs point to yes, but I'm not a fan of the monkeypatching seemingly involved, nor of having to import ``importlib.util``.
     - See beartype and its justification `for <https://github.com/beartype/beartype/blob/e9eeb4e282f438e770520b99deadbe219a1c62dc/beartype/claw/_importlib/_clawimpload.py#L177-L312>`_ `this <https://github.com/beartype/beartype/blob/e9eeb4e282f438e770520b99deadbe219a1c62dc/beartype/claw/_importlib/clawimpcache.py#L22-L26>`_.
 
 - [ ] Fix subpackage imports being broken if done within ``defer_imports_until_use`` like this:
