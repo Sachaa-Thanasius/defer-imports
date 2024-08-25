@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-# TODO: ast and tokenize are the most expensive upfront import costs. Can they be avoided?
 import ast
 import builtins
 import collections
@@ -34,11 +33,19 @@ class DeferredInstrumenter(ast.NodeTransformer):
     results are assigned to custom keys in the global namespace.
     """
 
-    def __init__(self, filename: str, data: _tp.ReadableBuffer, encoding: str) -> None:
-        self.filename = filename
+    def __init__(
+        self,
+        filepath: _tp.Union[_tp.StrPath, _tp.ReadableBuffer],
+        data: _tp.ReadableBuffer,
+        encoding: str,
+    ) -> None:
+        self.filepath = filepath
         self.data = data
         self.encoding = encoding
         self.scope_depth = 0
+
+    def transform(self) -> _tp.Any:
+        return self.visit(ast.parse(self.data, self.filepath, "exec"))
 
     def _visit_scope(self, node: ast.AST) -> ast.AST:
         """Track Python scope changes. Used to determine if defer_imports_until_use usage is valid."""
@@ -62,7 +69,7 @@ class DeferredInstrumenter(ast.NodeTransformer):
         """Get the location context for a node. That context will be used as an argument to SyntaxError."""
 
         text = ast.get_source_segment(self._decode_source(), node, padded=True)
-        context = (self.filename, node.lineno, node.col_offset + 1, text)
+        context = (str(self.filepath), node.lineno, node.col_offset + 1, text)
         if sys.version_info >= (3, 10):  # pragma: >=3.10 cover
             context += (node.end_lineno, node.end_col_offset + 1)
         return context
@@ -258,7 +265,7 @@ class DeferredFileLoader(SourceFileLoader):
     """A file loader that instruments .py files which use "with defer_imports_until_use: ..."."""
 
     @classmethod
-    def _check_for_defer_usage(cls, data: _tp.ReadableBuffer) -> tuple[str, bool]:
+    def _check_source_for_defer_usage(cls, data: _tp.ReadableBuffer) -> tuple[str, bool]:
         """Get the encoding of the code and also check if it uses "with defer_imports_until_use"."""
 
         tok_NAME, tok_OP = tokenize.NAME, tokenize.OP
@@ -282,24 +289,26 @@ class DeferredFileLoader(SourceFileLoader):
         )
         return encoding, uses_defer
 
-    # TODO: InspectLoader is the virtual superclass of SourceFileLoader thanks to ABC registration, so typeshed
-    #       reflects that. However, there's a slight mismatch in source_to_code signatures. Make a PR?
     def source_to_code(  # pyright: ignore [reportIncompatibleMethodOverride]
         self,
         data: _tp.ReadableBuffer,
-        path: _tp.ReadableBuffer | _tp.StrPath,
+        path: _tp.Union[_tp.ReadableBuffer, _tp.StrPath],
         *,
         _optimize: int = -1,
     ) -> _tp.CodeType:
+        # NOTE: InspectLoader is the virtual superclass of SourceFileLoader thanks to ABC registration, so typeshed
+        #       reflects that. However, there's a slight mismatch in source_to_code signatures. Make a PR?
+
+        # Defer to regular machinery if the module is empty or doesn't use defer_imports_until_use.
         if not data:
-            return super().source_to_code(data, path, _optimize=_optimize)  # pyright: ignore
+            return super().source_to_code(data, path, _optimize=_optimize)  # pyright: ignore # See note above.
 
-        encoding, uses_defer = self._check_for_defer_usage(data)
+        encoding, uses_defer = self._check_source_for_defer_usage(data)
         if not uses_defer:
-            return super().source_to_code(data, path, _optimize=_optimize)  # pyright: ignore
+            return super().source_to_code(data, path, _optimize=_optimize)  # pyright: ignore # See note above.
 
-        transformer = DeferredInstrumenter(str(path), data, encoding)
-        instrumented_tree = ast.fix_missing_locations(transformer.visit(ast.parse(data, path, "exec")))
+        instrumenter = DeferredInstrumenter(path, data, encoding)
+        instrumented_tree = ast.fix_missing_locations(instrumenter.transform())
         return compile(instrumented_tree, path, "exec", dont_inherit=True, optimize=_optimize)
 
     def get_data(self, path: str) -> bytes:
@@ -370,7 +379,7 @@ class DeferredImportProxy:
         name: str,
         global_ns: dict[str, object],
         local_ns: dict[str, object],
-        fromlist: tuple[str, ...] | None,
+        fromlist: _tp.Optional[tuple[str, ...]],
         level: int = 0,
     ) -> None:
         self.defer_proxy_name = name
@@ -421,16 +430,15 @@ class DeferredImportKey(str):
     When referenced, the key will replace itself in the namespace with the resolved import or the right name from it.
     """
 
-    __slots__ = ("defer_key_str", "defer_key_proxy")
-
-    defer_key_str: str
-    defer_key_proxy: DeferredImportProxy
+    __slots__ = ("defer_key_str", "defer_key_proxy", "is_recursing")
 
     def __new__(cls, key: str, proxy: DeferredImportProxy, /):
-        self = super().__new__(cls, key)
+        return super().__new__(cls, key)
+
+    def __init__(self, key: str, proxy: DeferredImportProxy, /):
         self.defer_key_str = str(key)
         self.defer_key_proxy = proxy
-        return self
+        self.is_recursing = False
 
     def __repr__(self) -> str:
         return f"<key for {self.defer_key_str!r} import>"
@@ -441,15 +449,16 @@ class DeferredImportKey(str):
         if self.defer_key_str != value:
             return False
 
-        if not is_deferred.get():
-            self._resolve()
+        if not self.is_recursing:
+            self.is_recursing = True
+
+            if not is_deferred.get():
+                self._resolve()
 
         return True
 
     def __hash__(self) -> int:
-        # NOTE: defer_key_str can never be reassigned if this is to remain consistent. Otherwise, just go back to
-        #       hash(defer_key_str).
-        return super().__hash__()
+        return hash(self.defer_key_str)
 
     def _resolve(self) -> None:
         """Perform an actual import for the given proxy and bind the result to the relevant namespace."""
@@ -490,7 +499,7 @@ class DeferredImportKey(str):
             namespace[key] = module
 
 
-def _calc_package(globals: dict[str, _tp.Any]) -> _tp.Optional[str]:
+def calc___package__(globals: dict[str, _tp.Any]) -> _tp.Optional[str]:
     """Calculate what __package__ should be.
 
     __package__ is not guaranteed to be defined or could be set to None
@@ -525,7 +534,7 @@ def _calc_package(globals: dict[str, _tp.Any]) -> _tp.Optional[str]:
     return package
 
 
-def _resolve_name(name: str, package: str, level: int) -> str:
+def resolve_name(name: str, package: str, level: int) -> str:
     """Resolve a relative module name to an absolute one.
 
     Slightly modified version of importlib._bootstrap._resolve_name.
@@ -539,11 +548,11 @@ def _resolve_name(name: str, package: str, level: int) -> str:
     return f"{base}.{name}" if name else base
 
 
-def _deferred_import(  # noqa: ANN202
+def deferred___import__(  # noqa: ANN202
     name: str,
     globals: dict[str, object],
     locals: dict[str, object],
-    fromlist: tuple[str, ...] | None = None,
+    fromlist: _tp.Optional[tuple[str, ...]] = None,
     level: int = 0,
     /,
 ):
@@ -551,8 +560,8 @@ def _deferred_import(  # noqa: ANN202
 
     # Resolve the names of relative imports.
     if level > 0:
-        package = _calc_package(locals)
-        name = _resolve_name(name, package, level)  # pyright: ignore [reportArgumentType]
+        package = calc___package__(locals)
+        name = resolve_name(name, package, level)  # pyright: ignore [reportArgumentType]
         level = 0
 
     # Handle submodule imports if relevant top-level imports already occurred in the call site's module.
@@ -636,7 +645,7 @@ class DeferredContext:
     def __enter__(self) -> None:
         self._defer_ctx_token = is_deferred.set(True)
         self._import_ctx_token = original_import.set(builtins.__import__)
-        builtins.__import__ = _deferred_import
+        builtins.__import__ = deferred___import__
 
     def __exit__(self, *exc_info: object) -> None:
         original_import.reset(self._import_ctx_token)

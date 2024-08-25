@@ -37,7 +37,9 @@ def create_sample_module(path: Path, source: str, loader_type: type):
     loader = loader_type(module_name, str(module_path))
     spec = importlib.util.spec_from_file_location(module_name, module_path, loader=loader)
     assert spec
-    return spec, importlib.util.module_from_spec(spec)
+    module = importlib.util.module_from_spec(spec)
+
+    return spec, module
 
 
 @pytest.mark.parametrize(
@@ -145,7 +147,7 @@ def test_instrumentation(before: str, after: str):
     before_bytes = before.encode()
     encoding, _ = tokenize.detect_encoding(io.BytesIO(before_bytes).readline)
     transformer = DeferredInstrumenter("<unknown>", before_bytes, encoding)
-    transformed_tree = ast.fix_missing_locations(transformer.visit(ast.parse(before)))
+    transformed_tree = ast.fix_missing_locations(transformer.transform())
 
     assert f"{ast.unparse(transformed_tree)}\n" == after
 
@@ -389,7 +391,8 @@ with defer_imports_until_use:
     module_name = "sample"
     path = tmp_file.resolve()
 
-    spec = importlib.util.spec_from_file_location(module_name, path, loader=DeferredFileLoader(module_name, str(path)))
+    loader = DeferredFileLoader(module_name, str(path))
+    spec = importlib.util.spec_from_file_location(module_name, path, loader=loader)
 
     assert spec
     assert spec.loader
@@ -421,11 +424,8 @@ class Example:
     module_name = "sample"
     path = tmp_file.resolve()
 
-    spec = importlib.util.spec_from_file_location(
-        module_name,
-        path,
-        loader=DeferredFileLoader(module_name, str(path)),
-    )
+    loader = DeferredFileLoader(module_name, str(path))
+    spec = importlib.util.spec_from_file_location(module_name, path, loader=loader)
 
     assert spec
     assert spec.loader
@@ -459,7 +459,8 @@ def test():
     module_name = "sample"
     path = tmp_file.resolve()
 
-    spec = importlib.util.spec_from_file_location(module_name, path, loader=DeferredFileLoader(module_name, str(path)))
+    loader = DeferredFileLoader(module_name, str(path))
+    spec = importlib.util.spec_from_file_location(module_name, path, loader=loader)
 
     assert spec
     assert spec.loader
@@ -490,7 +491,8 @@ with defer_imports_until_use:
     module_name = "sample"
     path = tmp_file.resolve()
 
-    spec = importlib.util.spec_from_file_location(module_name, path, loader=DeferredFileLoader(module_name, str(path)))
+    loader = DeferredFileLoader(module_name, str(path))
+    spec = importlib.util.spec_from_file_location(module_name, path, loader=loader)
 
     assert spec
     assert spec.loader
@@ -615,7 +617,6 @@ with defer_imports_until_use:
     assert expected_asyncio_repr not in repr(vars(module))
 
 
-@pytest.mark.xfail(reason="Not sure right now.")
 def test_relative_imports_1(tmp_path: Path):
     """Test a synthetic package that uses relative imports within defer_imports_until_use blocks.
 
@@ -668,8 +669,7 @@ class B:
     assert spec.loader
 
     module = importlib.util.module_from_spec(spec)
-    # sys.modules["sample_package"] = module  # Causes RecursionError.
-    # Is sample_package not being manually put in sys.modules a problem?
+    sys.modules["sample_package"] = module
     spec.loader.exec_module(module)
 
     module_locals_repr = repr(vars(module))
@@ -677,7 +677,9 @@ class B:
     assert "<key for 'A' import>: <proxy for 'from sample_package.a import A'>" in module_locals_repr
     assert "<key for 'B' import>: <proxy for 'from sample_package.b import B'>" in module_locals_repr
 
-    # FIXME: This currently doesn't work, but it should.
+    # FIXME: This causes a recursion error because before importing the submodule that A is from, a,
+    #        importlib._bootstrap._handle_fromlist checks if a is present with hasattr, which triggers a to attempt
+    #        to load, which recurses because a is technically an attribute in __init__. Not sure how to fix this, tbh.
     assert module.A
 
 

@@ -16,6 +16,7 @@ __all__ = (
     "Optional",
     "ReadableBuffer",
     "StrPath",
+    "Union",
     "final",
 )
 
@@ -60,17 +61,12 @@ def __getattr__(name: str) -> object:  # noqa: PLR0911
         globals()["CodeType"] = CodeType
         return CodeType
 
-    if name == "Optional":
-        from typing import Optional
-
-        globals()["Optional"] = Optional
-        return Optional
-
     if name == "Final":
         from typing import Final
 
         globals()["Final"] = Final
         return Final
+
     if name == "Generator":
         from collections.abc import Generator
 
@@ -82,6 +78,12 @@ def __getattr__(name: str) -> object:  # noqa: PLR0911
 
         globals()["Iterable"] = Iterable
         return Iterable
+
+    if name == "Optional":
+        from typing import Optional
+
+        globals()["Optional"] = Optional
+        return Optional
 
     if name == "ReadableBuffer":
         if sys.version_info >= (3, 12):
@@ -100,6 +102,12 @@ def __getattr__(name: str) -> object:  # noqa: PLR0911
 
         globals()["StrPath"] = StrPath = Union[str, os.PathLike[str]]
         return StrPath
+
+    if name == "Union":
+        from typing import Union
+
+        globals()["Union"] = Union
+        return Union
 
     msg = f"module {__name__!r} has no attribute {name!r}"
     raise AttributeError(msg)
