@@ -1,6 +1,4 @@
-# pyright: reportUnusedImport=none
-# Based on this script by Gregory Szorc: https://gist.github.com/indygreg/be1c229fa41ced5c76d912f7073f9de6
-
+# pyright: reportUnusedImport=none, reportMissingTypeStubs=none
 
 import __future__
 

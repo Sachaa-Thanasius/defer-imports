@@ -236,7 +236,7 @@ class DeferredImportFileLoader(importlib.machinery.SourceFileLoader):
         return encoding, uses_defer
 
     # NOTE: InspectLoader is the virtual superclass of SourceFileLoader thanks to ABC registration, so typeshed
-    # reflects that. However, there's a slight mismatch in source_to_code signatures.
+    #       reflects that. However, there's a slight mismatch in source_to_code signatures.
     def source_to_code(  # pyright: ignore [reportIncompatibleMethodOverride]
         self,
         data: ReadableBuffer,
@@ -331,7 +331,7 @@ class DeferredImportProxy:
         self.defer_proxy_sub: str | None = None
 
     @property
-    def defer_proxy_import_args(self):  # noqa: ANN202
+    def defer_proxy_import_args(self):  # noqa: ANN202 # Too verbose.
         """A tuple of args that can be passed into __import__."""
 
         return (
@@ -395,7 +395,8 @@ class DeferredImportKey(str):
         return True
 
     def __hash__(self) -> int:
-        # We're not reassigning the key to cause a mismatch ever, so this should be fine.
+        # NOTE: defer_key_str can never be reassigned if this is to remain consistent. Otherwise, just go back to
+        #       hash(defer_key_str).
         return super().__hash__()
 
     def _resolve(self) -> None:
@@ -413,16 +414,17 @@ class DeferredImportKey(str):
                 # Change the namespaces as well to make sure nested proxies are replaced in the right place.
                 attr_val.defer_proxy_global_ns = attr_val.defer_proxy_local_ns = vars(module)
 
-        # ---- Replace the proxy with the resolved module or module attribute in the relevant namespace.
+        # Replace the proxy with the resolved module or module attribute in the relevant namespace.
 
         # First, get the regular string key and the relevant namespace.
         key = self.defer_key_str
         namespace = proxy.defer_proxy_local_ns
 
         # Second, remove the deferred key to avoid it sticking around.
-        # NOTE: This is necessary to prevent recursive resolution for proxies.
+        # NOTE: This is necessary to prevent recursive resolution for proxies, since __eq__ will be triggered again.
         _is_def_tok = is_deferred.set(True)
         try:
+            # TODO: Figure out why this works and del namespace[key] didn't.
             namespace[key] = namespace.pop(key)
         finally:
             is_deferred.reset(_is_def_tok)
@@ -464,23 +466,22 @@ def _deferred_import(  # noqa: ANN202
     # Resolve the names of relative imports.
     if level > 0:
         package = calc_package(locals)
-        name = resolve_name(name, package, level)
+        name = resolve_name(name, package, level)  # pyright: ignore [reportArgumentType]
 
-    # Handle submodule imports if relevant top-level imports already happened previously
-    # in the module of the call site.
-    # TODO: Related to the previous comment: consider adding a condition that base_parent must be a ModuleType or a
-    #       DeferredImportProxy, to avoid attaching proxies to a random thing that would've normally been clobbered
-    #       first?
+    # Handle submodule imports if relevant top-level imports already occured in the call site's module.
     if not fromlist and ("." in name):
         name_parts = name.split(".")
         try:
+            # TODO: Consider adding a condition that base_parent must be a ModuleType or a DeferredImportProxy, to
+            #       avoid attaching proxies to a random thing that would've normally been clobbered by the import
+            #       first?
             base_parent = parent = locals[name_parts[0]]
         except KeyError:
             pass
         else:
             # Nest submodule proxies as needed.
-            # FIXME: Mucking with a member of the passed-in locals isn't ideal. That's a major reason for the
-            #        instrumentation aspect in the first place. Is there a better way or place?
+            # TODO: Mucking with a member of the passed-in locals isn't ideal. That's a major reason for the hybrid
+            #       instrumentation approach in the first place. Is there a better way or place?
             for bound, attr_name in enumerate(name_parts[1:], start=2):
                 if attr_name not in vars(parent):
                     nested_proxy = DeferredImportProxy(".".join(name_parts[:bound]), globals, locals, (), level)
@@ -509,9 +510,20 @@ def install_defer_import_hook() -> None:
         if hook.__qualname__.startswith("FileFinder.path_hook"):
             loader_details = (DeferredImportFileLoader, importlib.machinery.SOURCE_SUFFIXES)
             new_hook = importlib.machinery.FileFinder.path_hook(loader_details)
-            new_hook.is_deferred_path_hook = True  # pyright: ignore # Runtime attribute assignment.
+            new_hook._is_deferred_path_hook = True  # pyright: ignore # Runtime attribute assignment.
             sys.path_hooks.insert(i, new_hook)
-            importlib.invalidate_caches()
+
+            # TODO: Consider all options for import cache invalidation. Some form of it is necessary.
+            #     1) sys.path_importer_cache.clear() - First attempt. Isn't enough, things break as a result.
+            #     2) importlib.invalidate_caches() - Works but might be overkill since it hits every meta path finder.
+            #     3) importlib.machinery.PathFinder.invalidate_caches() - Also called by 2. Heavy as fuck because it
+            #        imports importlib.metadata, but it's narrower in scope.
+            #     4) inlining - Make a util function that mostly copies 3 except for the importlib.metadata part?
+            #        Potentially a middle ground between 3 and 1, though if the importlib.metadata invalidation is
+            #        really necessary, we might just have to eat it.
+            #
+            # The cost of this is technically a one-time startup one, but it's still potentially hefty.
+            importlib.machinery.PathFinder.invalidate_caches()
             return
 
 
@@ -519,9 +531,10 @@ def uninstall_defer_import_hook() -> None:
     """Remove deferred's path hook if it's in sys.path_hooks."""
 
     for i, hook in enumerate(sys.path_hooks):
-        if hook.__qualname__.startswith("FileFinder.path_hook") and getattr(hook, "is_deferred_path_hook", False):
+        if hook.__qualname__.startswith("FileFinder.path_hook") and getattr(hook, "_is_deferred_path_hook", False):
             del sys.path_hooks[i]
-            importlib.invalidate_caches()
+            # TODO: See comment in install_defer_import_hook. Sync here.
+            importlib.machinery.PathFinder.invalidate_caches()
             return
 
 

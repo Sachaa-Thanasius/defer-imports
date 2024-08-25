@@ -1,10 +1,9 @@
-# pyright: reportUnusedImport=none
-# Based on this script by Gregory Szorc: https://gist.github.com/indygreg/be1c229fa41ced5c76d912f7073f9de6
-
-from deferred import defer_imports_until_use
+# pyright: reportUnusedImport=none, reportMissingTypeStubs=none
+from slothy import lazy_importing
 
 
-with defer_imports_until_use:
+with lazy_importing():
+
     import __future__
 
     # import _bootlocale # Doesn't exist on 3.11 on Windows
@@ -535,3 +534,4 @@ with defer_imports_until_use:
     import zipfile
 
     import test
+

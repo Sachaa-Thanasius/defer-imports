@@ -1,5 +1,19 @@
 import os
 import sys
+
+__all__ = (
+    "TYPING",
+    "StrPath",
+    "ReadableBuffer",
+    "final",
+    "Final",
+    "CodeType",
+    "pairwise",
+    "calc_package",
+    "resolve_name",
+    "HasLocationAttributes",
+)
+
 from types import CodeType
 from typing import TYPE_CHECKING as TYPING, Final, Protocol, final
 
@@ -25,16 +39,3 @@ class HasLocationAttributes(Protocol):
     col_offset: int
     end_lineno: int | None
     end_col_offset: int | None
-
-__all__ = (
-    "TYPING",
-    "StrPath",
-    "ReadableBuffer",
-    "final",
-    "Final",
-    "CodeType",
-    "pairwise",
-    "calc_package",
-    "resolve_name",
-    "HasLocationAttributes",
-)

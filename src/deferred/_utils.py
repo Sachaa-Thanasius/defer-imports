@@ -1,6 +1,21 @@
+"""Utilities (or substitutes) that are more expensive to annotate or import than I'd like."""
+
 import sys
 import warnings
 
+
+__all__ = (
+    "TYPING",
+    "StrPath",
+    "ReadableBuffer",
+    "final",
+    "Final",
+    "CodeType",
+    "pairwise",
+    "calc_package",
+    "resolve_name",
+    "HasLocationAttributes",
+)
 
 TYPING = False
 """Constant that is True at type-checking time but False at runtime. Similar to typing.TYPE_CHECKING."""
@@ -97,17 +112,3 @@ def resolve_name(name: str, package: str, level: int) -> str:
 
 class HasLocationAttributes:
     """Placeholder for protocol representing an ast node's location attributes."""
-
-
-__all__ = (
-    "TYPING",
-    "StrPath",
-    "ReadableBuffer",
-    "final",
-    "Final",
-    "CodeType",
-    "pairwise",
-    "calc_package",
-    "resolve_name",
-    "HasLocationAttributes",
-)

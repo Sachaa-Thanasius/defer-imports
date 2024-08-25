@@ -64,7 +64,7 @@ TODO
             import importlib.abc
             import importlib.util
 
-    - I could not explain to you why it works, but it does.
+    - One small problem: I don't know why it works, just some of how.
 
 - [ ] Add tests for the following:
 
