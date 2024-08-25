@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# TODO: ast and tokenize are the most expensive upfront import costs. Can they be avoided?
 import ast
 import builtins
 import collections
@@ -18,80 +19,7 @@ from importlib.machinery import (
     SourceFileLoader,
 )
 
-from . import _types
-
-
-# region -------- Utilities
-
-
-def sliding_window(iterable: _types.Iterable[_types.T], n: int) -> _types.Iterable[tuple[_types.T, ...]]:
-    """Collect data into overlapping fixed-length chunks or blocks.
-
-    Copied from 3.12 itertools docs.
-
-    Examples
-    --------
-    >>> ["".join(window) for window in sliding_window('ABCDEFG', 4)]
-    ['ABCD', 'BCDE', 'CDEF', 'DEFG']
-    """
-
-    iterator = iter(iterable)
-    window = collections.deque(itertools.islice(iterator, n - 1), maxlen=n)
-    for x in iterator:
-        window.append(x)
-        yield tuple(window)
-
-
-def calc_package(globals: dict[str, _types.Any]) -> _types.Optional[str]:
-    """Calculate what __package__ should be.
-
-    __package__ is not guaranteed to be defined or could be set to None
-    to represent that its proper value is unknown.
-
-    Slightly modified version of importlib._bootstrap._calc___package__.
-    """
-
-    # TODO: Keep the warnings up to date with CPython.
-    package: str | None = globals.get("__package__")
-    spec: ModuleSpec | None = globals.get("__spec__")
-    if package is not None:
-        if spec is not None and package != spec.parent:
-            category = DeprecationWarning if sys.version_info >= (3, 12) else ImportWarning
-            warnings.warn(
-                f"__package__ != __spec__.parent ({package!r} != {spec.parent!r})",
-                category,
-                stacklevel=3,
-            )
-        return package
-    elif spec is not None:
-        return spec.parent
-    else:
-        warnings.warn(
-            "can't resolve package from __spec__ or __package__, falling back on __name__ and __path__",
-            ImportWarning,
-            stacklevel=3,
-        )
-        package = globals["__name__"]
-        if "__path__" not in globals:
-            package = package.rpartition(".")[0]  # pyright: ignore [reportOptionalMemberAccess]
-    return package
-
-
-def resolve_name(name: str, package: str, level: int) -> str:
-    """Resolve a relative module name to an absolute one.
-
-    Slightly modified version of importlib._bootstrap._resolve_name.
-    """
-
-    bits = package.rsplit(".", level - 1)
-    if len(bits) < level:
-        msg = "attempted relative import beyond top-level package"
-        raise ImportError(msg)
-    base = bits[0]
-    return f"{base}.{name}" if name else base
-
-
-# endregion
+from . import _typing as _tp
 
 
 # region -------- Compile-time hook
@@ -106,7 +34,7 @@ class DeferredInstrumenter(ast.NodeTransformer):
     results are assigned to custom keys in the global namespace.
     """
 
-    def __init__(self, filename: str, data: _types.ReadableBuffer, encoding: str) -> None:
+    def __init__(self, filename: str, data: _tp.ReadableBuffer, encoding: str) -> None:
         self.filename = filename
         self.data = data
         self.encoding = encoding
@@ -146,6 +74,7 @@ class DeferredInstrumenter(ast.NodeTransformer):
         if "." in name:
             name = name.partition(".")[0]
 
+        # NOTE: Creating the AST directly is also an option, but this felt more maintainable.
         if_tree = ast.parse(
             f"if type({name}) is DeferredImportProxy:\n"
             f"    temp_proxy = local_ns.pop('{name}')\n"
@@ -188,7 +117,13 @@ class DeferredInstrumenter(ast.NodeTransformer):
         return ast.Assign(targets=[ast.Name("@temp_proxy", ctx=ast.Store())], value=ast.Constant(None))
 
     def _substitute_import_keys(self, import_nodes: list[ast.stmt]) -> list[ast.stmt]:
-        """Instrument the list of imports."""
+        """Instrument the list of imports.
+
+        Raises
+        ------
+        SyntaxError:
+            If any of the given nodes are not an import or are a wildcard import.
+        """
 
         new_import_nodes: list[ast.stmt] = list(import_nodes)
 
@@ -206,13 +141,12 @@ class DeferredInstrumenter(ast.NodeTransformer):
 
                 new_import_nodes.insert(i + 1, self._create_import_name_replacement(alias.asname or alias.name))
 
-        # Initialize temporary helper variables.
+        # Initialize helper variables.
         new_import_nodes[0:0] = (self._initialize_local_ns(), self._initialize_temp_proxy())
 
-        # Delete temporary variables after all is said and done to avoid namespace pollution.
-        temp_proxy_deletion = ast.Delete(targets=[ast.Name("@temp_proxy", ctx=ast.Del())])
-        local_ns_deletion = ast.Delete(targets=[ast.Name("@local_ns", ctx=ast.Del())])
-        new_import_nodes.extend((temp_proxy_deletion, local_ns_deletion))
+        # Delete helper variables after all is said and done to avoid namespace pollution.
+        temp_names: list[ast.expr] = [ast.Name(name, ctx=ast.Del()) for name in ("@temp_proxy", "@local_ns")]
+        new_import_nodes.append(ast.Delete(targets=temp_names))
 
         return new_import_nodes
 
@@ -232,12 +166,12 @@ class DeferredInstrumenter(ast.NodeTransformer):
             len(node.items) == 1
             and (
                 (
-                    # with defer_imports_until_use
+                    # Allow "with defer_imports_until_use".
                     isinstance(node.items[0].context_expr, ast.Name)
                     and node.items[0].context_expr.id == "defer_imports_until_use"
                 )
                 or (
-                    # with deferred.defer_imports_until_use
+                    # Allow "with deferred.defer_imports_until_use".
                     isinstance(node.items[0].context_expr, ast.Attribute)
                     and isinstance(node.items[0].context_expr.value, ast.Name)
                     and node.items[0].context_expr.value.id == "deferred"
@@ -281,33 +215,54 @@ class DeferredInstrumenter(ast.NodeTransformer):
 
             position += 1
 
-        defer_aliases = [
-            ast.alias(name="DeferredImportKey", asname="@DeferredImportKey"),
-            ast.alias(name="DeferredImportProxy", asname="@DeferredImportProxy"),
-        ]
-        key_import = ast.ImportFrom(module="deferred._core", names=defer_aliases, level=0)
-        node.body.insert(position, key_import)
+        # Import key and proxy classes.
+        key_class = DeferredImportKey.__name__
+        proxy_class = DeferredImportProxy.__name__
+
+        defer_aliases = [ast.alias(name=name, asname=f"@{name}") for name in (key_class, proxy_class)]
+        key_and_proxy_import = ast.ImportFrom(module="deferred._core", names=defer_aliases, level=0)
+        node.body.insert(position, key_and_proxy_import)
 
         # Clean up the namespace.
-        deferred_key_deletion = ast.Delete(targets=[ast.Name("@DeferredImportKey", ctx=ast.Del())])
-        deferred_proxy_deletion = ast.Delete(targets=[ast.Name("@DeferredImportProxy", ctx=ast.Del())])
-        node.body.extend((deferred_key_deletion, deferred_proxy_deletion))
+        key_and_proxy_names: list[ast.expr] = [ast.Name(f"@{name}", ctx=ast.Del()) for name in (key_class, proxy_class)]
+        node.body.append(ast.Delete(targets=key_and_proxy_names))
 
         return self.generic_visit(node)
 
 
 def _match_token(token: tokenize.TokenInfo, **kwargs: object) -> bool:
+    """Check if a given token's attributes match the given kwargs."""
+
     return all(getattr(token, name) == val for name, val in kwargs.items())
+
+
+def sliding_window(iterable: _tp.Iterable[_tp.T], n: int) -> _tp.Iterable[tuple[_tp.T, ...]]:
+    """Collect data into overlapping fixed-length chunks or blocks.
+
+    Copied from 3.12 itertools docs.
+
+    Examples
+    --------
+    >>> ["".join(window) for window in sliding_window('ABCDEFG', 4)]
+    ['ABCD', 'BCDE', 'CDEF', 'DEFG']
+    """
+
+    iterator = iter(iterable)
+    window = collections.deque(itertools.islice(iterator, n - 1), maxlen=n)
+    for x in iterator:
+        window.append(x)
+        yield tuple(window)
 
 
 class DeferredFileLoader(SourceFileLoader):
     """A file loader that instruments .py files which use "with defer_imports_until_use: ..."."""
 
     @classmethod
-    def _check_for_defer_usage(cls, data: _types.ReadableBuffer) -> tuple[str, bool]:
+    def _check_for_defer_usage(cls, data: _tp.ReadableBuffer) -> tuple[str, bool]:
         """Get the encoding of the code and also check if it uses "with defer_imports_until_use"."""
 
         tok_NAME, tok_OP = tokenize.NAME, tokenize.OP
+
         token_stream = tokenize.tokenize(io.BytesIO(data).readline)
         encoding = next(token_stream).string
         uses_defer = any(
@@ -319,24 +274,23 @@ class DeferredFileLoader(SourceFileLoader):
                 )
                 or (
                     _match_token(tok2, type=tok_NAME, string="deferred")
-                    and _match_token(tok2, type=tok_OP, string=".")
-                    and _match_token(tok3, type=tok_NAME, string="defer_imports_until_use")
-                    and _match_token(tok4, type=tok_OP, string=":")
+                    and _match_token(tok3, type=tok_OP, string=".")
+                    and _match_token(tok4, type=tok_NAME, string="defer_imports_until_use")
                 )
             )
             for tok1, tok2, tok3, tok4 in sliding_window(token_stream, 4)
         )
         return encoding, uses_defer
 
-    # NOTE: InspectLoader is the virtual superclass of SourceFileLoader thanks to ABC registration, so typeshed
-    #       reflects that. However, there's a slight mismatch in source_to_code signatures.
+    # TODO: InspectLoader is the virtual superclass of SourceFileLoader thanks to ABC registration, so typeshed
+    #       reflects that. However, there's a slight mismatch in source_to_code signatures. Make a PR?
     def source_to_code(  # pyright: ignore [reportIncompatibleMethodOverride]
         self,
-        data: _types.ReadableBuffer,
-        path: _types.ReadableBuffer | _types.StrPath,
+        data: _tp.ReadableBuffer,
+        path: _tp.ReadableBuffer | _tp.StrPath,
         *,
         _optimize: int = -1,
-    ) -> _types.CodeType:
+    ) -> _tp.CodeType:
         if not data:
             return super().source_to_code(data, path, _optimize=_optimize)  # pyright: ignore
 
@@ -374,7 +328,7 @@ class DeferredFileLoader(SourceFileLoader):
 
         return data[len(BYTECODE_HEADER) :]
 
-    def set_data(self, path: str, data: _types.ReadableBuffer, *, _mode: int = 0o666) -> None:
+    def set_data(self, path: str, data: _tp.ReadableBuffer, *, _mode: int = 0o666) -> None:
         """Write bytes data to a file.
 
         Notes
@@ -392,8 +346,7 @@ class DeferredFileLoader(SourceFileLoader):
         return super().set_data(path, data, _mode=_mode)
 
 
-loader_details = (DeferredFileLoader, SOURCE_SUFFIXES)
-DEFERRED_PATH_HOOK = FileFinder.path_hook(loader_details)
+DEFERRED_PATH_HOOK = FileFinder.path_hook((DeferredFileLoader, SOURCE_SUFFIXES))
 
 
 # endregion
@@ -506,7 +459,7 @@ class DeferredImportKey(str):
         # Perform the original __import__ and pray.
         module = original_import.get()(*proxy.defer_proxy_import_args)
 
-        # Transfer nested proxies over to the resolved item.
+        # Transfer nested proxies over to the resolved module.
         for attr_key, attr_val in vars(proxy).items():
             if isinstance(attr_val, DeferredImportProxy) and not hasattr(module, attr_key):
                 setattr(module, DeferredImportKey(attr_key, attr_val), attr_val)
@@ -537,6 +490,55 @@ class DeferredImportKey(str):
             namespace[key] = module
 
 
+def _calc_package(globals: dict[str, _tp.Any]) -> _tp.Optional[str]:
+    """Calculate what __package__ should be.
+
+    __package__ is not guaranteed to be defined or could be set to None
+    to represent that its proper value is unknown.
+
+    Slightly modified version of importlib._bootstrap._calc___package__.
+    """
+
+    package: str | None = globals.get("__package__")
+    spec: ModuleSpec | None = globals.get("__spec__")
+    if package is not None:
+        if spec is not None and package != spec.parent:
+            # TODO: Keep the warnings up to date with CPython.
+            category = DeprecationWarning if sys.version_info >= (3, 12) else ImportWarning
+            warnings.warn(
+                f"__package__ != __spec__.parent ({package!r} != {spec.parent!r})",
+                category,
+                stacklevel=3,
+            )
+        return package
+    elif spec is not None:
+        return spec.parent
+    else:
+        warnings.warn(
+            "can't resolve package from __spec__ or __package__, falling back on __name__ and __path__",
+            ImportWarning,
+            stacklevel=3,
+        )
+        package = globals["__name__"]
+        if "__path__" not in globals:
+            package = package.rpartition(".")[0]  # pyright: ignore [reportOptionalMemberAccess]
+    return package
+
+
+def _resolve_name(name: str, package: str, level: int) -> str:
+    """Resolve a relative module name to an absolute one.
+
+    Slightly modified version of importlib._bootstrap._resolve_name.
+    """
+
+    bits = package.rsplit(".", level - 1)
+    if len(bits) < level:
+        msg = "attempted relative import beyond top-level package"
+        raise ImportError(msg)
+    base = bits[0]
+    return f"{base}.{name}" if name else base
+
+
 def _deferred_import(  # noqa: ANN202
     name: str,
     globals: dict[str, object],
@@ -549,8 +551,8 @@ def _deferred_import(  # noqa: ANN202
 
     # Resolve the names of relative imports.
     if level > 0:
-        package = calc_package(locals)
-        name = resolve_name(name, package, level)  # pyright: ignore [reportArgumentType]
+        package = _calc_package(locals)
+        name = _resolve_name(name, package, level)  # pyright: ignore [reportArgumentType]
         level = 0
 
     # Handle submodule imports if relevant top-level imports already occurred in the call site's module.
@@ -625,7 +627,7 @@ def uninstall_defer_import_hook() -> None:
         PathFinder.invalidate_caches()
 
 
-@_types.final
+@_tp.final
 class DeferredContext:
     """The type for defer_imports_until_use."""
 
@@ -642,7 +644,7 @@ class DeferredContext:
         builtins.__import__ = original_import.get()
 
 
-defer_imports_until_use: _types.Final[DeferredContext] = DeferredContext()
+defer_imports_until_use: _tp.Final[DeferredContext] = DeferredContext()
 """A context manager within which imports occur lazily.
 
 Raises

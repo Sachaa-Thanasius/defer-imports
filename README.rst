@@ -28,7 +28,7 @@ Features and Caveats
 
 - Python implementation–agnostic, in theory
 
-    - The only dependency is on globals() at module scope to maintain its current API: specifically, that its return value will be a read-through, *write-through*, dict-like view of the module globals, and that locals() will return the same thing.
+    - The only dependency is on locals() at module scope to maintain its current API: specifically, that its return value will be a read-through, *write-through*, dict-like view of the module locals.
 
 - Not that slow, especially with support from bytecode caching
 - Doesn't support lazy importing in class or function scope
@@ -38,7 +38,7 @@ Features and Caveats
 Benchmarks
 ==========
 
-The methodology is somewhat rough: at the moment, time to import is being measured with both the ``benchmark/bench_samples.py`` script (run with ``python -m benchmark.bench_samples``) and python's importtime command-line function (e.g. run with ``python -X importtime -c "import benchmark.sample_deferred``).
+The methodology is somewhat rough: at the moment, time to import is being measured with both the ``benchmark/bench_samples.py`` script (run with ``python -m benchmark.bench_samples``) and python's importtime command-line function (e.g. run with ``python -X importtime -c "import deferred``).
 
 
 TODO
@@ -64,14 +64,14 @@ TODO
 
 - [ ] Add tests for the following:
 
-    - [ ] Relative imports
-    - [ ] Combinations of different import types
-    - [ ] True circular imports
+    - [x] Relative imports
+    - [x] Combinations of different import types
+    - [ ] Circular imports
     - [ ] Thread safety (see importlib.util.LazyLoader for reference?)
     - [ ] Other python implementations/platforms
 
 - [x] Make this able to import the entire standard library, including all the subpackage imports uncommented. UPDATE: See ``benchmark/sample_deferred.py``.
-- [ ] Make this be able to run on normal code. It currently breaks pip, readline, and who knows what else in the standard library, possibly because of the subpackage imports issue.
+- [x] Make this be able to run on normal code. It currently breaks pip, readline, and who knows what else in the standard library, possibly because of the subpackage imports issue.
 
 
 Acknowledgements

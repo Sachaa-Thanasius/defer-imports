@@ -1,6 +1,6 @@
 # pyright: reportUnsupportedDunderAll=none
 # ruff: noqa: F822
-"""Typing-related constructs that are annoying to import for one reason or another."""
+"""A __getattr__-based lazy import shim for typing- and annotation-related symbols."""
 
 import sys
 
@@ -40,38 +40,47 @@ def final(f: object) -> object:
 
 
 def __getattr__(name: str) -> object:  # noqa: PLR0911
+    # Let's cache the return values in the global namespace to avoid subsequent calls to __getattr__ if possible.
+
     if name == "T":
         from typing import TypeVar
 
-        return TypeVar("T")
+        globals()["T"] = T = TypeVar("T")  # pyright: ignore [reportGeneralTypeIssues]
+        return T
 
     if name == "Any":
         from typing import Any
 
+        globals()["Any"] = Any
         return Any
 
     if name == "CodeType":
         from types import CodeType
 
+        globals()["CodeType"] = CodeType
         return CodeType
 
     if name == "Optional":
         from typing import Optional
 
+        globals()["Optional"] = Optional
         return Optional
 
     if name == "Final":
         from typing import Final
 
+        globals()["Final"] = Final
         return Final
     if name == "Generator":
         from collections.abc import Generator
 
+        globals()["Generator"] = Generator
         return Generator
 
     if name == "Iterable":
         from collections.abc import Iterable
 
+        globals()["Iterable"] = Iterable
         return Iterable
 
     if name == "ReadableBuffer":
@@ -82,13 +91,15 @@ def __getattr__(name: str) -> object:  # noqa: PLR0911
 
             ReadableBuffer = Union[bytes, bytearray, memoryview]
 
+        globals()["ReadableBuffer"] = ReadableBuffer
         return ReadableBuffer
 
     if name == "StrPath":
         import os
         from typing import Union
 
-        return Union[str, os.PathLike[str]]
+        globals()["StrPath"] = StrPath = Union[str, os.PathLike[str]]
+        return StrPath
 
     msg = f"module {__name__!r} has no attribute {name!r}"
     raise AttributeError(msg)

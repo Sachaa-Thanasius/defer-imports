@@ -60,10 +60,8 @@ with defer_imports_until_use:
     if type(inspect) is @DeferredImportProxy:
         @temp_proxy = @local_ns.pop('inspect')
         @local_ns[@DeferredImportKey('inspect', @temp_proxy)] = @temp_proxy
-    del @temp_proxy
-    del @local_ns
-del @DeferredImportKey
-del @DeferredImportProxy
+    del @temp_proxy, @local_ns
+del @DeferredImportKey, @DeferredImportProxy
 """,
             id="regular import",
         ),
@@ -90,10 +88,8 @@ with defer_imports_until_use:
     if type(importlib) is @DeferredImportProxy:
         @temp_proxy = @local_ns.pop('importlib')
         @local_ns[@DeferredImportKey('importlib', @temp_proxy)] = @temp_proxy
-    del @temp_proxy
-    del @local_ns
-del @DeferredImportKey
-del @DeferredImportProxy
+    del @temp_proxy, @local_ns
+del @DeferredImportKey, @DeferredImportProxy
 """,
             id="mixed import 1",
         ),
@@ -114,10 +110,8 @@ with defer_imports_until_use:
     if type(a) is @DeferredImportProxy:
         @temp_proxy = @local_ns.pop('a')
         @local_ns[@DeferredImportKey('a', @temp_proxy)] = @temp_proxy
-    del @temp_proxy
-    del @local_ns
-del @DeferredImportKey
-del @DeferredImportProxy
+    del @temp_proxy, @local_ns
+del @DeferredImportKey, @DeferredImportProxy
 """,
             id="relative import 1",
         ),
@@ -138,10 +132,8 @@ with deferred.defer_imports_until_use:
     if type(a) is @DeferredImportProxy:
         @temp_proxy = @local_ns.pop('a')
         @local_ns[@DeferredImportKey('a', @temp_proxy)] = @temp_proxy
-    del @temp_proxy
-    del @local_ns
-del @DeferredImportKey
-del @DeferredImportProxy
+    del @temp_proxy, @local_ns
+del @DeferredImportKey, @DeferredImportProxy
 """,
             id="with deferred.defer_imports_until_use",
         ),
@@ -571,21 +563,6 @@ with defer_imports_until_use:
     import asyncio.constants
     import asyncio.coroutines
     import asyncio.events
-    import asyncio.format_helpers
-    import asyncio.futures
-    import asyncio.locks
-    import asyncio.log
-    import asyncio.proactor_events
-    import asyncio.protocols
-    import asyncio.queues
-    import asyncio.runners
-    import asyncio.selector_events
-    import asyncio.sslproto
-    import asyncio.streams
-    import asyncio.subprocess
-    import asyncio.tasks
-    import asyncio.transports
-    import asyncio.unix_events
 """
 
     spec, module = create_sample_module(tmp_path, source, DeferredFileLoader)
@@ -691,7 +668,7 @@ class B:
     assert spec.loader
 
     module = importlib.util.module_from_spec(spec)
-    sys.modules["sample_package"] = module
+    # sys.modules["sample_package"] = module  # Causes RecursionError.
     # Is sample_package not being manually put in sys.modules a problem?
     spec.loader.exec_module(module)
 
