@@ -2,7 +2,7 @@
 "defer_imports_until_use" context manager.
 """
 
-from deferred._core import defer_imports_until_use, install_defer_import_hook, uninstall_defer_import_hook
+from ._core import defer_imports_until_use, install_defer_import_hook, uninstall_defer_import_hook
 
 
 __all__ = ("defer_imports_until_use", "install_defer_import_hook", "uninstall_defer_import_hook")

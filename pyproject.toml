@@ -168,7 +168,7 @@ keep-runtime-typing = true
     "F403",
     "F405",
 ]
-"src/deferred/*.py" = [
+"src/deferred/**/*.py" = [
     # Allow some builtin name shadowing.
     "A001",
     "A002",

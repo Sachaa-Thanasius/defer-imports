@@ -59,8 +59,11 @@ def main() -> None:
     else:
         results = {type_: func() for type_, func in BENCH_FUNCS.items()}
 
-    print("Benching all")
-    print("-" * 30)
+    header = "Importing stdlib"
+
+    print()
+    print(header)
+    print("-" * len(header))
     for type_, result in results.items():
         print(f"{type_}: {result}")
 

@@ -2,13 +2,96 @@ from __future__ import annotations
 
 import ast
 import builtins
+import collections
 import contextvars
 import io
+import itertools
 import sys
 import tokenize
-from importlib.machinery import BYTECODE_SUFFIXES, SOURCE_SUFFIXES, FileFinder, PathFinder, SourceFileLoader
+import warnings
+from importlib.machinery import (
+    BYTECODE_SUFFIXES,
+    SOURCE_SUFFIXES,
+    FileFinder,
+    ModuleSpec,
+    PathFinder,
+    SourceFileLoader,
+)
 
-from ._utils import CodeType, Final, ReadableBuffer, StrPath, calc_package, final, sliding_window, resolve_name
+from . import _types
+
+
+# region -------- Utilities
+
+
+def sliding_window(iterable: _types.Iterable[_types.T], n: int) -> _types.Iterable[tuple[_types.T, ...]]:
+    """Collect data into overlapping fixed-length chunks or blocks.
+
+    Copied from 3.12 itertools docs.
+
+    Examples
+    --------
+    >>> ["".join(window) for window in sliding_window('ABCDEFG', 4)]
+    ['ABCD', 'BCDE', 'CDEF', 'DEFG']
+    """
+
+    iterator = iter(iterable)
+    window = collections.deque(itertools.islice(iterator, n - 1), maxlen=n)
+    for x in iterator:
+        window.append(x)
+        yield tuple(window)
+
+
+def calc_package(globals: dict[str, _types.Any]) -> _types.Optional[str]:
+    """Calculate what __package__ should be.
+
+    __package__ is not guaranteed to be defined or could be set to None
+    to represent that its proper value is unknown.
+
+    Slightly modified version of importlib._bootstrap._calc___package__.
+    """
+
+    # TODO: Keep the warnings up to date with CPython.
+    package: str | None = globals.get("__package__")
+    spec: ModuleSpec | None = globals.get("__spec__")
+    if package is not None:
+        if spec is not None and package != spec.parent:
+            category = DeprecationWarning if sys.version_info >= (3, 12) else ImportWarning
+            warnings.warn(
+                f"__package__ != __spec__.parent ({package!r} != {spec.parent!r})",
+                category,
+                stacklevel=3,
+            )
+        return package
+    elif spec is not None:
+        return spec.parent
+    else:
+        warnings.warn(
+            "can't resolve package from __spec__ or __package__, falling back on __name__ and __path__",
+            ImportWarning,
+            stacklevel=3,
+        )
+        package = globals["__name__"]
+        if "__path__" not in globals:
+            package = package.rpartition(".")[0]  # pyright: ignore [reportOptionalMemberAccess]
+    return package
+
+
+def resolve_name(name: str, package: str, level: int) -> str:
+    """Resolve a relative module name to an absolute one.
+
+    Slightly modified version of importlib._bootstrap._resolve_name.
+    """
+
+    bits = package.rsplit(".", level - 1)
+    if len(bits) < level:
+        msg = "attempted relative import beyond top-level package"
+        raise ImportError(msg)
+    base = bits[0]
+    return f"{base}.{name}" if name else base
+
+
+# endregion
 
 
 # region -------- Compile-time hook
@@ -23,7 +106,7 @@ class DeferredInstrumenter(ast.NodeTransformer):
     results are assigned to custom keys in the global namespace.
     """
 
-    def __init__(self, filename: str, data: ReadableBuffer, encoding: str) -> None:
+    def __init__(self, filename: str, data: _types.ReadableBuffer, encoding: str) -> None:
         self.filename = filename
         self.data = data
         self.encoding = encoding
@@ -162,7 +245,6 @@ class DeferredInstrumenter(ast.NodeTransformer):
                 )
             )
         ):
-            print("HERE")
             return self.generic_visit(node)
 
         if self.scope_depth != 0:
@@ -222,7 +304,7 @@ class DeferredFileLoader(SourceFileLoader):
     """A file loader that instruments .py files which use "with defer_imports_until_use: ..."."""
 
     @classmethod
-    def _check_for_defer_usage(cls, data: ReadableBuffer) -> tuple[str, bool]:
+    def _check_for_defer_usage(cls, data: _types.ReadableBuffer) -> tuple[str, bool]:
         """Get the encoding of the code and also check if it uses "with defer_imports_until_use"."""
 
         tok_NAME, tok_OP = tokenize.NAME, tokenize.OP
@@ -250,11 +332,11 @@ class DeferredFileLoader(SourceFileLoader):
     #       reflects that. However, there's a slight mismatch in source_to_code signatures.
     def source_to_code(  # pyright: ignore [reportIncompatibleMethodOverride]
         self,
-        data: ReadableBuffer,
-        path: ReadableBuffer | StrPath,
+        data: _types.ReadableBuffer,
+        path: _types.ReadableBuffer | _types.StrPath,
         *,
         _optimize: int = -1,
-    ) -> CodeType:
+    ) -> _types.CodeType:
         if not data:
             return super().source_to_code(data, path, _optimize=_optimize)  # pyright: ignore
 
@@ -292,7 +374,7 @@ class DeferredFileLoader(SourceFileLoader):
 
         return data[len(BYTECODE_HEADER) :]
 
-    def set_data(self, path: str, data: ReadableBuffer, *, _mode: int = 0o666) -> None:
+    def set_data(self, path: str, data: _types.ReadableBuffer, *, _mode: int = 0o666) -> None:
         """Write bytes data to a file.
 
         Notes
@@ -543,7 +625,7 @@ def uninstall_defer_import_hook() -> None:
         PathFinder.invalidate_caches()
 
 
-@final
+@_types.final
 class DeferredContext:
     """The type for defer_imports_until_use."""
 
@@ -560,7 +642,7 @@ class DeferredContext:
         builtins.__import__ = original_import.get()
 
 
-defer_imports_until_use: Final[DeferredContext] = DeferredContext()
+defer_imports_until_use: _types.Final[DeferredContext] = DeferredContext()
 """A context manager within which imports occur lazily.
 
 Raises
