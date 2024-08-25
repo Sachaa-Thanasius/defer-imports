@@ -3,7 +3,6 @@ from deferred import defer_imports_until_use
 
 
 with defer_imports_until_use:
-
     import __future__
 
     # import _bootlocale # Doesn't exist on 3.11 on Windows
@@ -534,4 +533,3 @@ with defer_imports_until_use:
     import zipfile
 
     import test
-

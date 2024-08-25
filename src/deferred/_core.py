@@ -73,7 +73,8 @@ class DeferredInstrumenter(ast.NodeTransformer):
         text = ast.get_source_segment(self._decode_source(), node, padded=True)
         context = (str(self.filepath), node.lineno, node.col_offset + 1, text)
         if sys.version_info >= (3, 10):  # pragma: >=3.10 cover
-            context += (node.end_lineno, node.end_col_offset + 1)
+            end_col_offset = (node.end_col_offset + 1) if (node.end_col_offset is not None) else None
+            context += (node.end_lineno, end_col_offset)
         return context
 
     @staticmethod

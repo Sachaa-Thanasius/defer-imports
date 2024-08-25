@@ -1,5 +1,4 @@
 # pyright: reportUnusedImport=none, reportMissingTypeStubs=none
-
 import __future__
 
 # import _bootlocale # Doesn't exist on 3.11 on Windows

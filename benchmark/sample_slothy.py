@@ -3,7 +3,6 @@ from slothy import lazy_importing
 
 
 with lazy_importing():
-
     import __future__
 
     # import _bootlocale # Doesn't exist on 3.11 on Windows
@@ -534,4 +533,3 @@ with lazy_importing():
     import zipfile
 
     import test
-

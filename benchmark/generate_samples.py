@@ -2,7 +2,6 @@ from pathlib import Path
 
 
 STDLIB_IMPORTS = """\
-
 import __future__
 
 # import _bootlocale # Doesn't exist on 3.11 on Windows
