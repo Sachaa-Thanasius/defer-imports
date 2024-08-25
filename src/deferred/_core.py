@@ -9,7 +9,7 @@ import sys
 import tokenize
 
 
-# region -------- Expensive-import-avoidance hack
+# region -------- Expensive-import-avoidance hacks
 
 
 TYPING = False
@@ -89,9 +89,6 @@ else:
             yield i, sequence[i]
 
 
-# endregion
-
-
 def decode_source(source_bytes: ReadableBuffer) -> str:
     """Slightly modified copy of importlib.util.decode_source."""
 
@@ -99,6 +96,9 @@ def decode_source(source_bytes: ReadableBuffer) -> str:
     encoding = tokenize.detect_encoding(source_bytes_readline)
     newline_decoder = io.IncrementalNewlineDecoder(None, True)
     return newline_decoder.decode(source_bytes.decode(encoding[0]))  # pyright: ignore
+
+
+# endregion
 
 
 # region -------- Compile-time hook
@@ -128,8 +128,6 @@ class DeferredImportFixer(ast.NodeTransformer):
     visit_Lambda = _visit_scope
     visit_ClassDef = _visit_scope
 
-    # region ---- Hook for imports in "with defer_imports_until_use: ..." blocks
-
     def _get_node_context(self, node: HasLocationAttributes):
         """Get the location context for a node. That context will be used as an argument to SyntaxError."""
 
@@ -142,7 +140,7 @@ class DeferredImportFixer(ast.NodeTransformer):
         return context
 
     @staticmethod
-    def _create_import_name_replacement(name: str) -> tuple[ast.Assign, ast.Assign]:
+    def _create_import_name_replacement(name: str) -> ast.If:
         """Create a tuple of AST equivalent to the following statements (slightly simplified):
 
             temp_proxy = global_ns.pop(name)
@@ -156,29 +154,39 @@ class DeferredImportFixer(ast.NodeTransformer):
 
         if "." in name:
             name = name.rpartition(".")[0]
-        return (
-            ast.Assign(
-                targets=[ast.Name("@temp_proxy", ctx=ast.Store())],
-                value=ast.Call(
-                    func=ast.Attribute(value=ast.Name("@global_ns", ctx=ast.Load()), attr="pop", ctx=ast.Load()),
-                    args=[ast.Constant(name)],
-                    keywords=[],
+        return ast.If(
+            test=ast.Compare(
+                left=ast.Call(
+                    func=ast.Name("type", ctx=ast.Load()), args=[ast.Name(name, ctx=ast.Load())], keywords=[]
                 ),
+                ops=[ast.Is()],
+                comparators=[ast.Name("@DeferredImportProxy", ctx=ast.Load())],
             ),
-            ast.Assign(
-                targets=[
-                    ast.Subscript(
-                        value=ast.Name("@global_ns", ctx=ast.Load()),
-                        slice=ast.Call(
-                            func=ast.Name("@DeferredImportKey", ctx=ast.Load()),
-                            args=[ast.Constant(name), ast.Name("@temp_proxy", ctx=ast.Load())],
-                            keywords=[],
-                        ),
-                        ctx=ast.Store(),
-                    )
-                ],
-                value=ast.Name("@temp_proxy", ctx=ast.Load()),
-            ),
+            body=[
+                ast.Assign(
+                    targets=[ast.Name("@temp_proxy", ctx=ast.Store())],
+                    value=ast.Call(
+                        func=ast.Attribute(value=ast.Name("@global_ns", ctx=ast.Load()), attr="pop", ctx=ast.Load()),
+                        args=[ast.Constant(name)],
+                        keywords=[],
+                    ),
+                ),
+                ast.Assign(
+                    targets=[
+                        ast.Subscript(
+                            value=ast.Name("@global_ns", ctx=ast.Load()),
+                            slice=ast.Call(
+                                func=ast.Name("@DeferredImportKey", ctx=ast.Load()),
+                                args=[ast.Constant(name), ast.Name("@temp_proxy", ctx=ast.Load())],
+                                keywords=[],
+                            ),
+                            ctx=ast.Store(),
+                        )
+                    ],
+                    value=ast.Name("@temp_proxy", ctx=ast.Load()),
+                ),
+            ],
+            orelse=[],
         )
 
     @staticmethod
@@ -187,7 +195,7 @@ class DeferredImportFixer(ast.NodeTransformer):
 
         Notes
         -----
-        @global_ns will serve as a temporary reference to the module globals to avoid re-calling globals() repeatedly.
+        @global_ns will serve as a temporary reference to the module globals to avoid calling globals() repeatedly.
         It is deleted at the end of the "with" block to avoid polluting the namespace.
         """
 
@@ -211,10 +219,14 @@ class DeferredImportFixer(ast.NodeTransformer):
                     msg = "import * not allowed in with defer_imports_until_use blocks"
                     raise SyntaxError(msg, self._get_node_context(sub_node))
 
-                new_import_nodes[i + 1 : i + 1] = self._create_import_name_replacement(alias.asname or alias.name)
+                new_import_nodes.insert(i + 1, self._create_import_name_replacement(alias.asname or alias.name))
 
         # A temporary reference to globals().
         new_import_nodes.insert(0, self._create_global_ns_assignment())
+        # A temporary variable for proxies to reside in.
+        new_import_nodes.insert(
+            1, ast.Assign(targets=[ast.Name("@temp_proxy", ctx=ast.Store())], value=ast.Constant(None))
+        )
 
         # Delete temporary variables after all is said and done.
         temp_proxy_deletion = ast.Delete(targets=[ast.Name("@temp_proxy", ctx=ast.Del())])
@@ -279,8 +291,11 @@ class DeferredImportFixer(ast.NodeTransformer):
 
             position += 1
 
-        deferred_key_alias = ast.alias(name="DeferredImportKey", asname="@DeferredImportKey")
-        key_import = ast.ImportFrom(module="deferred._core", names=[deferred_key_alias], level=0)
+        defer_aliases = [
+            ast.alias(name="DeferredImportKey", asname="@DeferredImportKey"),
+            ast.alias(name="DeferredImportProxy", asname="@DeferredImportProxy"),
+        ]
+        key_import = ast.ImportFrom(module="deferred._core", names=defer_aliases, level=0)
         node.body.insert(position, key_import)
 
         deferred_key_deletion = ast.Delete(targets=[ast.Name("@DeferredImportKey", ctx=ast.Del())])
@@ -288,10 +303,10 @@ class DeferredImportFixer(ast.NodeTransformer):
 
         return self.generic_visit(node)
 
-    # endregion
-
 
 class DeferredImportFixLoader(importlib.machinery.SourceFileLoader):
+    """A file loader that instruments modules that are using "with defer_imports_until_use: ..."."""
+
     @staticmethod
     def _check_for_defer_usage(data: ReadableBuffer) -> bool:
         """Check that "with defer_imports_until_use" is actually used in the code."""
@@ -304,7 +319,8 @@ class DeferredImportFixLoader(importlib.machinery.SourceFileLoader):
             for first_tok, second_tok in pairwise(tokenize.tokenize(io.BytesIO(data).readline))
         )
 
-    # InspectLoader, the virtual superclass of SourceFileLoader, has a slightly different source_to_code signature.
+    # InspectLoader is the virtual superclass of SourceFileLoader thanks to ABC registration, so typeshed reflects
+    # that. However, in reality, it has a slightly different source_to_code signature.
     def source_to_code(  # pyright: ignore [reportIncompatibleMethodOverride]
         self,
         data: ReadableBuffer,
@@ -318,6 +334,8 @@ class DeferredImportFixLoader(importlib.machinery.SourceFileLoader):
         # Get the source to make better error messages.
         source = decode_source(data)
         orig_tree = ast.parse(data, path, "exec")
+
+        # NOTE: Locations could be fixed where needed to avoid full tree traversal, but that ruins the error messages.
         new_tree = ast.fix_missing_locations(DeferredImportFixer(str(path), source).visit(orig_tree))
         return compile(new_tree, path, "exec", dont_inherit=True, optimize=_optimize)
 
@@ -327,6 +345,8 @@ class DeferredImportFixLoader(importlib.machinery.SourceFileLoader):
 
 # region -------- Runtime hook
 
+
+_MISSING = object()
 
 original_import = contextvars.ContextVar("original_import", default=builtins.__import__)
 """A contextvar for tracking what builtins.__import__ currently is."""
@@ -351,7 +371,6 @@ class DeferredImportProxy:
         self.defer_proxy_fromlist = fromlist
         self.defer_proxy_level = level
 
-        # NOTE: This should only ever have 1 member. Consider making it str | None.
         self.defer_proxy_requested_attrs: list[str] = []
 
     @property
@@ -431,8 +450,11 @@ class DeferredImportKey:
             namespace[self.key] = module
 
 
-def _deferred_import(name: str, globals=None, locals=None, fromlist=None, level: int = 0) -> DeferredImportProxy:
+def _deferred_import(name: str, globals=None, locals=None, fromlist=None, level: int = 0):
     """The implementation of __import__ supporting defer imports."""
+
+    if level == 0 and (module := sys.modules.get(name, _MISSING)) is not _MISSING:
+        return module
 
     globals = globals if (globals is not None) else {}
     fromlist = fromlist if (fromlist is not None) else ()
@@ -482,7 +504,6 @@ class DeferContext:
     def __enter__(self):
         self._token = original_import.set(builtins.__import__)
         builtins.__import__ = _deferred_import
-        return self
 
     def __exit__(self, *exc_info: object) -> None:
         original_import.reset(self._token)

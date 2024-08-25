@@ -48,20 +48,9 @@ These are quite rough. At the moment, time to import is being measured with the 
 TODO
 ====
 
-- [ ] Investigate if this package would benefit from a custom optimization suffix for bytecode. Signs point to yes, but I'm not a fan of the monkeypatching seemingly involved.
+- [ ] Investigate if this package would benefit from a custom optimization suffix for bytecode. Signs point to yes, but I'm not a fan of the monkeypatching seemingly involved, nor of having to import ``importlib.util``.
 
-    - Ref: typeguard
-
-        - https://github.com/agronholm/typeguard/commit/4f948d05e135ff8ed76be459b8232d730a6a3e06
-        - https://github.com/agronholm/typeguard/commit/1715bd780156d1f689ffbe865b751d3a756ef46c
-
-    - Ref: beartype
-
-        - https://github.com/beartype/beartype/blob/e9eeb4e282f438e770520b99deadbe219a1c62dc/beartype/claw/_importlib/clawimpcache.py#L205
-
-    - Ref: importlib docs
-
-        - https://docs.python.org/3/library/importlib.html#importlib.util.cache_from_source
+    - See beartype and its justification `for <https://github.com/beartype/beartype/blob/e9eeb4e282f438e770520b99deadbe219a1c62dc/beartype/claw/_importlib/_clawimpload.py#L177-L312>`_ `this <https://github.com/beartype/beartype/blob/e9eeb4e282f438e770520b99deadbe219a1c62dc/beartype/claw/_importlib/clawimpcache.py#L22-L26>`_.
 
 - [ ] Fix subpackage imports being broken if done within ``defer_imports_until_use`` like this:
 
