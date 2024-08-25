@@ -24,7 +24,10 @@ ReadableBuffer = "bytes | bytearray | memoryview"
 
 
 def final(f: object) -> object:
-    """Placeholder for typing.final. Copied from typing with minimal changes."""
+    """Placeholder for typing.final.
+    
+    Copied from typing with minimal changes.
+    """
 
     try:
         f.__final__ = True  # pyright: ignore # Runtime attribute assignment
@@ -71,7 +74,7 @@ def calc_package(globals: dict[str, object]):
     Slightly modified version of importlib._bootstrap._calc___package__.
     """
 
-    # TODO: Keep the warnings up to date.
+    # TODO: Keep the warnings up to date with CPython.
     package = globals.get("__package__")
     spec = globals.get("__spec__")
     if package is not None:

@@ -8,16 +8,7 @@ import sys
 import tokenize
 from importlib.machinery import BYTECODE_SUFFIXES, SOURCE_SUFFIXES, FileFinder, PathFinder, SourceFileLoader
 
-from ._utils import (
-    CodeType,
-    Final,
-    ReadableBuffer,
-    StrPath,
-    calc_package,
-    final,
-    pairwise,
-    resolve_name,
-)
+from ._utils import CodeType, Final, ReadableBuffer, StrPath, calc_package, final, pairwise, resolve_name
 
 
 # region -------- Compile-time hook
@@ -56,7 +47,7 @@ class DeferredInstrumenter(ast.NodeTransformer):
         newline_decoder = io.IncrementalNewlineDecoder(None, translate=True)
         return newline_decoder.decode(self.data.decode(self.encoding))  # pyright: ignore
 
-    def _get_node_context(self, node: ast.stmt):  # noqa: ANN202
+    def _get_node_context(self, node: ast.stmt):  # noqa: ANN202 # Return annotation is verbose and version-dependent.
         """Get the location context for a node. That context will be used as an argument to SyntaxError."""
 
         text = ast.get_source_segment(self._decode_source(), node, padded=True)
@@ -67,29 +58,24 @@ class DeferredInstrumenter(ast.NodeTransformer):
 
     @staticmethod
     def _create_import_name_replacement(name: str) -> ast.If:
-        """Create an AST equivalent to the following statements (slightly simplified):
-
-        if type(name) is DeferredImportProxy:
-            temp_proxy = global_ns.pop('name')
-            global_ns[DeferredImportKey('name', temp_proxy)] = temp_proxy
-        """
+        """Create an AST for changing the name of a variable in locals if the variable is a deferred proxy."""
 
         if "." in name:
             name = name.partition(".")[0]
 
-        mini_tree = ast.parse(
+        if_tree = ast.parse(
             f"if type({name}) is DeferredImportProxy:\n"
-            f"    temp_proxy = global_ns.pop('{name}')\n"
-            f"    global_ns[DeferredImportKey('{name}', temp_proxy)] = temp_proxy"
+            f"    temp_proxy = local_ns.pop('{name}')\n"
+            f"    local_ns[DeferredImportKey('{name}', temp_proxy)] = temp_proxy"
         )
-        if_node = mini_tree.body[0]
+        if_node = if_tree.body[0]
         assert isinstance(if_node, ast.If)
 
-        # Adjust some of the names to be inaccessible via regular name resolution.
+        # Adjust some of the names to be inaccessible by normal users.
         for node in ast.walk(if_node):
             if isinstance(node, ast.Name) and node.id in {
                 "temp_proxy",
-                "global_ns",
+                "local_ns",
                 "DeferredImportProxy",
                 "DeferredImportKey",
             }:
@@ -97,20 +83,20 @@ class DeferredInstrumenter(ast.NodeTransformer):
         return if_node
 
     @staticmethod
-    def _create_global_ns_var() -> ast.Assign:
-        """Create an AST that's equivalent to "@global_ns = globals()".
+    def _initialize_local_ns() -> ast.Assign:
+        """Create an AST that's equivalent to "@local_ns = locals()".
 
-        The created @global_ns variable will be used as a temporary reference to the result of globals() to avoid
-        calling globals() repeatedly.
+        The created @local_ns variable will be used as a temporary reference to the locals to avoid calling locals()
+        repeatedly.
         """
 
         return ast.Assign(
-            targets=[ast.Name("@global_ns", ctx=ast.Store())],
-            value=ast.Call(ast.Name("globals", ctx=ast.Load()), args=[], keywords=[]),
+            targets=[ast.Name("@local_ns", ctx=ast.Store())],
+            value=ast.Call(ast.Name("locals", ctx=ast.Load()), args=[], keywords=[]),
         )
 
     @staticmethod
-    def _create_temp_proxy_var() -> ast.Assign:
+    def _initialize_temp_proxy() -> ast.Assign:
         """Create an AST that's equivalent to "@temp_proxy = None".
 
         The created @temp_proxy variable will be used as a temporary reference to the current proxy being "fixed".
@@ -137,12 +123,13 @@ class DeferredInstrumenter(ast.NodeTransformer):
 
                 new_import_nodes.insert(i + 1, self._create_import_name_replacement(alias.asname or alias.name))
 
-        new_import_nodes[0:0] = (self._create_global_ns_var(), self._create_temp_proxy_var())
+        # Initialize temporary helper variables.
+        new_import_nodes[0:0] = (self._initialize_local_ns(), self._initialize_temp_proxy())
 
         # Delete temporary variables after all is said and done to avoid namespace pollution.
         temp_proxy_deletion = ast.Delete(targets=[ast.Name("@temp_proxy", ctx=ast.Del())])
-        global_ns_deletion = ast.Delete(targets=[ast.Name("@global_ns", ctx=ast.Del())])
-        new_import_nodes.extend((temp_proxy_deletion, global_ns_deletion))
+        local_ns_deletion = ast.Delete(targets=[ast.Name("@local_ns", ctx=ast.Del())])
+        new_import_nodes.extend((temp_proxy_deletion, local_ns_deletion))
 
         return new_import_nodes
 
@@ -215,7 +202,7 @@ class DeferredInstrumenter(ast.NodeTransformer):
 
 
 class DeferredFileLoader(SourceFileLoader):
-    """A file loader that instruments modules that are using "with defer_imports_until_use: ..."."""
+    """A file loader that instruments .py files which use "with defer_imports_until_use: ..."."""
 
     @staticmethod
     def _check_for_defer_usage(data: ReadableBuffer) -> tuple[str, bool]:
@@ -241,7 +228,7 @@ class DeferredFileLoader(SourceFileLoader):
         *,
         _optimize: int = -1,
     ) -> CodeType:
-        if not bool(data):
+        if not data:
             return super().source_to_code(data, path, _optimize=_optimize)  # pyright: ignore
 
         encoding, uses_defer = self._check_for_defer_usage(data)
@@ -502,20 +489,14 @@ def install_defer_import_hook() -> None:
         return
 
     # TODO: Consider all options for import cache invalidation. Some form of it is necessary because we went the
-    #       path_hooks route.
-    #       1)  sys.path_importer_cache.clear()
-    #           First attempt. Isn't enough; so much shit breaks as a result.
-    #       2)  importlib.invalidate_caches()
-    #           Works but might be overkill since it hits every meta path finder.
-    #       3)  PathFinder.invalidate_caches()
-    #           Also called by 2. Heavy as fuck because it imports importlib.metadata, but it's narrower in scope.
-    #       4)  inlining
-    #           Make a util function that mostly copies 3 except for the importlib.metadata part? It's a possible
-    #           middle ground between 3 and 1, but if the importlib.metadata invalidation is really necessary,
-    #           we might just have to pay the price.
+    #       sys.path_hooks route.
+    #       1)  sys.path_importer_cache.clear() - Not enough. Everything breaks.
+    #       2)  importlib.invalidate_caches() - Works, but might be overkill since it hits every meta path finder.
+    #           Calls 3 among other things.
+    #       3)  PathFinder.invalidate_caches() - Works, but it's heavy due to importing importlib.metadata.
+    #       ?)  inlining - Copy the implementation of 3 sans importlib.metdata part? Might be incorrect.
     #
-    # importlib.metadata is imported in almost all of the viable options, and it's too heavy to ignore. It
-    # imports >10 modules immediately, including inspect for goodness' sake.
+    # Goal: Avoid further increasing startup time on first runs, i.e. before any bytecode caching.
     for i, hook in enumerate(sys.path_hooks):
         if hook.__qualname__.startswith("FileFinder.path_hook"):
             sys.path_hooks.insert(i, DEFERRED_PATH_HOOK)

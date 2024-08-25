@@ -175,11 +175,10 @@ keep-runtime-typing = true
 ]
 # ---- Test code
 "tests/**/*.py" = [
-    # Allow printing.
-    "T201",
-    "T203",
-    # Allow fewer annotations.
-    "ANN201",
+    "T201",   # Allow printing.
+    "T203",   # Allow pretty printing.
+    "ANN201", # Don't need return annotations for tests.
+    "S102",   # exec is used to test for NameError within a module's namespace.
 ]
 "benchmark/**/*.py" = ["F401", "ERA001"]
 
