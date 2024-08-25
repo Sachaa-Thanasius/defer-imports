@@ -346,40 +346,79 @@ with defer_imports_until_use:
 
 
 class TestMixedImportTypes:
-    def test_top_level_and_submodules(self, tmp_path: Path):
+    def test_top_level_and_submodules_1(self, tmp_path: Path):
         source = """\
-# from pprint import pprint
+from pprint import pprint
 
 from deferred import defer_imports_until_use
 
 with defer_imports_until_use:
     import importlib
     import importlib.abc
-    # import importlib.resources
-    # import importlib.util
+    import importlib.util
 
-# breakpoint()
 # expected_importlib_repr = "<key for 'importlib' import>: <proxy for 'import importlib'>"
 
-# Make sure the importlib proxy is here and then resolves.
+# Test that the importlib proxy is here and then resolves.
 assert "<key for 'importlib' import>: <proxy for 'import importlib'>" in repr(vars())
 assert importlib
 assert "<key for 'importlib' import>: <proxy for 'import importlib'>" not in repr(vars())
 # pprint(vars(importlib))
 
-# Make sure the nested proxies carry over to the resolved importlib.
+# Test that the nested proxies carry over to the resolved importlib.
 assert "<key for 'abc' import>: <proxy for 'import importlib.abc as ...'>" in repr(vars(importlib))
-# assert "<key for 'resources' import>: <proxy for 'import importlib.resources as ...'>" in repr(vars(importlib))
-# assert "<key for 'util' import>: <proxy for 'import importlib.util as ...'>" in repr(vars(importlib))
+assert "<key for 'util' import>: <proxy for 'import importlib.util as ...'>" in repr(vars(importlib))
 
+assert "<key for 'abc' import>: <proxy for 'import importlib.abc as ...'>" in repr(vars(importlib))
 importlib.abc
-# importlib.util
-"""
+assert "<key for 'abc' import>: <proxy for 'import importlib.abc as ...'>" not in repr(vars(importlib))
 
+assert "<key for 'util' import>: <proxy for 'import importlib.util as ...'>" in repr(vars(importlib))
+importlib.util
+assert "<key for 'util' import>: <proxy for 'import importlib.util as ...'>" not in repr(vars(importlib))
+"""
         spec, module = create_sample_module(tmp_path, source, DeferredImportFileLoader)
         assert spec.loader
         for key in list(sys.modules):
             if key == "importlib" or key.startswith("importlib."):
+                sys.modules.pop(key)
+        spec.loader.exec_module(module)
+
+    def test_top_level_and_submodules_2(self, tmp_path: Path):
+        source = """\
+from pprint import pprint
+
+from deferred import defer_imports_until_use
+
+with defer_imports_until_use:
+    import asyncio
+    import asyncio.base_events
+    import asyncio.base_futures
+    import asyncio.base_subprocess
+    import asyncio.base_tasks
+    import asyncio.constants
+    import asyncio.coroutines
+    import asyncio.events
+    import asyncio.format_helpers
+    import asyncio.futures
+    import asyncio.locks
+    import asyncio.log
+    import asyncio.proactor_events
+    import asyncio.protocols
+    import asyncio.queues
+    import asyncio.runners
+    import asyncio.selector_events
+    import asyncio.sslproto
+    import asyncio.streams
+    import asyncio.subprocess
+    import asyncio.tasks
+    import asyncio.transports
+    import asyncio.unix_events
+"""
+        spec, module = create_sample_module(tmp_path, source, DeferredImportFileLoader)
+        assert spec.loader
+        for key in list(sys.modules):
+            if key == "asyncio" or key.startswith("asyncio."):
                 sys.modules.pop(key)
         spec.loader.exec_module(module)
 

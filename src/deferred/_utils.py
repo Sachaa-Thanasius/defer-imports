@@ -2,25 +2,6 @@ import sys
 import warnings
 
 
-if sys.version_info >= (3, 10):
-    from itertools import pairwise
-else:
-    from itertools import tee
-
-    def pairwise(iterable) -> zip[tuple[object, object]]:  # pyright: ignore
-        """Pairwise recipe copied from itertools.
-
-        Examples
-        --------
-        >>> list(pairwise("ABCDEFG"))
-        [('A', 'B'), ('B', 'C'), ('C', 'D'), ('D', 'E'), ('E', 'F'), ('F', 'G')]
-        """
-
-        a, b = tee(iterable)
-        next(b, None)
-        return zip(a, b)
-
-
 TYPING = False
 """Constant that is True at type-checking time but False at runtime. Similar to typing.TYPE_CHECKING."""
 
@@ -43,6 +24,28 @@ def final(f: object) -> object:
 
 class Final:
     """Placeholder for typing.Final."""
+
+
+CodeType = type(final.__code__)
+
+
+if sys.version_info >= (3, 10):
+    from itertools import pairwise
+else:
+    from itertools import tee
+
+    def pairwise(iterable) -> zip[tuple[object, object]]:
+        """Pairwise recipe copied from itertools.
+
+        Examples
+        --------
+        >>> list(pairwise("ABCDEFG"))
+        [('A', 'B'), ('B', 'C'), ('C', 'D'), ('D', 'E'), ('E', 'F'), ('F', 'G')]
+        """
+
+        a, b = tee(iterable)
+        next(b, None)
+        return zip(a, b)
 
 
 def calc_package(globals: dict[str, object]):
@@ -102,6 +105,7 @@ __all__ = (
     "ReadableBuffer",
     "final",
     "Final",
+    "CodeType",
     "pairwise",
     "calc_package",
     "resolve_name",

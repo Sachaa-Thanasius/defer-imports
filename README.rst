@@ -53,7 +53,7 @@ TODO
     - Signs point to yes, but I'm not a fan of the monkeypatching seemingly involved, nor of having to import ``importlib.util``.
     - See beartype and its justification `for <https://github.com/beartype/beartype/blob/e9eeb4e282f438e770520b99deadbe219a1c62dc/beartype/claw/_importlib/_clawimpload.py#L177-L312>`_ `this <https://github.com/beartype/beartype/blob/e9eeb4e282f438e770520b99deadbe219a1c62dc/beartype/claw/_importlib/clawimpcache.py#L22-L26>`_.
 
-- [ ] Fix subpackage imports being broken if done within ``defer_imports_until_use`` like this:
+- [x] Fix subpackage imports being broken if done within ``defer_imports_until_use`` like this:
 
     .. code:: python
 
@@ -63,6 +63,8 @@ TODO
             import importlib
             import importlib.abc
             import importlib.util
+
+    - I could not explain to you why it works, but it does.
 
 - [ ] Add tests for the following:
 
