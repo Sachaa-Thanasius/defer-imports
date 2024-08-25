@@ -40,7 +40,7 @@ def final(f: object) -> object:
     return f
 
 
-def __getattr__(name: str) -> object:  # noqa: PLR0911
+def __getattr__(name: str) -> object:  # pragma: no cover # noqa: PLR0911
     # Let's cache the return values in the global namespace to avoid subsequent calls to __getattr__ if possible.
 
     if name == "T":

@@ -46,6 +46,43 @@ def create_sample_module(path: Path, source: str, loader_type: type):
     ("before", "after"),
     [
         pytest.param(
+            """'''Module docstring here'''""",
+            '''\
+"""Module docstring here"""
+from deferred._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+del @DeferredImportKey, @DeferredImportProxy
+''',
+            id="Inserts statements after module docstring",
+        ),
+        pytest.param(
+            """from __future__ import annotations""",
+            '''\
+from __future__ import annotations
+from deferred._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+del @DeferredImportKey, @DeferredImportProxy
+''',
+            id="Inserts statements after __future__ import",
+        ),
+        pytest.param(
+            """\
+from contextlib import nullcontext
+
+from deferred import defer_imports_until_use
+
+with defer_imports_until_use, nullcontext():
+    import inspect
+""",
+            """\
+from deferred._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+from contextlib import nullcontext
+from deferred import defer_imports_until_use
+with defer_imports_until_use, nullcontext():
+    import inspect
+del @DeferredImportKey, @DeferredImportProxy
+""",
+            id="does nothing if used at same time as another context manager",
+        ),
+        pytest.param(
             """\
 from deferred import defer_imports_until_use
 
@@ -188,6 +225,15 @@ def test_empty(tmp_path: Path):
     spec.loader.exec_module(module)
 
 
+def test_noninstrumented(tmp_path: Path):
+    source = "import contextlib"
+
+    spec, module = create_sample_module(tmp_path, source, DeferredFileLoader)
+    assert spec.loader
+    spec.loader.exec_module(module)
+    assert module.contextlib is sys.modules["contextlib"]
+
+
 def test_regular_import(tmp_path: Path):
     source = """\
 from deferred import defer_imports_until_use
@@ -207,8 +253,7 @@ with defer_imports_until_use:
 
     assert module.inspect is sys.modules["inspect"]
 
-    def sample_func(a: int, c: float) -> float:
-        return c
+    def sample_func(a: int, c: float) -> float: ...
 
     assert str(module.inspect.signature(sample_func)) == "(a: int, c: float) -> float"
 
@@ -241,8 +286,7 @@ with defer_imports_until_use:
 
     assert sys.modules["inspect"] is module.gin
 
-    def sample_func(a: int, b: str) -> str:
-        return b
+    def sample_func(a: int, b: str) -> str: ...
 
     assert str(module.gin.signature(sample_func)) == "(a: int, b: str) -> str"
 
@@ -643,14 +687,14 @@ with defer_imports_until_use:
     sample_package_path.joinpath("a.py").write_text(
         """\
 class A:
-    def __init__(val: object):
+    def __init__(self, val: object):
         self.val = val
 """
     )
     sample_package_path.joinpath("b.py").write_text(
         """\
 class B:
-    def __init__(val: object):
+    def __init__(self, val: object):
         self.val = val
 """
     )
@@ -669,7 +713,7 @@ class B:
     assert spec.loader
 
     module = importlib.util.module_from_spec(spec)
-    sys.modules["sample_package"] = module
+    sys.modules[package_name] = module
     spec.loader.exec_module(module)
 
     module_locals_repr = repr(vars(module))
@@ -678,15 +722,83 @@ class B:
     assert "<key for 'B' import>: <proxy for 'from sample_package.b import B'>" in module_locals_repr
 
     assert module.A
-    assert repr(module.A) == "<class 'sample_package.a.A'>"
+    assert repr(module.A("hello")).startswith("<sample_package.a.A object at")
+
+    del sys.modules[package_name]
 
 
-def test_false_circular_imports():
-    """TODO"""
+def test_circular_imports(tmp_path: Path):
+    """Test a synthetic package that does circular imports.
 
+    The package has the following structure:
+        .
+        └───circular_package
+            ├───__init__.py
+            ├───main.py
+            ├───x.py
+            └───y.py
+    """
 
-def test_true_circular_imports():
-    """TODO"""
+    circular_package_path = tmp_path / "circular_package"
+    circular_package_path.mkdir()
+    circular_package_path.joinpath("__init__.py").write_text(
+        """\
+from deferred import defer_imports_until_use
+
+with defer_imports_until_use:
+    import circular_package.main
+"""
+    )
+    circular_package_path.joinpath("main.py").write_text(
+        """\
+from .x import X2
+X2()
+"""
+    )
+    circular_package_path.joinpath("x.py").write_text(
+        """\
+def X1():
+    return "X"
+
+from .y import Y1
+
+def X2():
+    return Y1()
+"""
+    )
+
+    circular_package_path.joinpath("y.py").write_text(
+        """\
+def Y1():
+    return "Y"
+
+from .x import X2
+
+def Y2():
+    return X2()
+"""
+    )
+
+    package_name = "circular_package"
+    package_init_path = str(circular_package_path / "__init__.py")
+
+    loader = DeferredFileLoader(package_name, package_init_path)
+    spec = importlib.util.spec_from_file_location(
+        package_name,
+        package_init_path,
+        loader=loader,
+        submodule_search_locations=[],  # A signal that this is a package.
+    )
+    assert spec
+    assert spec.loader
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[package_name] = module
+    spec.loader.exec_module(module)
+
+    assert module
+
+    del sys.modules[package_name]
 
 
 def test_thread_safety():
