@@ -1,3 +1,4 @@
+========
 deferred
 ========
 
@@ -5,7 +6,7 @@ An pure-Python implementation of PEP 690–esque lazy imports, but at a user's b
 
 
 Installation
-------------
+============
 
 **Requires Python 3.9+**
 
@@ -17,13 +18,13 @@ This can be installed via pip:
 
 
 Documentation
--------------
+=============
 
 Mostly limited to docstrings and comments in the package code.
 
 
 Features and Caveats
-^^^^^^^^^^^^^^^^^^^^
+--------------------
 
 - Python implementation–agnostic, in theory
 
@@ -35,7 +36,7 @@ Features and Caveats
 
 
 Benchmarks
-----------
+==========
 
 These are quite rough. At the moment, time to import is being measured with the following command, with variations for different module names (e.g. bench_slothy for ``slothy``):
 
@@ -45,9 +46,9 @@ These are quite rough. At the moment, time to import is being measured with the 
 
 
 TODO
-----
+====
 
-- [] Investigate if this package would benefit from a custom optimization suffix for bytecode. Signs point to yes, but I'm not a fan of the monkeypatching seemingly involved.
+- [ ] Investigate if this package would benefit from a custom optimization suffix for bytecode. Signs point to yes, but I'm not a fan of the monkeypatching seemingly involved.
 
     - Ref: typeguard
 
@@ -62,7 +63,7 @@ TODO
 
         - https://docs.python.org/3/library/importlib.html#importlib.util.cache_from_source
 
-- [] Fix subpackage imports being broken if done within ``defer_imports_until_use`` like this:
+- [ ] Fix subpackage imports being broken if done within ``defer_imports_until_use`` like this:
 
     .. code:: python
         
@@ -73,20 +74,20 @@ TODO
             import asyncio.base_events
             import asyncio.base_futures
 
-- [] Add tests for the following:
+- [ ] Add tests for the following:
 
-    - [] Relative imports
-    - [] Combinations of different import types
-    - [] True circular imports
-    - [] Thread safety (see importlib.util.LazyLoader for reference?)
-    - [] Other python implementations/platforms
+    - [ ] Relative imports
+    - [ ] Combinations of different import types
+    - [ ] True circular imports
+    - [ ] Thread safety (see importlib.util.LazyLoader for reference?)
+    - [ ] Other python implementations/platforms
 
-- [] Make this able to import the entire standard library, including all the subpackage imports uncommented (see benchmark/all_stdlib_modules.py)
-- [] Make this be able to run on normal code. It currently breaks pip, readline, and who knows what else in the standard library, possibly because of the subpackage imports issue.
+- [ ] Make this able to import the entire standard library, including all the subpackage imports uncommented (see benchmark/all_stdlib_modules.py)
+- [ ] Make this be able to run on normal code. It currently breaks pip, readline, and who knows what else in the standard library, possibly because of the subpackage imports issue.
 
 
 Acknowledgements
-----------------
+================
 
 - This wouldn't have been possible without using PEP 690 and two other pieces of code as starting points.
 
