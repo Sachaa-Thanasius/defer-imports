@@ -677,10 +677,8 @@ class B:
     assert "<key for 'A' import>: <proxy for 'from sample_package.a import A'>" in module_locals_repr
     assert "<key for 'B' import>: <proxy for 'from sample_package.b import B'>" in module_locals_repr
 
-    # FIXME: This causes a recursion error because before importing the submodule that A is from, a,
-    #        importlib._bootstrap._handle_fromlist checks if a is present with hasattr, which triggers a to attempt
-    #        to load, which recurses because a is technically an attribute in __init__. Not sure how to fix this, tbh.
     assert module.A
+    assert repr(module.A) == "<class 'sample_package.a.A'>"
 
 
 def test_false_circular_imports():
