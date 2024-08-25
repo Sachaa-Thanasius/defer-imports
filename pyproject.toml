@@ -38,26 +38,8 @@ Source = "https://github.com/Sachaa-Thanasius/deferred"
 [tool.hatch.build.targets.wheel]
 packages = ["src/deferred"]
 
-# [tool.hatch.build.targets.wheel.hooks.autorun]
-# # Install the import hook at startup to register deferred's finder.
-# dependencies = ["hatch-autorun"]
-# code = """
-# try:
-#     import deferred
-# except ImportError:
-#     pass
-# else:
-#     deferred.install_defer_import_hook()
-# """
-
 
 # ---- Testing config
-
-[[tool.hatch.envs.hatch-test.matrix]]
-python = ["3.9", "3.10", "3.11", "3.12", "3.13"]
-
-[tool.hatch.envs.hatch-test]
-extra-dependencies = ["covdefaults"]
 
 [tool.pytest.ini_options]
 pythonpath = "src"

@@ -7,11 +7,13 @@ expected proxy repr, as that's the only way to inspect it without causing it to 
 """
 
 import ast
+import contextlib
 import importlib.util
 import io
 import sys
 import tokenize
 from pathlib import Path
+from types import ModuleType
 from typing import cast
 
 import pytest
@@ -42,6 +44,17 @@ def create_sample_module(path: Path, source: str, loader_type: type):
     return spec, module
 
 
+@contextlib.contextmanager
+def temporary_sys_modules_entry(name: str, module: ModuleType):
+    """Add a module to sys.modules and then attempt to remove it on exit."""
+
+    sys.modules[name] = module
+    try:
+        yield
+    finally:
+        sys.modules.pop(name, None)
+
+
 @pytest.mark.parametrize(
     ("before", "after"),
     [
@@ -56,11 +69,11 @@ del @DeferredImportKey, @DeferredImportProxy
         ),
         pytest.param(
             """from __future__ import annotations""",
-            '''\
+            """\
 from __future__ import annotations
 from deferred._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
 del @DeferredImportKey, @DeferredImportProxy
-''',
+""",
             id="Inserts statements after __future__ import",
         ),
         pytest.param(
@@ -713,18 +726,17 @@ class B:
     assert spec.loader
 
     module = importlib.util.module_from_spec(spec)
-    sys.modules[package_name] = module
-    spec.loader.exec_module(module)
 
-    module_locals_repr = repr(vars(module))
-    assert "<key for 'a' import>: <proxy for 'from sample_package import a'>" in module_locals_repr
-    assert "<key for 'A' import>: <proxy for 'from sample_package.a import A'>" in module_locals_repr
-    assert "<key for 'B' import>: <proxy for 'from sample_package.b import B'>" in module_locals_repr
+    with temporary_sys_modules_entry(package_name, module):
+        spec.loader.exec_module(module)
 
-    assert module.A
-    assert repr(module.A("hello")).startswith("<sample_package.a.A object at")
+        module_locals_repr = repr(vars(module))
+        assert "<key for 'a' import>: <proxy for 'from sample_package import a'>" in module_locals_repr
+        assert "<key for 'A' import>: <proxy for 'from sample_package.a import A'>" in module_locals_repr
+        assert "<key for 'B' import>: <proxy for 'from sample_package.b import B'>" in module_locals_repr
 
-    del sys.modules[package_name]
+        assert module.A
+        assert repr(module.A("hello")).startswith("<sample_package.a.A object at")
 
 
 def test_circular_imports(tmp_path: Path):
@@ -793,12 +805,11 @@ def Y2():
     assert spec.loader
 
     module = importlib.util.module_from_spec(spec)
-    sys.modules[package_name] = module
-    spec.loader.exec_module(module)
 
-    assert module
+    with temporary_sys_modules_entry(package_name, module):
+        spec.loader.exec_module(module)
 
-    del sys.modules[package_name]
+        assert module
 
 
 def test_thread_safety():
