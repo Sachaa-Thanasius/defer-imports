@@ -8,7 +8,7 @@ import sys
 import tokenize
 from importlib.machinery import BYTECODE_SUFFIXES, SOURCE_SUFFIXES, FileFinder, PathFinder, SourceFileLoader
 
-from ._utils import CodeType, Final, ReadableBuffer, StrPath, calc_package, final, pairwise, resolve_name
+from ._utils import CodeType, Final, ReadableBuffer, StrPath, calc_package, final, sliding_window, resolve_name
 
 
 # region -------- Compile-time hook
@@ -147,9 +147,22 @@ class DeferredInstrumenter(ast.NodeTransformer):
 
         if not (
             len(node.items) == 1
-            and isinstance(node.items[0].context_expr, ast.Name)
-            and node.items[0].context_expr.id == "defer_imports_until_use"
+            and (
+                (
+                    # with defer_imports_until_use
+                    isinstance(node.items[0].context_expr, ast.Name)
+                    and node.items[0].context_expr.id == "defer_imports_until_use"
+                )
+                or (
+                    # with deferred.defer_imports_until_use
+                    isinstance(node.items[0].context_expr, ast.Attribute)
+                    and isinstance(node.items[0].context_expr.value, ast.Name)
+                    and node.items[0].context_expr.value.id == "deferred"
+                    and node.items[0].context_expr.attr == "defer_imports_until_use"
+                )
+            )
         ):
+            print("HERE")
             return self.generic_visit(node)
 
         if self.scope_depth != 0:
@@ -161,7 +174,7 @@ class DeferredInstrumenter(ast.NodeTransformer):
 
     def visit_Module(self, node: ast.Module) -> ast.AST:
         """Insert imports necessary to make defer_imports_until_use work properly. The import is placed after the
-        module docstring and any "from __future__" imports.
+        module docstring and after __future__ imports.
 
         Notes
         -----
@@ -201,21 +214,35 @@ class DeferredInstrumenter(ast.NodeTransformer):
         return self.generic_visit(node)
 
 
+def _match_token(token: tokenize.TokenInfo, **kwargs: object) -> bool:
+    return all(getattr(token, name) == val for name, val in kwargs.items())
+
+
 class DeferredFileLoader(SourceFileLoader):
     """A file loader that instruments .py files which use "with defer_imports_until_use: ..."."""
 
-    @staticmethod
-    def _check_for_defer_usage(data: ReadableBuffer) -> tuple[str, bool]:
+    @classmethod
+    def _check_for_defer_usage(cls, data: ReadableBuffer) -> tuple[str, bool]:
         """Get the encoding of the code and also check if it uses "with defer_imports_until_use"."""
 
+        tok_NAME, tok_OP = tokenize.NAME, tokenize.OP
         token_stream = tokenize.tokenize(io.BytesIO(data).readline)
         encoding = next(token_stream).string
         uses_defer = any(
-            first_tok.type == tokenize.NAME
-            and first_tok.string == "with"
-            and second_tok.type == tokenize.NAME
-            and second_tok.string == "defer_imports_until_use"
-            for first_tok, second_tok in pairwise(token_stream)
+            _match_token(tok1, type=tok_NAME, string="with")
+            and (
+                (
+                    _match_token(tok2, type=tok_NAME, string="defer_imports_until_use")
+                    and _match_token(tok3, type=tok_OP, string=":")
+                )
+                or (
+                    _match_token(tok2, type=tok_NAME, string="deferred")
+                    and _match_token(tok2, type=tok_OP, string=".")
+                    and _match_token(tok3, type=tok_NAME, string="defer_imports_until_use")
+                    and _match_token(tok4, type=tok_OP, string=":")
+                )
+            )
+            for tok1, tok2, tok3, tok4 in sliding_window(token_stream, 4)
         )
         return encoding, uses_defer
 

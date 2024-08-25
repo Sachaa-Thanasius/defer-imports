@@ -1,7 +1,9 @@
 """Utilities (or substitutes) that are more expensive to annotate or import than I'd like."""
 
+import collections
 import sys
 import warnings
+from itertools import islice
 
 
 __all__ = (
@@ -11,7 +13,7 @@ __all__ = (
     "final",
     "Final",
     "CodeType",
-    "pairwise",
+    "sliding_window",
     "calc_package",
     "resolve_name",
 )
@@ -25,7 +27,7 @@ ReadableBuffer = "bytes | bytearray | memoryview"
 
 def final(f: object) -> object:
     """Placeholder for typing.final.
-    
+
     Copied from typing with minimal changes.
     """
 
@@ -46,23 +48,22 @@ class Final:
 CodeType = type(final.__code__)
 
 
-if sys.version_info >= (3, 10):  # pragma: >=3.10 cover
-    from itertools import pairwise
-else:  # pragma: <3.10 cover
-    from itertools import tee
+def sliding_window(iterable, n: int):
+    """Collect data into overlapping fixed-length chunks or blocks.
 
-    def pairwise(iterable) -> zip[tuple[object, object]]:
-        """Pairwise recipe copied from itertools.
+    Copied from 3.12 itertools docs.
 
-        Examples
-        --------
-        >>> list(pairwise("ABCDEFG"))
-        [('A', 'B'), ('B', 'C'), ('C', 'D'), ('D', 'E'), ('E', 'F'), ('F', 'G')]
-        """
+    Examples
+    --------
+    >>> ["".join(window) for window in sliding_window('ABCDEFG', 4)]
+    ['ABCD', 'BCDE', 'CDEF', 'DEFG']
+    """
 
-        a, b = tee(iterable)
-        next(b, None)
-        return zip(a, b)
+    iterator = iter(iterable)
+    window = collections.deque(islice(iterator, n - 1), maxlen=n)
+    for x in iterator:
+        window.append(x)
+        yield tuple(window)
 
 
 def calc_package(globals: dict[str, object]):
