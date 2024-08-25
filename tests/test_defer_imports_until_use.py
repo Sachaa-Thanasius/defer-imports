@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 import pytest
+
 from deferred._core import DeferredImportFileLoader
 
 
@@ -35,10 +36,10 @@ import sys
 
 from deferred import defer_imports_until_use
 
-
 with defer_imports_until_use:
     import inspect
 
+# expected_inspect_repr = "<key for 'inspect' import>: <proxy for 'import inspect'>"
 assert "<key for 'inspect' import>: <proxy for 'import inspect'>" in repr(vars())
 assert inspect
 assert "<key for 'inspect' import>: <proxy for 'import inspect'>" not in repr(vars())
@@ -59,19 +60,20 @@ import sys
 import pytest
 from deferred import defer_imports_until_use
 
-
 with defer_imports_until_use:
     import inspect as gin
+
+# expected_gin_repr = "<key for 'gin' import>: <proxy for 'import inspect'>"
 
 assert "<key for 'gin' import>: <proxy for 'import inspect'>" in repr(vars())
 
 with pytest.raises(NameError):
     inspect
 
-
 assert "<key for 'gin' import>: <proxy for 'import inspect'>" in repr(vars())
 assert gin
 assert "<key for 'gin' import>: <proxy for 'import inspect'>" not in repr(vars())
+
 assert sys.modules["inspect"] is gin
 assert str(gin.signature(lambda a, b: b)) == "(a, b)"
 """
@@ -87,10 +89,10 @@ import sys
 
 from deferred import defer_imports_until_use
 
-
 with defer_imports_until_use:
     import collections.abc
 
+# expected_collections_repr = "<key for 'collections' import>: <proxy for 'import collections.abc'>"
 assert "<key for 'collections' import>: <proxy for 'import collections.abc'>" in repr(vars())
 
 assert collections
@@ -113,11 +115,11 @@ import sys
 import pytest
 from deferred import defer_imports_until_use
 
-
 with defer_imports_until_use:
     import collections.abc as xyz
 
 # Make sure the right proxy is in the namespace.
+# expected_xyz_repr = "<key for 'xyz' import>: <proxy for 'import collections.abc as ...'>"
 assert "<key for 'xyz' import>: <proxy for 'import collections.abc as ...'>" in repr(vars())
 
 # Make sure the intermediate imports or proxies for them aren't in the namespace.
@@ -154,7 +156,6 @@ import sys
 import pytest
 from deferred import defer_imports_until_use
 
-
 with defer_imports_until_use:
     from inspect import isfunction, signature
 
@@ -186,7 +187,6 @@ import sys
 
 import pytest
 from deferred import defer_imports_until_use
-
 
 with defer_imports_until_use:
     from inspect import Signature as MySignature
@@ -349,9 +349,7 @@ class TestMixedImportTypes:
     def test_top_level_and_submodules(self, tmp_path: Path):
         source = """\
 from pprint import pprint
-
 from deferred import defer_imports_until_use
-
 
 with defer_imports_until_use:
     import importlib
@@ -359,8 +357,22 @@ with defer_imports_until_use:
     import importlib.util
     import importlib.resources
 
-print()
+# expected_importlib_repr = "<key for 'importlib' import>: <proxy for 'import importlib'>"
+
+# Make sure the importlib proxy is here.
+assert "<key for 'importlib' import>: <proxy for 'import importlib'>" in repr(vars())
+
+# Make sure importlib resolves.
 importlib
+assert "<key for 'importlib' import>: <proxy for 'import importlib'>" not in repr(vars())
+pprint(vars(importlib))
+
+# Make sure the nested proxies carry over to the resolved importlib.
+assert "<key for 'abc' import>: <proxy for 'from importlib.abc import <<<'>" in repr(vars(importlib))
+assert "<key for 'util' import>: <proxy for 'from importlib.util import <<<'>" in repr(vars(importlib))
+assert "<key for 'resources' import>: <proxy for 'from importlib.resources import <<<'>" in repr(vars(importlib))
+
+
 importlib.abc
 importlib.util
 """

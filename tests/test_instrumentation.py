@@ -5,6 +5,7 @@ import io
 import tokenize
 
 import pytest
+
 from deferred._core import DeferredImportInstrumenter
 
 

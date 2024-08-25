@@ -8,7 +8,7 @@ import io
 import sys
 import tokenize
 
-from ._utils import Final, HasLocationAttributes, ReadableBuffer, StrPath, final, pairwise
+from ._utils import Final, HasLocationAttributes, ReadableBuffer, StrPath, calc_package, final, pairwise, resolve_name
 
 
 # region -------- Compile-time hook
@@ -62,47 +62,32 @@ class DeferredImportInstrumenter(ast.NodeTransformer):
     def _create_import_name_replacement(name: str) -> ast.If:
         """Create an AST equivalent to the following statements (slightly simplified):
 
-        if type(name) is DeferredProxy:
-            temp_proxy = global_ns.pop(name)
-            global_ns(DeferredImportKey(name, temp_proxy)) = temp_proxy
+        if type(name) is DeferredImportProxy:
+            temp_proxy = global_ns.pop('name')
+            global_ns[DeferredImportKey('name', temp_proxy)] = temp_proxy
         """
 
         if "." in name:
             name = name.rpartition(".")[0]
-        return ast.If(
-            test=ast.Compare(
-                left=ast.Call(
-                    func=ast.Name("type", ctx=ast.Load()), args=[ast.Name(name, ctx=ast.Load())], keywords=[]
-                ),
-                ops=[ast.Is()],
-                comparators=[ast.Name("@DeferredImportProxy", ctx=ast.Load())],
-            ),
-            body=[
-                ast.Assign(
-                    targets=[ast.Name("@temp_proxy", ctx=ast.Store())],
-                    value=ast.Call(
-                        func=ast.Attribute(value=ast.Name("@global_ns", ctx=ast.Load()), attr="pop", ctx=ast.Load()),
-                        args=[ast.Constant(name)],
-                        keywords=[],
-                    ),
-                ),
-                ast.Assign(
-                    targets=[
-                        ast.Subscript(
-                            value=ast.Name("@global_ns", ctx=ast.Load()),
-                            slice=ast.Call(
-                                func=ast.Name("@DeferredImportKey", ctx=ast.Load()),
-                                args=[ast.Constant(name), ast.Name("@temp_proxy", ctx=ast.Load())],
-                                keywords=[],
-                            ),
-                            ctx=ast.Store(),
-                        )
-                    ],
-                    value=ast.Name("@temp_proxy", ctx=ast.Load()),
-                ),
-            ],
-            orelse=[],
+
+        mini_tree = ast.parse(
+            f"if type({name}) is DeferredImportProxy:\n"
+            f"    temp_proxy = global_ns.pop('{name}')\n"
+            f"    global_ns[DeferredImportKey('{name}', temp_proxy)] = temp_proxy"
         )
+        if_node = mini_tree.body[0]
+        assert isinstance(if_node, ast.If)
+
+        # Adjust some of the names to be inaccessible via regular name resolution.
+        for node in ast.walk(if_node):
+            if isinstance(node, ast.Name) and node.id in {
+                "temp_proxy",
+                "global_ns",
+                "DeferredImportProxy",
+                "DeferredImportKey",
+            }:
+                node.id = f"@{node.id}"
+        return if_node
 
     @staticmethod
     def _create_global_ns_var() -> ast.Assign:
@@ -149,9 +134,8 @@ class DeferredImportInstrumenter(ast.NodeTransformer):
 
         # Delete temporary variables after all is said and done to avoid namespace pollution.
         temp_proxy_deletion = ast.Delete(targets=[ast.Name("@temp_proxy", ctx=ast.Del())])
-        new_import_nodes.append(temp_proxy_deletion)
         global_ns_deletion = ast.Delete(targets=[ast.Name("@global_ns", ctx=ast.Del())])
-        new_import_nodes.append(global_ns_deletion)
+        new_import_nodes.extend((temp_proxy_deletion, global_ns_deletion))
 
         return new_import_nodes
 
@@ -162,7 +146,6 @@ class DeferredImportInstrumenter(ast.NodeTransformer):
         ------
         SyntaxError:
             If any of the following conditions are met, in order of priority:
-
                 1. "defer_imports_until_use" is being used in a non-module scope.
                 2. "defer_imports_until_use" block contains a statement that isn't an import.
                 3. "defer_imports_until_use" block contains a wildcard import.
@@ -216,10 +199,10 @@ class DeferredImportInstrumenter(ast.NodeTransformer):
         key_import = ast.ImportFrom(module="deferred._core", names=defer_aliases, level=0)
         node.body.insert(position, key_import)
 
+        # Clean up the namespace.
         deferred_key_deletion = ast.Delete(targets=[ast.Name("@DeferredImportKey", ctx=ast.Del())])
-        node.body.append(deferred_key_deletion)
         deferred_proxy_deletion = ast.Delete(targets=[ast.Name("@DeferredImportProxy", ctx=ast.Del())])
-        node.body.append(deferred_proxy_deletion)
+        node.body.extend((deferred_key_deletion, deferred_proxy_deletion))
 
         return self.generic_visit(node)
 
@@ -262,6 +245,8 @@ class DeferredImportFileLoader(importlib.machinery.SourceFileLoader):
     def get_data(self, path: str) -> bytes:
         """Return the data from path as raw bytes.
 
+        Notes
+        -----
         If the path points to a bytecode file, check for a deferred-specific header. If the header is invalid, raising
         OSError will invalidate the bytecode.
 
@@ -274,11 +259,11 @@ class DeferredImportFileLoader(importlib.machinery.SourceFileLoader):
             return data
 
         if not data.startswith(b"deferred"):
-            msg = "No deferred header"
+            msg = '"deferred" header missing from bytecode'
             raise OSError(msg)
 
         if not data.startswith(BYTECODE_HEADER):
-            msg = "deferred header mismatch"
+            msg = '"deferred" header is outdated'
             raise OSError(msg)
 
         return data[len(BYTECODE_HEADER) :]
@@ -286,9 +271,11 @@ class DeferredImportFileLoader(importlib.machinery.SourceFileLoader):
     def set_data(self, path: str, data: ReadableBuffer, *, _mode: int = 0o666) -> None:
         """Write bytes data to a file.
 
-        If the file is a bytecode one, prepend a deferred-specific header to it. That way, we can identify our
-        instrumented bytecode and invalidate it if necessary. An alternative way to go about this is to monkeypatch
-        importlib._bootstrap_external.cache_from_source, as beartype and typeguard do, but that seems more annoying.
+        Notes
+        -----
+        If the file is a bytecode one, prepend a deferred-specific header to it. That way, instrumented bytecode can be
+        identified and invalidated it if necessary. Another option is to monkeypatch importlib.util.cache_from_source,
+        as beartype and typeguard do, but that seems less safe.
 
         Source: https://gregoryszorc.com/blog/2017/03/13/from-__past__-import-bytes_literals/
         """
@@ -297,6 +284,13 @@ class DeferredImportFileLoader(importlib.machinery.SourceFileLoader):
             data = BYTECODE_HEADER + data
 
         return super().set_data(path, data, _mode=_mode)
+
+
+class DeferredImportFileFinder(importlib.machinery.FileFinder):
+    """deferred's custom file-based finder.
+
+    Currently a stub but may be utilized in the future.
+    """
 
 
 # endregion
@@ -308,10 +302,10 @@ class DeferredImportFileLoader(importlib.machinery.SourceFileLoader):
 _MISSING = object()
 
 original_import = contextvars.ContextVar("current_import", default=builtins.__import__)
-"""A contextvar for tracking what builtins.__import__ currently is."""
+"""What builtins.__import__ currently points to."""
 
 is_deferred = contextvars.ContextVar("is_deferred", default=False)
-"""A contextvar for determining if executing code is currently within defer_imports_until_use."""
+"""Whether imports should be deferred."""
 
 
 class DeferredImportProxy:
@@ -330,6 +324,8 @@ class DeferredImportProxy:
         self.defer_proxy_local_ns = local_ns
         self.defer_proxy_fromlist = fromlist
         self.defer_proxy_level = level
+
+        # Only used in cases of non-from-import submodule aliasing a la "import a.b as c".
         self.defer_proxy_sub: str | None = None
 
     @property
@@ -346,42 +342,49 @@ class DeferredImportProxy:
 
     def __repr__(self) -> str:
         if self.defer_proxy_fromlist:
-            stmt = f"from {self.defer_proxy_name} import {', '.join(self.defer_proxy_fromlist)}"
+            imp_stmt = f"from {self.defer_proxy_name} import {', '.join(self.defer_proxy_fromlist)}"
         elif self.defer_proxy_sub:
-            stmt = f"import {self.defer_proxy_name} as ..."
+            imp_stmt = f"import {self.defer_proxy_name} as ..."
         else:
-            stmt = f"import {self.defer_proxy_name}"
+            imp_stmt = f"import {self.defer_proxy_name}"
 
-        return f"<proxy for {stmt!r}>"
+        return f"<proxy for {imp_stmt!r}>"
 
     def __getattr__(self, attr: str):
         sub_proxy = type(self)(*self.defer_proxy_import_args)
+
         if attr in self.defer_proxy_fromlist:
             sub_proxy.defer_proxy_fromlist = (attr,)
         else:
             sub_proxy.defer_proxy_sub = attr
+
         return sub_proxy
 
 
-class DeferredImportKey:
+class DeferredImportKey(str):
     """Mapping key for an import proxy.
 
     When referenced, the key will replace itself in the namespace with the resolved import or the right name from it.
     """
 
-    __slots__ = ("defer_key_key", "defer_key_proxy")
+    __slots__ = ("defer_key_str", "defer_key_proxy")
 
-    def __init__(self, key: str, proxy: DeferredImportProxy) -> None:
-        self.defer_key_key = key
+    defer_key_str: str
+    defer_key_proxy: DeferredImportProxy
+
+    def __new__(cls, key: str, proxy: DeferredImportProxy, /):
+        self = super().__new__(cls, key)
+        self.defer_key_str = str(key)
         self.defer_key_proxy = proxy
+        return self
 
-    def __repr__(self) -> str:
-        return f"<key for {self.defer_key_key!r} import>"
+    def __repr__(self, /) -> str:
+        return f"<key for {self.defer_key_str!r} import>"
 
-    def __eq__(self, value: object) -> bool:
+    def __eq__(self, value: object, /) -> bool:
         if not isinstance(value, str):
             return NotImplemented
-        if self.defer_key_key != value:
+        if self.defer_key_str != value:
             return False
 
         if not is_deferred.get():
@@ -389,21 +392,41 @@ class DeferredImportKey:
 
         return True
 
-    def __hash__(self) -> int:
-        return hash(self.defer_key_key)
+    def __hash__(self, /) -> int:
+        return hash(self.defer_key_str)
 
     def _resolve(self) -> None:
         """Perform an actual import for the given proxy and bind the result to the relevant namespace."""
 
-        key = self.defer_key_key
         proxy = self.defer_key_proxy
-        namespace = proxy.defer_proxy_local_ns
+
+        # Perform the original __import__ and pray.
         module = original_import.get()(*proxy.defer_proxy_import_args)
 
-        # Replace the proxy on the namespace with the resolved module or module attribute in the namespace.
-        del namespace[self]
+        # Transfer nested proxies over to the resolved item.
+        for attr_name, attr_val in vars(proxy).items():
+            if isinstance(attr_name, DeferredImportKey) and not hasattr(module, attr_name.defer_key_str):
+                assert isinstance(attr_val, DeferredImportProxy)
+                # NOTE: Change the namespaces as well to make sure nested proxies are replaced in the right place.
+                attr_val.defer_proxy_global_ns = attr_val.defer_proxy_local_ns = vars(module)
+                setattr(module, attr_name, attr_val)
 
-        # if any((type(attr) is DeferredImportKey) for attr in vars(proxy)):
+        # ---- Replace the proxy on the relevant namespace with the resolved module or module attribute.
+
+        # First, pick the relevant namespace.
+        namespace = proxy.defer_proxy_local_ns
+
+        # Second, remove the deferred key to avoid it sticking around.
+        # NOTE: This is necessary to prevent recursive resolution for nested proxies.
+        _is_def_tok = is_deferred.set(True)
+        try:
+            del namespace[self]
+        finally:
+            is_deferred.reset(_is_def_tok)
+
+        # Finally, resolve any requested attribute access and replace using a regular string key.
+        key = self.defer_key_str
+
         if proxy.defer_proxy_fromlist:
             namespace[key] = getattr(module, proxy.defer_proxy_fromlist[0])
         elif proxy.defer_proxy_sub is not None:
@@ -414,33 +437,47 @@ class DeferredImportKey:
 
 def _deferred_import(
     name: str,
-    globals: dict[str, object] = None,
-    locals: dict[str, object] | None = None,
+    globals: dict[str, object],
+    locals: dict[str, object],
     fromlist: tuple[str, ...] | None = None,
     level: int = 0,
+    /,
 ):
-    """The implementation of __import__ supporting defer imports."""
+    """An implementation of __import__ supporting defer imports.
 
-    # A few sanity checks in case someone uses __import__ within defer_imports_until_use.
-    if locals is None:
-        msg = "deferred import machinery only allowed at module level"
-        raise DeferredImportError(msg)
+    The arguments are less flexible to indicate this should shouldn't ever be called as __import__.
+    """
 
-    if fromlist == ("*",):
-        msg = "import * not allowed within deferred import machinery"
-        raise DeferredImportError(msg)
+    # Resolve the names of relative imports.
+    if level > 0:
+        package = calc_package(globals)
+        name = resolve_name(name, package, level)
 
-    # Return cached modules for absolute imports. Relative imports are harder.
-    if level == 0 and (module := sys.modules.get(name, _MISSING)) is not _MISSING:
+    # FIXME: This check for cached modules is incomplete.
+    if (module := sys.modules.get(name, _MISSING)) is not _MISSING:
         return module
 
+    # Handle submodule imports if relevant top-level imports already happened.
+    if not fromlist and ("." in name):
+        base_name, *rest_name = name.split(".")
+        try:
+            parent = globals[base_name]
+        except KeyError:
+            pass
+        else:
+            # Nest the submodule proxies as needed.
+            # XXX: Mucking with a member of the passed-in globals within __import__ isn't ideal. Is there a better way?
+            #      Maybe via the instrumentation instead?
+            for i, sub_name in enumerate(rest_name, start=1):
+                if sub_name not in vars(parent):
+                    nested_name = ".".join((base_name, *rest_name[:i]))
+                    nested_proxy = DeferredImportProxy(nested_name, globals, locals, ("<<<",), level)
+                    setattr(parent, DeferredImportKey(sub_name, nested_proxy), nested_proxy)
+                    parent = nested_proxy
+
+            return globals[base_name]
+
     fromlist = fromlist if (fromlist is not None) else ()
-
-    base_name, *rest_name = name.split(".")
-    if not fromlist and len(rest_name) and (base_name in globals):
-        proxy = DeferredImportProxy(name, globals, locals, ("__name__",), level)
-        setattr(globals[name], DeferredImportKey(rest_name[0], proxy), proxy)
-
     return DeferredImportProxy(name, globals, locals, fromlist, level)
 
 
@@ -457,15 +494,13 @@ class DeferredImportError(ImportError):
 def install_defer_import_hook() -> None:
     """Insert deferred's path hook right before the default FileFinder one.
 
-    This can be called in a few places, e.g. __init__.py of your package, a .pth file in site-packages, etc.
+    This can be called in a few places, e.g. __init__.py of a package, a .pth file in site-packages, etc.
     """
 
     for i, hook in enumerate(sys.path_hooks):
         if "FileFinder.path_hook" in hook.__qualname__:
-            supported_file_loader = (DeferredImportFileLoader, importlib.machinery.SOURCE_SUFFIXES)
-            new_hook = importlib.machinery.FileFinder.path_hook(supported_file_loader)
-            new_hook.is_deferred_import_hook = True  # pyright: ignore # Runtime attribute assignment.
-            sys.path_hooks.insert(i, new_hook)
+            loader_details = (DeferredImportFileLoader, importlib.machinery.SOURCE_SUFFIXES)
+            sys.path_hooks.insert(i, DeferredImportFileFinder.path_hook(loader_details))
             sys.path_importer_cache.clear()
             return
 
@@ -474,7 +509,7 @@ def uninstall_defer_import_hook() -> None:
     """Remove deferred's path hook if it's in sys.path_hooks."""
 
     for i, hook in enumerate(sys.path_hooks):
-        if "FileFinder.path_hook" in hook.__qualname__ and getattr(hook, "is_deferred_import_hook", False):
+        if "DeferredImportFileFinder.path_hook" in hook.__qualname__:
             del sys.path_hooks[i]
             sys.path_importer_cache.clear()
             return
