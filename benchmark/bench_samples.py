@@ -48,7 +48,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.remove_pycache:
-        for relevant_dir in ("benchmark", "src", "tests"):
+        for relevant_dir in ("benchmark", "src"):
             for file in Path(relevant_dir).glob("**/__pycache__"):
                 shutil.rmtree(file)
 

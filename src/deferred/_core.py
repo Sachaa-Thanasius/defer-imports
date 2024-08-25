@@ -3,15 +3,14 @@ from __future__ import annotations
 import ast
 import builtins
 import contextvars
-import importlib.machinery
 import io
 import sys
 import tokenize
+from importlib.machinery import BYTECODE_SUFFIXES, SOURCE_SUFFIXES, FileFinder, PathFinder, SourceFileLoader
 
 from ._utils import (
     CodeType,
     Final,
-    HasLocationAttributes,
     ReadableBuffer,
     StrPath,
     calc_package,
@@ -28,7 +27,7 @@ BYTECODE_HEADER = b"deferred0.0.1"
 """Custom header for deferred-instrumented bytecode files. Should be updated with every version release."""
 
 
-class DeferredImportInstrumenter(ast.NodeTransformer):
+class DeferredInstrumenter(ast.NodeTransformer):
     """AST transformer that "instruments" imports within "with defer_imports_until_use: ..." blocks so that their
     results are assigned to custom keys in the global namespace.
     """
@@ -39,7 +38,7 @@ class DeferredImportInstrumenter(ast.NodeTransformer):
         self.encoding = encoding
         self.scope_depth = 0
 
-    def _visit_scope(self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda | ast.ClassDef) -> ast.AST:
+    def _visit_scope(self, node: ast.AST) -> ast.AST:
         """Track Python scope changes. Used to determine if defer_imports_until_use usage is valid."""
 
         self.scope_depth += 1
@@ -57,14 +56,12 @@ class DeferredImportInstrumenter(ast.NodeTransformer):
         newline_decoder = io.IncrementalNewlineDecoder(None, translate=True)
         return newline_decoder.decode(self.data.decode(self.encoding))  # pyright: ignore
 
-    def _get_node_context(self, node: HasLocationAttributes):  # noqa: ANN202
+    def _get_node_context(self, node: ast.stmt):  # noqa: ANN202
         """Get the location context for a node. That context will be used as an argument to SyntaxError."""
-
-        assert isinstance(node, ast.AST)
 
         text = ast.get_source_segment(self._decode_source(), node, padded=True)
         context = (self.filename, node.lineno, node.col_offset + 1, text)
-        if sys.version_info >= (3, 10):
+        if sys.version_info >= (3, 10):  # pragma: >=3.10 cover
             context += (node.end_lineno, node.end_col_offset + 1)
         return context
 
@@ -217,12 +214,15 @@ class DeferredImportInstrumenter(ast.NodeTransformer):
         return self.generic_visit(node)
 
 
-class DeferredImportFileLoader(importlib.machinery.SourceFileLoader):
+class DeferredFileLoader(SourceFileLoader):
     """A file loader that instruments modules that are using "with defer_imports_until_use: ..."."""
 
     @staticmethod
     def _check_for_defer_usage(data: ReadableBuffer) -> tuple[str, bool]:
         """Get the encoding of the code and also check if it uses "with defer_imports_until_use"."""
+
+        if not bool(data):
+            return "utf-8", False
 
         token_stream = tokenize.tokenize(io.BytesIO(data).readline)
         encoding = next(token_stream).string
@@ -249,7 +249,7 @@ class DeferredImportFileLoader(importlib.machinery.SourceFileLoader):
             # The default pathway for code that doesn't use defer_imports_until_use.
             return super().source_to_code(data, path, _optimize=_optimize)  # pyright: ignore
 
-        transformer = DeferredImportInstrumenter(str(path), data, encoding)
+        transformer = DeferredInstrumenter(str(path), data, encoding)
         instrumented_tree = ast.fix_missing_locations(transformer.visit(ast.parse(data, path, "exec")))
         return compile(instrumented_tree, path, "exec", dont_inherit=True, optimize=_optimize)
 
@@ -266,7 +266,7 @@ class DeferredImportFileLoader(importlib.machinery.SourceFileLoader):
 
         data = super().get_data(path)
 
-        if not path.endswith(tuple(importlib.machinery.BYTECODE_SUFFIXES)):
+        if not path.endswith(tuple(BYTECODE_SUFFIXES)):
             return data
 
         if not data.startswith(b"deferred"):
@@ -291,10 +291,14 @@ class DeferredImportFileLoader(importlib.machinery.SourceFileLoader):
         Source: https://gregoryszorc.com/blog/2017/03/13/from-__past__-import-bytes_literals/
         """
 
-        if path.endswith(tuple(importlib.machinery.BYTECODE_SUFFIXES)):
+        if path.endswith(tuple(BYTECODE_SUFFIXES)):
             data = BYTECODE_HEADER + data
 
         return super().set_data(path, data, _mode=_mode)
+
+
+loader_details = (DeferredFileLoader, SOURCE_SUFFIXES)
+DEFERRED_PATH_HOOK = FileFinder.path_hook(loader_details)
 
 
 # endregion
@@ -424,7 +428,7 @@ class DeferredImportKey(str):
         # NOTE: This is necessary to prevent recursive resolution for proxies, since __eq__ will be triggered again.
         _is_def_tok = is_deferred.set(True)
         try:
-            # TODO: Figure out why this works and del namespace[key] didn't.
+            # TODO: Figure out why this works and del namespace[key] doesn't.
             namespace[key] = namespace.pop(key)
         finally:
             is_deferred.reset(_is_def_tok)
@@ -450,11 +454,12 @@ def _deferred_import(  # noqa: ANN202
 
     # Attempt to return cached modules, but only if the requested import meets the following conditions:
     # 1. It isn't a "from" import.
-    #    - Doing fromlist checking/verification is out of scope.
+    #   - Doing fromlist checking/verification is out of scope.
     # 2. It isn't a submodule import.
-    #    - Checking that the submodule will be imported by the parent module (or doing that import ourselves) is out of scope.
+    #   - Checking that the submodule will be imported by the parent module (or doing that import ourselves) is out of
+    #     scope.
     # 3. It's an import that's only possible with normal import syntax (e.g. not "import .a").
-    #    - Direct use of __import__ within a defer_imports_until_use context is currently invalid.
+    #   - Directly using __import__ within a defer_imports_until_use context is currently invalid.
     #
     # Thus, the only imports that qualify are absolute, top-level, non-nested imports.
     if not fromlist and level == 0 and ("." not in name):
@@ -468,7 +473,7 @@ def _deferred_import(  # noqa: ANN202
         package = calc_package(locals)
         name = resolve_name(name, package, level)  # pyright: ignore [reportArgumentType]
 
-    # Handle submodule imports if relevant top-level imports already occured in the call site's module.
+    # Handle submodule imports if relevant top-level imports already occurred in the call site's module.
     if not fromlist and ("." in name):
         name_parts = name.split(".")
         try:
@@ -480,14 +485,17 @@ def _deferred_import(  # noqa: ANN202
             pass
         else:
             # Nest submodule proxies as needed.
-            # TODO: Mucking with a member of the passed-in locals isn't ideal. That's a major reason for the hybrid
-            #       instrumentation approach in the first place. Is there a better way or place?
+            # TODO: Modifying a member of the passed-in locals isn't ideal. Still better than modifying the locals
+            #       mapping directly, and avoiding *that* is a major reason for the hybrid instrumentation approach.
+            #       Still, is there a better way to do this or maybe a better place for it?
             for bound, attr_name in enumerate(name_parts[1:], start=2):
                 if attr_name not in vars(parent):
                     nested_proxy = DeferredImportProxy(".".join(name_parts[:bound]), globals, locals, (), level)
                     nested_proxy.defer_proxy_sub = attr_name
                     setattr(parent, attr_name, nested_proxy)
                     parent = nested_proxy
+                else:
+                    parent = getattr(parent, attr_name)
 
             return base_parent
 
@@ -506,36 +514,41 @@ def install_defer_import_hook() -> None:
     This can be called in a few places, e.g. __init__.py of a package, a .pth file in site-packages, etc.
     """
 
+    if DEFERRED_PATH_HOOK in sys.path_hooks:
+        return
+
+    # TODO: Consider all options for import cache invalidation. Some form of it is necessary because we went the
+    #       path_hooks route.
+    #       1)  sys.path_importer_cache.clear()
+    #           First attempt. Isn't enough; so much shit breaks as a result.
+    #       2)  importlib.invalidate_caches()
+    #           Works but might be overkill since it hits every meta path finder.
+    #       3)  PathFinder.invalidate_caches()
+    #           Also called by 2. Heavy as fuck because it imports importlib.metadata, but it's narrower in scope.
+    #       4)  inlining
+    #           Make a util function that mostly copies 3 except for the importlib.metadata part? It's a possible
+    #           middle ground between 3 and 1, but if the importlib.metadata invalidation is really necessary,
+    #           we might just have to pay the price.
+    #
+    # importlib.metadata is imported in almost all of the viable options, and it's too heavy to ignore. It
+    # imports >10 modules immediately, including inspect for goodness' sake.
     for i, hook in enumerate(sys.path_hooks):
         if hook.__qualname__.startswith("FileFinder.path_hook"):
-            loader_details = (DeferredImportFileLoader, importlib.machinery.SOURCE_SUFFIXES)
-            new_hook = importlib.machinery.FileFinder.path_hook(loader_details)
-            new_hook._is_deferred_path_hook = True  # pyright: ignore # Runtime attribute assignment.
-            sys.path_hooks.insert(i, new_hook)
-
-            # TODO: Consider all options for import cache invalidation. Some form of it is necessary.
-            #     1) sys.path_importer_cache.clear() - First attempt. Isn't enough, things break as a result.
-            #     2) importlib.invalidate_caches() - Works but might be overkill since it hits every meta path finder.
-            #     3) importlib.machinery.PathFinder.invalidate_caches() - Also called by 2. Heavy as fuck because it
-            #        imports importlib.metadata, but it's narrower in scope.
-            #     4) inlining - Make a util function that mostly copies 3 except for the importlib.metadata part?
-            #        Potentially a middle ground between 3 and 1, though if the importlib.metadata invalidation is
-            #        really necessary, we might just have to eat it.
-            #
-            # The cost of this is technically a one-time startup one, but it's still potentially hefty.
-            importlib.machinery.PathFinder.invalidate_caches()
+            sys.path_hooks.insert(i, DEFERRED_PATH_HOOK)
+            PathFinder.invalidate_caches()
             return
 
 
 def uninstall_defer_import_hook() -> None:
     """Remove deferred's path hook if it's in sys.path_hooks."""
 
-    for i, hook in enumerate(sys.path_hooks):
-        if hook.__qualname__.startswith("FileFinder.path_hook") and getattr(hook, "_is_deferred_path_hook", False):
-            del sys.path_hooks[i]
-            # TODO: See comment in install_defer_import_hook. Sync here.
-            importlib.machinery.PathFinder.invalidate_caches()
-            return
+    try:
+        sys.path_hooks.remove(DEFERRED_PATH_HOOK)
+    except ValueError:
+        pass
+    else:
+        # TODO: See comment in install_defer_import_hook. Sync here.
+        PathFinder.invalidate_caches()
 
 
 @final

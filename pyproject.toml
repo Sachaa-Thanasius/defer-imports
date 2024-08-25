@@ -38,7 +38,6 @@ Source = "https://github.com/Sachaa-Thanasius/deferred"
 [tool.hatch.build.targets.wheel]
 packages = ["src/deferred"]
 
-# NOTE: The last thing to fix.
 # [tool.hatch.build.targets.wheel.hooks.autorun]
 # # Install the import hook at startup to register deferred's finder.
 # dependencies = ["hatch-autorun"]
@@ -77,7 +76,7 @@ source = ["deferred", "tests"]
 
 [tool.coverage.report]
 # It's a work in progress.
-fail_under = 70
+fail_under = 85
 exclude_lines = ["^\\s*(?:el)?if TYPING:"]
 
 

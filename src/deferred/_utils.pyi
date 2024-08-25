@@ -11,11 +11,10 @@ __all__ = (
     "pairwise",
     "calc_package",
     "resolve_name",
-    "HasLocationAttributes",
 )
 
 from types import CodeType
-from typing import TYPE_CHECKING as TYPING, Final, Protocol, final
+from typing import TYPE_CHECKING as TYPING, Final, final
 
 from typing_extensions import Buffer as ReadableBuffer, TypeAlias
 
@@ -33,9 +32,3 @@ else:
 
 def calc_package(globals: dict[str, object]) -> str | None: ...  # noqa: A002
 def resolve_name(name: str, package: str, level: int) -> str: ...
-
-class HasLocationAttributes(Protocol):
-    lineno: int
-    col_offset: int
-    end_lineno: int | None
-    end_col_offset: int | None

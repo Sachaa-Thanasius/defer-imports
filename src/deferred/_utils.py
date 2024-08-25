@@ -14,7 +14,6 @@ __all__ = (
     "pairwise",
     "calc_package",
     "resolve_name",
-    "HasLocationAttributes",
 )
 
 TYPING = False
@@ -29,7 +28,7 @@ def final(f: object) -> object:
 
     try:
         f.__final__ = True  # pyright: ignore # Runtime attribute assignment
-    except (AttributeError, TypeError):
+    except (AttributeError, TypeError):  # pragma: no cover
         # Skip the attribute silently if it is not writable.
         # AttributeError: if the object has __slots__ or a read-only property
         # TypeError: if it's a builtin class
@@ -44,9 +43,9 @@ class Final:
 CodeType = type(final.__code__)
 
 
-if sys.version_info >= (3, 10):
+if sys.version_info >= (3, 10):  # pragma: >=3.10 cover
     from itertools import pairwise
-else:
+else:  # pragma: <3.10 cover
     from itertools import tee
 
     def pairwise(iterable) -> zip[tuple[object, object]]:
@@ -108,7 +107,3 @@ def resolve_name(name: str, package: str, level: int) -> str:
         raise ImportError(msg)
     base = bits[0]
     return f"{base}.{name}" if name else base
-
-
-class HasLocationAttributes:
-    """Placeholder for protocol representing an ast node's location attributes."""

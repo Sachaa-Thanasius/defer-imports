@@ -28,7 +28,7 @@ Features and Caveats
 
 - Python implementation–agnostic, in theory
 
-    - The only dependency is on globals() at module scope to maintain its current API: specifically, that its return value will be a read-through, *write-through*, dict-like view of the module globals
+    - The only dependency is on globals() at module scope to maintain its current API: specifically, that its return value will be a read-through, *write-through*, dict-like view of the module globals, and that locals() will return the same thing.
 
 - Not that slow, especially with support from bytecode caching
 - Doesn't support lazy importing in class or function scope
@@ -38,11 +38,7 @@ Features and Caveats
 Benchmarks
 ==========
 
-These are quite rough. At the moment, time to import is being measured with the following command, with variations for different module names (e.g. bench_slothy for ``slothy``):
-
-.. code:: sh
-
-    python -X importtime -c "import benchmark.bench_defer"
+The methodology is somewhat rough: at the moment, time to import is being measured with both the ``benchmark/bench_samples.py`` script (run with ``python -m benchmark.bench_samples``) and python's importtime command-line function (e.g. run with ``python -X importtime -c "import benchmark.sample_deferred``).
 
 
 TODO
@@ -64,7 +60,7 @@ TODO
             import importlib.abc
             import importlib.util
 
-    - One small problem: I don't know why it works, just some of how.
+    - One remaining problem: I don't know why it works, just some of how.
 
 - [ ] Add tests for the following:
 
@@ -74,17 +70,17 @@ TODO
     - [ ] Thread safety (see importlib.util.LazyLoader for reference?)
     - [ ] Other python implementations/platforms
 
-- [ ] Make this able to import the entire standard library, including all the subpackage imports uncommented (see benchmark/all_stdlib_modules.py)
+- [x] Make this able to import the entire standard library, including all the subpackage imports uncommented. UPDATE: See ``benchmark/sample_deferred.py``.
 - [ ] Make this be able to run on normal code. It currently breaks pip, readline, and who knows what else in the standard library, possibly because of the subpackage imports issue.
 
 
 Acknowledgements
 ================
 
-- This wouldn't have been possible without using PEP 690 and two other pieces of code as starting points.
+- Thanks to PEP 690 for pushing this feature and two pure-Python pieces of code for serving as starting points and references.
 
     - `PEP 690 <https://peps.python.org/pep-0690/>`_
     - `Jelle's lazy gist <https://gist.github.com/JelleZijlstra/23c01ceb35d1bc8f335128f59a32db4c>`_
-    - `slothy <https://github.com/bswck/slothy>`_ (also based on the previous gist)
+    - `slothy <https://github.com/bswck/slothy>`_ (based on the previous gist)
 
 - Thanks to Sinbad for the feedback and for unintentionally pushing me towards this approach.
