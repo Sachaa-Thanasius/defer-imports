@@ -1,5 +1,4 @@
 # pyright: reportUnusedImport=none
-# ruff: noqa
 import __future__
 
 import _bootlocale

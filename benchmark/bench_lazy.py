@@ -1,5 +1,4 @@
 # pyright: reportUnusedImport=none
-# ruff: noqa
 from deferred import defer_imports_until_use
 
 

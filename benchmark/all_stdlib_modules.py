@@ -1,5 +1,4 @@
 # pyright: reportUnusedImport=none
-# ruff: noqa
 # Source: https://gist.github.com/indygreg/be1c229fa41ced5c76d912f7073f9de6
 
 # from lazy import defer_imports_until_use

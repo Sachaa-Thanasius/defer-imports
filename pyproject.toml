@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "deferred"
 version = "0.0.1"
-description = "At implementing lazy imports in Python with compile-time and runtime import hooks."
+description = "Yet another attempt at implementing lazy imports in Python."
 requires-python = ">=3.9"
 license = "MIT"
 authors = [
@@ -27,8 +27,13 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-dev = ["typing-extensions"]
+dev = ["typing-extensions", "pytest", "coverage", "covdefaults"]
 benchmark = ["slothy"]
+
+[project.urls]
+Documentation = "https://github.com/Sachaa-Thanasius/deferred#readme"
+Issues = "https://github.com/Sachaa-Thanasius/deferred/issues"
+Source = "https://github.com/Sachaa-Thanasius/deferred"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/deferred"]
@@ -45,6 +50,35 @@ packages = ["src/deferred"]
 # else:
 #     deferred.install_defer_import_hook()
 # """
+
+
+# ---- Testing config
+
+[[tool.hatch.envs.hatch-test.matrix]]
+python = ["3.9", "3.10", "3.11", "3.12", "3.13"]
+
+[tool.hatch.envs.hatch-test]
+extra-dependencies = ["covdefaults"]
+
+[tool.pytest.ini_options]
+pythonpath = "src"
+addopts = [
+    # "--import-mode=importlib", # This breaks a few pytest features currently.
+    "--strict-markers",
+    "--strict-config",
+]
+
+[tool.coverage.paths]
+deferred = ["src"]
+
+[tool.coverage.run]
+plugins = ["covdefaults"]
+source = ["deferred", "tests"]
+
+[tool.coverage.report]
+# It's a work in progress.
+fail_under = 70
+exclude_lines = ["^\\s*(?:el)?if TYPING:"]
 
 
 # -------- Linting config
@@ -131,7 +165,7 @@ keep-runtime-typing = true
 [tool.ruff.lint.per-file-ignores]
 # ---- Package code
 "**/__init__.py" = [
-    # Ruff doesn't understand using wildcard imports to export names in a package.
+    # Ruff doesn't understand wildcard imports that export names from a package.
     "F403",
     "F405",
 ]
@@ -144,14 +178,14 @@ keep-runtime-typing = true
     "ANN202",
 ]
 # ---- Test code
-"tests/**/test_*.py" = [
+"tests/**/*.py" = [
     # Allow printing.
     "T201",
     "T203",
     # Allow fewer annotations.
     "ANN201",
 ]
-"tests/stdlib/**/test_*.py" = ["F401"]
+"benchmark/**/*.py" = ["F401", "ERA001"]
 
 
 # -------- Type-checking config

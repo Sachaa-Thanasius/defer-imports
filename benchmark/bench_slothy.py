@@ -1,5 +1,4 @@
 # pyright: reportUnusedImport=none
-# ruff: noqa
 from slothy import lazy_importing
 
 
