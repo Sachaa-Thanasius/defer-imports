@@ -593,8 +593,8 @@ with defer_imports_until_use:
     assert expected_importlib_repr not in repr(vars(module))
 
     # Test that the nested proxies carry over to the resolved importlib.
-    module_importlib_vars = vars(module.importlib)  # pyright: ignore [reportUnknownVariableType]
-    module_importlib_vars = cast(dict[str, object], module_importlib_vars)
+    module_importlib_vars = cast(dict[str, object], vars(module.importlib))
+
     assert expected_importlib_abc_repr in repr(module_importlib_vars)
     assert expected_importlib_util_repr in repr(module_importlib_vars)
 

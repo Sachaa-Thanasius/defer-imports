@@ -41,6 +41,12 @@ packages = ["src/deferred"]
 
 # ---- Testing config
 
+[[tool.hatch.envs.hatch-test.matrix]]
+python = ["3.9", "3.10", "3.11", "3.12", "3.13", "pypy3.9", "pypy3.10"]
+
+[tool.hatch.envs.hatch-test]
+extra-dependencies = ["covdefaults"]
+
 [tool.pytest.ini_options]
 pythonpath = "src"
 addopts = [

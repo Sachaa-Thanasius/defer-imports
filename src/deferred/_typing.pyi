@@ -10,6 +10,7 @@ __all__ = (
     "Final",
     "Generator",
     "Iterable",
+    "ModuleType",
     "Optional",
     "ReadableBuffer",
     "StrPath",
@@ -18,7 +19,7 @@ __all__ = (
 )
 
 from collections.abc import Generator, Iterable
-from types import CodeType
+from types import CodeType, ModuleType
 from typing import TYPE_CHECKING as TYPING, Any, Final, Optional, TypeVar, Union, final
 
 from typing_extensions import Buffer as ReadableBuffer

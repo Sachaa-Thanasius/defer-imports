@@ -469,12 +469,15 @@ class DeferredImportKey(str):
         proxy = self.defer_key_proxy
 
         # Perform the original __import__ and pray.
-        module = original_import.get()(*proxy.defer_proxy_import_args)
+        module: _tp.ModuleType = original_import.get()(*proxy.defer_proxy_import_args)
 
         # Transfer nested proxies over to the resolved module.
+        module_vars = vars(module)
         for attr_key, attr_val in vars(proxy).items():
             if isinstance(attr_val, DeferredImportProxy) and not hasattr(module, attr_key):
-                setattr(module, DeferredImportKey(attr_key, attr_val), attr_val)
+                # NOTE: This originally used setattr(), but I found that pypy normalizes the attr name to a str, losing
+                #       the DeferredImportKey properties.
+                module_vars[DeferredImportKey(attr_key, attr_val)] = attr_val
                 # Change the namespaces as well to make sure nested proxies are replaced in the right place.
                 attr_val.defer_proxy_global_ns = attr_val.defer_proxy_local_ns = vars(module)
 
