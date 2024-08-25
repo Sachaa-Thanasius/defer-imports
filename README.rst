@@ -66,12 +66,13 @@ TODO
 
     - [x] Relative imports
     - [x] Combinations of different import types
-    - [ ] Circular imports
+    - [x] Circular imports
     - [ ] Thread safety (see importlib.util.LazyLoader for reference?)
     - [ ] Other python implementations/platforms
 
 - [x] Make this able to import the entire standard library, including all the subpackage imports uncommented. UPDATE: See ``benchmark/sample_deferred.py``.
 - [x] Make this be able to run on normal code. It currently breaks pip, readline, and who knows what else in the standard library, possibly because of the subpackage imports issue.
+- [ ] Investigate remaining TODO comments in the code.
 
 
 Acknowledgements

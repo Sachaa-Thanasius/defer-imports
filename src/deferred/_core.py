@@ -45,6 +45,8 @@ class DeferredInstrumenter(ast.NodeTransformer):
         self.scope_depth = 0
 
     def transform(self) -> _tp.Any:
+        """Transform the tree created from the given data and filepath."""
+
         return self.visit(ast.parse(self.data, self.filepath, "exec"))
 
     def _visit_scope(self, node: ast.AST) -> ast.AST:
@@ -608,7 +610,7 @@ def install_defer_import_hook() -> None:
     if DEFERRED_PATH_HOOK in sys.path_hooks:
         return
 
-    # TODO: Consider all options for import cache invalidation. Some form of it is necessary because we went the
+    # TODO: Consider all options for finder cache invalidation. Some form of it is necessary because we went the
     #       sys.path_hooks route.
     #       1)  sys.path_importer_cache.clear() - Not enough. Everything breaks.
     #       2)  importlib.invalidate_caches() - Works, but might be overkill since it hits every meta path finder.
