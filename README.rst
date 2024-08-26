@@ -2,6 +2,16 @@
 deferred
 ========
 
+.. image:: https://img.shields.io/github/license/Sachaa-Thanasius/deferred.svg
+    :target: https://opensource.org/licenses/MIT
+    :alt: License: MIT
+.. image:: https://img.shields.io/badge/pyright-checked-informational.svg
+    :target: https://github.com/microsoft/pyright/
+    :alt: Pyright
+.. image:: https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json
+    :target: https://github.com/astral-sh/ruff
+    :alt: Ruff
+
 An pure-Python implementation of PEP 690–esque lazy imports, but at a user's behest within the ``defer_imports_until_use`` context manager.
 
 
@@ -68,7 +78,7 @@ TODO
     - [x] Combinations of different import types
     - [x] Circular imports
     - [ ] Thread safety (see importlib.util.LazyLoader for reference?)
-    - [ ] Other python implementations/platforms
+    - [x] Other python implementations/platforms
 
 - [x] Make this able to import the entire standard library, including all the subpackage imports uncommented. UPDATE: See ``benchmark/sample_deferred.py``.
 - [x] Make this be able to run on normal code. It currently breaks pip, readline, and who knows what else in the standard library, possibly because of the subpackage imports issue.
