@@ -516,9 +516,10 @@ def calc___package__(globals: dict[str, _tp.Any]) -> _tp.Optional[str]:
 
     package: str | None = globals.get("__package__")
     spec: ModuleSpec | None = globals.get("__spec__")
+
+    # TODO: Keep the warnings in sync with supported CPython versions.
     if package is not None:
         if spec is not None and package != spec.parent:
-            # TODO: Keep the warnings up to date with CPython.
             category = DeprecationWarning if sys.version_info >= (3, 12) else ImportWarning
             warnings.warn(
                 f"__package__ != __spec__.parent ({package!r} != {spec.parent!r})",
@@ -526,17 +527,19 @@ def calc___package__(globals: dict[str, _tp.Any]) -> _tp.Optional[str]:
                 stacklevel=3,
             )
         return package
-    elif spec is not None:
+
+    if spec is not None:
         return spec.parent
-    else:
-        warnings.warn(
-            "can't resolve package from __spec__ or __package__, falling back on __name__ and __path__",
-            ImportWarning,
-            stacklevel=3,
-        )
-        package = globals["__name__"]
-        if "__path__" not in globals:
-            package = package.rpartition(".")[0]  # pyright: ignore [reportOptionalMemberAccess]
+
+    warnings.warn(
+        "can't resolve package from __spec__ or __package__, falling back on __name__ and __path__",
+        ImportWarning,
+        stacklevel=3,
+    )
+    package = globals["__name__"]
+    if "__path__" not in globals:
+        package = package.rpartition(".")[0]  # pyright: ignore [reportOptionalMemberAccess]
+
     return package
 
 

@@ -29,7 +29,7 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-dev = ["typing-extensions", "pytest", "coverage", "covdefaults"]
+dev = ["pytest", "coverage", "covdefaults"]
 benchmark = ["slothy"]
 
 [project.urls]
@@ -133,12 +133,6 @@ extend-ignore = [
     "ISC001",
     "ISC002",
     # ---- Project-specific rules
-    # -- Readability
-    # Allow else and elif after return, raise, and continue.
-    "RET505",
-    "RET506",
-    "RET507",
-    "SIM108", # Don't shorten if-else to ternary.
 ]
 unfixable = [
     "ERA", # Prevent unlikely erroneous deletion.
@@ -159,9 +153,7 @@ keep-runtime-typing = true
     "F405",
 ]
 "src/deferred/**/*.py" = [
-    # Allow some builtin name shadowing.
-    "A001",
-    "A002",
+    "A002", # Allow some shadowing of builtins by parameter names.
 ]
 # ---- Test code
 "tests/**/*.py" = [
@@ -170,7 +162,10 @@ keep-runtime-typing = true
     "ANN201", # Don't need return annotations for tests.
     "S102",   # exec is used to test for NameError within a module's namespace.
 ]
-"benchmark/**/*.py" = ["F401", "ERA001"]
+"benchmark/**/*.py" = [
+    "F401",   # Allow unused imports; we're testing import speed.
+    "ERA001", # Allow commented code.
+]
 
 
 # -------- Type-checking config
