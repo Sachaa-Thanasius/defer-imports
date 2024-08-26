@@ -16,7 +16,7 @@ deferred
     :target: https://github.com/astral-sh/ruff
     :alt: Ruff
 
-An pure-Python implementation of PEP 690–esque lazy imports, but at a user's behest within the ``defer_imports_until_use`` context manager.
+An pure-Python implementation of PEP 690–esque lazy imports, but at a user's behest within a ``defer_imports_until_use`` context manager.
 
 
 Installation
@@ -29,6 +29,32 @@ This can be installed via pip:
 .. code:: sh
 
     python -m pip install git@https://github.com/Sachaa-Thanasius/deferred
+
+
+Example
+=======
+
+.. code:: python
+
+    from deferred import defer_imports_until_use
+
+    with defer_imports_until_use:
+        import inspect
+        from typing import TypeVar
+
+    # inspect and TypeVar won't be imported until referenced.
+    # For imports that are only used for annotations, this import cost can be avoided entirely by making sure all annotations are strings.
+
+
+Setup
+=====
+deferred hooks into the Python import system with a path hook. That path hook needs to be registered before code using ``defer_imports_until_use`` is executed. To do that, include the following somewhere such that it will be executed before your code:
+
+.. code:: python
+
+    import deferred
+
+    deferred.install_defer_import_hook()
 
 
 Documentation
@@ -53,6 +79,12 @@ Benchmarks
 ==========
 
 The methodology is somewhat rough: at the moment, time to import is being measured with both the ``benchmark/bench_samples.py`` script (run with ``python -m benchmark.bench_samples``) and python's importtime command-line function (e.g. run with ``python -X importtime -c "import deferred``).
+
+
+Why?
+====
+
+I wasn't satisfied with the state of lazy imports in Python and wanted to put my own spin on it.
 
 
 TODO
