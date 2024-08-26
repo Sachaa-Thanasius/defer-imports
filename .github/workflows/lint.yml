@@ -29,7 +29,7 @@ jobs:
       matrix:
         python-version: [ '3.9', '3.10', '3.11', '3.12', '3.13' ]
 
-    name: check ${{ matrix.python-version }}
+    name: Pyright - ${{ matrix.python-version }}
     steps:
       - uses: actions/checkout@v4
         with:

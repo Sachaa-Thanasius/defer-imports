@@ -19,7 +19,7 @@ jobs:
         python-version: [ '3.9', '3.10', '3.11', '3.12', '3.13', 'pypy-3.9', 'pypy-3.10' ]
         os: [ubuntu-latest, macOS-latest, windows-latest]
 
-    name: check ${{ matrix.python-version }} on ${{ matrix.os }}
+    name: Tests - ${{ matrix.python-version }} - ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
         with:
