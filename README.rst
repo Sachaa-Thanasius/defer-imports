@@ -42,15 +42,13 @@ Example
         import inspect
         from typing import TypeVar
 
-    # inspect and TypeVar won't be imported until referenced.
-    # For imports that are only used for annotations,
-    # this import cost can be avoided entirely by making sure
-    # all annotations are strings.
+    # inspect and TypeVar won't be imported until referenced. For imports that are only used for annotations,
+    # this import cost can be avoided entirely by making sure all annotations are strings.
 
 
 Setup
 =====
-deferred hooks into the Python import system with a path hook. That path hook needs to be registered before code using ``defer_imports_until_use`` is executed. To do that, include the following somewhere such that it will be executed before your code:
+``deferred`` hooks into the Python import system with a path hook. That path hook needs to be registered before code using ``defer_imports_until_use`` is executed. To do that, include the following somewhere such that it will be executed before your code:
 
 .. code:: python
 
@@ -86,41 +84,7 @@ The methodology is somewhat rough: at the moment, time to import is being measur
 Why?
 ====
 
-I wasn't satisfied with the state of lazy imports in Python and wanted to put my own spin on it.
-
-
-TODO
-====
-
--   [x] Investigate if this package would benefit from a custom optimization suffix for bytecode. UPDATE: Added in a different way without monkeypatching, thanks to `this blog post <https://gregoryszorc.com/blog/2017/03/13/from-__past__-import-bytes_literals/>`_.
-
-    -   Signs point to yes, but I'm not a fan of the monkeypatching seemingly involved, nor of having to import ``importlib.util``.
-    -   See beartype and its justification `for <https://github.com/beartype/beartype/blob/e9eeb4e282f438e770520b99deadbe219a1c62dc/beartype/claw/_importlib/_clawimpload.py#L177-L312>`_ `this <https://github.com/beartype/beartype/blob/e9eeb4e282f438e770520b99deadbe219a1c62dc/beartype/claw/_importlib/clawimpcache.py#L22-L26>`_.
-
--   [x] Fix subpackage imports being broken if done within ``defer_imports_until_use`` like this:
-
-    .. code:: python
-
-        from deferred import defer_imports_until_use
-
-        with defer_imports_until_use:
-            import importlib
-            import importlib.abc
-            import importlib.util
-
-    -   One remaining problem: I don't know why it works, just some of how.
-
--   [ ] Add tests for the following:
-
-    -   [x] Relative imports
-    -   [x] Combinations of different import types
-    -   [x] Circular imports
-    -   [ ] Thread safety (see importlib.util.LazyLoader for reference?)
-    -   [x] Other python implementations/platforms
-
--   [x] Make this able to import the entire standard library, including all the subpackage imports uncommented. UPDATE: See ``benchmark/sample_deferred.py``.
--   [x] Make this be able to run on normal code. It currently breaks pip, readline, and who knows what else in the standard library, possibly because of the subpackage imports issue.
--   [ ] Investigate remaining TODO comments in the code.
+I wasn't satisfied with the state of lazy imports in Python and wanted to put my own spin on it while avoiding CPython implementation details as much as possible.
 
 
 Acknowledgements

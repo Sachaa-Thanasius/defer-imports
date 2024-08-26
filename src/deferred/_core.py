@@ -84,7 +84,7 @@ class DeferredInstrumenter(ast.NodeTransformer):
         if "." in name:
             name = name.partition(".")[0]
 
-        # NOTE: Creating the AST directly is also an option, but this felt more maintainable.
+        # NOTE: Creating the AST directly is also an option, but this feels more maintainable.
         if_tree = ast.parse(
             f"if type({name}) is DeferredImportProxy:\n"
             f"    temp_proxy = local_ns.pop('{name}')\n"

@@ -1,6 +1,7 @@
 from pathlib import Path
 
 
+# Mostly sourced from https://gist.github.com/indygreg/be1c229fa41ced5c76d912f7073f9de6.
 STDLIB_IMPORTS = """\
 import __future__
 
@@ -534,8 +535,9 @@ import zipfile
 import test
 """
 
-
-INDENTED_STDLIB_IMPORTS = "".join((f"    {line}" if line.strip() else line) for line in STDLIB_IMPORTS.splitlines(True))
+INDENTED_STDLIB_IMPORTS = "".join(
+    (f"    {line}" if line.strip() else line) for line in STDLIB_IMPORTS.splitlines(keepends=True)
+)
 PYRIGHT_IGNORE_DIRECTIVES = "# pyright: reportUnusedImport=none, reportMissingTypeStubs=none"
 
 
