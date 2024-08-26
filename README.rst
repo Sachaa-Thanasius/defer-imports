@@ -2,13 +2,17 @@
 deferred
 ========
 
-.. image:: https://img.shields.io/github/license/Sachaa-Thanasius/deferred.svg
+|License| |Pyright| |Ruff|
+
+.. |License| image:: https://img.shields.io/github/license/Sachaa-Thanasius/deferred.svg
     :target: https://opensource.org/licenses/MIT
     :alt: License: MIT
-.. image:: https://img.shields.io/badge/pyright-checked-informational.svg
+
+.. |Pyright| image:: https://img.shields.io/badge/pyright-checked-informational.svg
     :target: https://github.com/microsoft/pyright/
     :alt: Pyright
-.. image:: https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json
+
+.. |Ruff| image:: https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json
     :target: https://github.com/astral-sh/ruff
     :alt: Ruff
 
