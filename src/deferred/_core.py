@@ -44,10 +44,10 @@ class DeferredInstrumenter(ast.NodeTransformer):
         self.encoding = encoding
         self.scope_depth = 0
 
-    def transform(self) -> _tp.Any:
+    def instrument(self) -> _tp.Any:
         """Transform the tree created from the given data and filepath."""
 
-        return self.visit(ast.parse(self.data, self.filepath, "exec"))
+        return ast.fix_missing_locations(self.visit(ast.parse(self.data, self.filepath, "exec")))
 
     def _visit_scope(self, node: ast.AST) -> ast.AST:
         """Track Python scope changes. Used to determine if defer_imports_until_use usage is valid."""
@@ -138,16 +138,16 @@ class DeferredInstrumenter(ast.NodeTransformer):
         new_import_nodes: list[ast.stmt] = list(import_nodes)
 
         for i in range(len(import_nodes) - 1, -1, -1):
-            sub_node = import_nodes[i]
+            node = import_nodes[i]
 
-            if not isinstance(sub_node, (ast.Import, ast.ImportFrom)):
+            if not isinstance(node, (ast.Import, ast.ImportFrom)):
                 msg = "with defer_imports_until_use blocks must only contain import statements"
-                raise SyntaxError(msg, self._get_node_context(sub_node))  # noqa: TRY004
+                raise SyntaxError(msg, self._get_node_context(node))  # noqa: TRY004
 
-            for alias in sub_node.names:
+            for alias in node.names:
                 if alias.name == "*":
                     msg = "import * not allowed in with defer_imports_until_use blocks"
-                    raise SyntaxError(msg, self._get_node_context(sub_node))
+                    raise SyntaxError(msg, self._get_node_context(node))
 
                 new_import_nodes.insert(i + 1, self._create_import_name_replacement(alias.asname or alias.name))
 
@@ -240,7 +240,7 @@ class DeferredInstrumenter(ast.NodeTransformer):
         return self.generic_visit(node)
 
 
-def _match_token(token: tokenize.TokenInfo, **kwargs: object) -> bool:
+def match_token(token: tokenize.TokenInfo, **kwargs: object) -> bool:
     """Check if a given token's attributes match the given kwargs."""
 
     return all(getattr(token, name) == val for name, val in kwargs.items())
@@ -267,29 +267,30 @@ def sliding_window(iterable: _tp.Iterable[_tp.T], n: int) -> _tp.Iterable[tuple[
 class DeferredFileLoader(SourceFileLoader):
     """A file loader that instruments .py files which use "with defer_imports_until_use: ..."."""
 
-    @classmethod
-    def _check_source_for_defer_usage(cls, data: _tp.ReadableBuffer) -> tuple[str, bool]:
-        """Get the encoding of the code and also check if it uses "with defer_imports_until_use"."""
+    @staticmethod
+    def check_source_for_defer_usage(data: _tp.ReadableBuffer) -> tuple[str, bool]:
+        """Get the encoding of the given code and also check if it uses "with defer_imports_until_use"."""
 
         tok_NAME, tok_OP = tokenize.NAME, tokenize.OP
 
         token_stream = tokenize.tokenize(io.BytesIO(data).readline)
         encoding = next(token_stream).string
         uses_defer = any(
-            _match_token(tok1, type=tok_NAME, string="with")
+            match_token(tok1, type=tok_NAME, string="with")
             and (
                 (
-                    _match_token(tok2, type=tok_NAME, string="defer_imports_until_use")
-                    and _match_token(tok3, type=tok_OP, string=":")
+                    match_token(tok2, type=tok_NAME, string="defer_imports_until_use")
+                    and match_token(tok3, type=tok_OP, string=":")
                 )
                 or (
-                    _match_token(tok2, type=tok_NAME, string="deferred")
-                    and _match_token(tok3, type=tok_OP, string=".")
-                    and _match_token(tok4, type=tok_NAME, string="defer_imports_until_use")
+                    match_token(tok2, type=tok_NAME, string="deferred")
+                    and match_token(tok3, type=tok_OP, string=".")
+                    and match_token(tok4, type=tok_NAME, string="defer_imports_until_use")
                 )
             )
             for tok1, tok2, tok3, tok4 in sliding_window(token_stream, 4)
         )
+
         return encoding, uses_defer
 
     def source_to_code(  # pyright: ignore [reportIncompatibleMethodOverride]
@@ -306,23 +307,29 @@ class DeferredFileLoader(SourceFileLoader):
         if not data:
             return super().source_to_code(data, path, _optimize=_optimize)  # pyright: ignore # See note above.
 
-        encoding, uses_defer = self._check_source_for_defer_usage(data)
+        encoding, uses_defer = self.check_source_for_defer_usage(data)
         if not uses_defer:
             return super().source_to_code(data, path, _optimize=_optimize)  # pyright: ignore # See note above.
 
-        instrumenter = DeferredInstrumenter(path, data, encoding)
-        instrumented_tree = ast.fix_missing_locations(instrumenter.transform())
-        return compile(instrumented_tree, path, "exec", dont_inherit=True, optimize=_optimize)
+        tree = DeferredInstrumenter(path, data, encoding).instrument()
+        return compile(tree, path, "exec", dont_inherit=True, optimize=_optimize)
 
     def get_data(self, path: str) -> bytes:
         """Return the data from path as raw bytes.
 
         Notes
         -----
-        If the path points to a bytecode file, check for a deferred-specific header. If the header is invalid, raising
-        OSError will invalidate the bytecode.
+        If the path points to a bytecode file, check for a deferred-specific header. If the header is invalid, raise
+        OSError to invalidate the bytecode; importlib._boostrap_external.SourceLoader.get_code expects this [1]_.
 
-        Source: https://gregoryszorc.com/blog/2017/03/13/from-__past__-import-bytes_literals/
+        Another option is to monkeypatch importlib.util.cache_from_source, as beartype [2]_ and typeguard [3]_ do, but that seems
+        less safe.
+
+        References
+        ----------
+        .. [1] https://gregoryszorc.com/blog/2017/03/13/from-__past__-import-bytes_literals/
+        .. [2] https://github.com/beartype/beartype/blob/e9eeb4e282f438e770520b99deadbe219a1c62dc/beartype/claw/_importlib/_clawimpload.py#L177-L312
+        .. [3] https://github.com/beartype/beartype/blob/e9eeb4e282f438e770520b99deadbe219a1c62dc/beartype/claw/_importlib/clawimpcache.py#L22-L26
         """
 
         data = super().get_data(path)
@@ -346,10 +353,11 @@ class DeferredFileLoader(SourceFileLoader):
         Notes
         -----
         If the file is a bytecode one, prepend a deferred-specific header to it. That way, instrumented bytecode can be
-        identified and invalidated it if necessary. Another option is to monkeypatch importlib.util.cache_from_source,
-        as beartype and typeguard do, but that seems less safe.
+        identified and invalidated later if necessary [1]_.
 
-        Source: https://gregoryszorc.com/blog/2017/03/13/from-__past__-import-bytes_literals/
+        References
+        ----------
+        .. [1] https://gregoryszorc.com/blog/2017/03/13/from-__past__-import-bytes_literals/
         """
 
         if path.endswith(tuple(BYTECODE_SUFFIXES)):
