@@ -2,7 +2,7 @@
 deferred
 ========
 
-|License| |Pyright| |Ruff| |pre-commit|
+|License|  |Pyright|  |Ruff|  |pre-commit|
 
 .. |License| image:: https://img.shields.io/github/license/Sachaa-Thanasius/deferred.svg
     :target: https://opensource.org/licenses/MIT
