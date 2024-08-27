@@ -2,7 +2,7 @@
 deferred
 ========
 
-|License|  |Pyright|  |Ruff|  |pre-commit|
+|License| |Pyright| |Ruff| |pre-commit|
 
 .. |License| image:: https://img.shields.io/github/license/Sachaa-Thanasius/deferred.svg
     :target: https://opensource.org/licenses/MIT
@@ -10,11 +10,11 @@ deferred
 
 .. |Pyright| image:: https://img.shields.io/badge/pyright-checked-informational.svg
     :target: https://github.com/microsoft/pyright/
-    :alt: Pyright
+    :alt: Type-checker: Pyright
 
 .. |Ruff| image:: https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json
     :target: https://github.com/astral-sh/ruff
-    :alt: Ruff
+    :alt: Linter and Formatter: Ruff
 
 .. |pre-commit| image:: https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit
     :target: https://github.com/pre-commit/pre-commit
@@ -82,22 +82,25 @@ Features and Caveats
 Benchmarks
 ==========
 
-The methodology is somewhat rough: at the moment, time to import is being measured with both the ``benchmark/bench_samples.py`` script (run with ``python -m benchmark.bench_samples``) and python's importtime command-line function (e.g. run with ``python -X importtime -c "import deferred"``).
+There are two ways of measuring activation and/or import time currently:
+
+-   ``python -m benchmark.bench_samples`` (run with ``--help`` to see more information)
+-   ``python -X importtime -c "import deferred"`` (substitute ``deferred`` with other modules, e.g. ``slothy``, to compare)
 
 
 Why?
 ====
 
-I wasn't satisfied with the state of lazy imports in Python and wanted to put my own spin on it while avoiding CPython implementation details as much as possible.
+Lazy imports, in theory, alleviate several pain points that Python has currently. I'm not alone in thinking that; `PEP 690 <https://peps.python.org/pep-0690/>`_ was put forth to integrate lazy imports into the language for that reason and explains the benefits much better than I can. While that was rejected, there are other options in the form of third-party libraries that implement lazy importing with some constraints. Most do not have an API that is as general and ergonomic as what PEP 690 laid out, but they didn't aim to fill those shoes in the first place (e.g. `demandimport <https://github.com/bwesterb/py-demandimport>`_, `apipkg <https://github.com/pytest-dev/apipkg>`_, `modutil <https://github.com/brettcannon/modutil>`_, `SPEC 1 <https://scientific-python.org/specs/spec-0001/>`_, and more).
+
+Then along came `slothy <https://github.com/bswck/slothy>`_, a library that does it better, having been constructed with feedback from multiple CPython core developers as well as one of the minds behind PEP 690. Its core concept is powerful, and it's the main inspiration for this project. However, the library also ties itself to specific Python runtimees by depending on the existence of frames. While that's fine — PEP 690 was for CPython, after all — I thought, after discussion with and feedback from others, that there was a way that could be less implementation dependent, more "pure", and thus might be more maintainable in the long run. Thus, ``deferred``.
 
 
 Acknowledgements
 ================
 
--   Thanks to PEP 690 for pushing this feature and two pure-Python pieces of code for serving as starting points and references.
-
-    -   `PEP 690 <https://peps.python.org/pep-0690/>`_
-    -   `Jelle's lazy gist <https://gist.github.com/JelleZijlstra/23c01ceb35d1bc8f335128f59a32db4c>`_
-    -   `slothy <https://github.com/bswck/slothy>`_ (based on the previous gist)
-
--   Thanks to Sinbad for the feedback and for unintentionally pushing me towards this approach.
+-   `PEP 690 <https://peps.python.org/pep-0690/>`_, for pushing this feature to the point of almost being accepted as a fundamental part of CPython
+-   Jelle Zijlstra, for so easily creating the core concept that ``slothy`` and now ``deferred`` rely on and sharing it in a `gist <https://gist.github.com/JelleZijlstra/23c01ceb35d1bc8f335128f59a32db4c>`_.
+-   `slothy <https://github.com/bswck/slothy>`_, for making something great with that concept.
+-   All the packages mentioned in "Why" above, for filling people's needs and laying the groundwork for what's come.
+-   Sinbad, for the feedback and for pushing me towards a hybrid approach.

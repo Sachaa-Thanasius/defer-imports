@@ -67,7 +67,7 @@ class DeferredInstrumenter(ast.NodeTransformer):
         newline_decoder = io.IncrementalNewlineDecoder(None, translate=True)
         return newline_decoder.decode(self.data.decode(self.encoding))  # pyright: ignore
 
-    def _get_node_context(self, node: ast.stmt):  # noqa: ANN202 # Return annotation is verbose and version-dependent.
+    def _get_node_context(self, node: ast.stmt):  # noqa: ANN202 # Version-dependent and too verbose.
         """Get the location context for a node. That context will be used as an argument to SyntaxError."""
 
         text = ast.get_source_segment(self._decode_source(), node, padded=True)
@@ -586,16 +586,14 @@ def deferred___import__(  # noqa: ANN202
         name_parts = name.split(".")
         try:
             # TODO: Consider adding a condition that base_parent must be a ModuleType or a DeferredImportProxy, to
-            #       avoid attaching proxies to a random thing that would've normally been clobbered by the import
-            #       first?
+            #       avoid attaching proxies to a random thing that would've normally been clobbered by the import?
             base_parent = parent = locals[name_parts[0]]
         except KeyError:
             pass
         else:
             # Nest submodule proxies as needed.
-            # TODO: Modifying a member of the passed-in locals isn't ideal. Still better than modifying the locals
-            #       mapping directly, and avoiding *that* is a major reason for the hybrid instrumentation approach.
-            #       Still, is there a better way to do this or maybe a better place for it?
+            # TODO: Is there a better way to do this or maybe a better place for it? Modifying a member of the
+            #       passed-in locals isn't ideal.
             for bound, attr_name in enumerate(name_parts[1:], start=2):
                 if attr_name not in vars(parent):
                     nested_proxy = DeferredImportProxy(".".join(name_parts[:bound]), globals, locals, (), level)
