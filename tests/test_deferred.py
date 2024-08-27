@@ -14,7 +14,7 @@ import sys
 import tokenize
 from pathlib import Path
 from types import ModuleType
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -41,11 +41,11 @@ def create_sample_module(path: Path, source: str, loader_type: type):
     assert spec
     module = importlib.util.module_from_spec(spec)
 
-    return spec, module
+    return spec, module, module_path
 
 
 @contextlib.contextmanager
-def temporary_sys_modules_entry(name: str, module: ModuleType):
+def temp_cache_module(name: str, module: ModuleType):
     """Add a module to sys.modules and then attempt to remove it on exit."""
 
     sys.modules[name] = module
@@ -232,15 +232,15 @@ def test_path_hook_installation():
 def test_empty(tmp_path: Path):
     source = ""
 
-    spec, module = create_sample_module(tmp_path, source, DeferredFileLoader)
+    spec, module, _ = create_sample_module(tmp_path, source, DeferredFileLoader)
     assert spec.loader
     spec.loader.exec_module(module)
 
 
-def test_noninstrumented(tmp_path: Path):
+def test_not_deferred(tmp_path: Path):
     source = "import contextlib"
 
-    spec, module = create_sample_module(tmp_path, source, DeferredFileLoader)
+    spec, module, _ = create_sample_module(tmp_path, source, DeferredFileLoader)
     assert spec.loader
     spec.loader.exec_module(module)
     assert module.contextlib is sys.modules["contextlib"]
@@ -254,7 +254,7 @@ with defer_imports_until_use:
     import inspect
 """
 
-    spec, module = create_sample_module(tmp_path, source, DeferredFileLoader)
+    spec, module, _ = create_sample_module(tmp_path, source, DeferredFileLoader)
     assert spec.loader
     spec.loader.exec_module(module)
 
@@ -278,7 +278,7 @@ with defer_imports_until_use:
     import inspect as gin
 """
 
-    spec, module = create_sample_module(tmp_path, source, DeferredFileLoader)
+    spec, module, _ = create_sample_module(tmp_path, source, DeferredFileLoader)
     assert spec.loader
     spec.loader.exec_module(module)
 
@@ -311,7 +311,7 @@ with defer_imports_until_use:
     import importlib.abc
 """
 
-    spec, module = create_sample_module(tmp_path, source, DeferredFileLoader)
+    spec, module, _ = create_sample_module(tmp_path, source, DeferredFileLoader)
     assert spec.loader
     spec.loader.exec_module(module)
 
@@ -333,7 +333,7 @@ with defer_imports_until_use:
     import collections.abc as xyz
 """
 
-    spec, module = create_sample_module(tmp_path, source, DeferredFileLoader)
+    spec, module, _ = create_sample_module(tmp_path, source, DeferredFileLoader)
     assert spec.loader
     spec.loader.exec_module(module)
 
@@ -382,7 +382,7 @@ with defer_imports_until_use:
     from inspect import isfunction, signature
 """
 
-    spec, module = create_sample_module(tmp_path, source, DeferredFileLoader)
+    spec, module, _ = create_sample_module(tmp_path, source, DeferredFileLoader)
     assert spec.loader
     spec.loader.exec_module(module)
 
@@ -413,7 +413,7 @@ with defer_imports_until_use:
     from inspect import Signature as MySignature
 """
 
-    spec, module = create_sample_module(tmp_path, source, DeferredFileLoader)
+    spec, module, _ = create_sample_module(tmp_path, source, DeferredFileLoader)
     assert spec.loader
     spec.loader.exec_module(module)
 
@@ -440,25 +440,13 @@ with defer_imports_until_use:
     print("Hello world")
 """
 
-    # Boilerplate to dynamically create and load this module.
-    tmp_file = tmp_path / "sample.py"
-    tmp_file.write_text(source, encoding="utf-8")
-
-    module_name = "sample"
-    path = tmp_file.resolve()
-
-    loader = DeferredFileLoader(module_name, str(path))
-    spec = importlib.util.spec_from_file_location(module_name, path, loader=loader)
-
-    assert spec
+    spec, module, module_path = create_sample_module(tmp_path, source, DeferredFileLoader)
     assert spec.loader
-
-    module = importlib.util.module_from_spec(spec)
 
     with pytest.raises(SyntaxError) as exc_info:
         spec.loader.exec_module(module)
 
-    assert exc_info.value.filename == str(path)
+    assert exc_info.value.filename == str(module_path)
     assert exc_info.value.lineno == 4
     assert exc_info.value.offset == 5
     assert exc_info.value.text == 'print("Hello world")'
@@ -474,24 +462,13 @@ class Example:
 """
 
     # Boilerplate to dynamically create and load this module.
-    tmp_file = tmp_path / "sample.py"
-    tmp_file.write_text(source, encoding="utf-8")
-
-    module_name = "sample"
-    path = tmp_file.resolve()
-
-    loader = DeferredFileLoader(module_name, str(path))
-    spec = importlib.util.spec_from_file_location(module_name, path, loader=loader)
-
-    assert spec
+    spec, module, module_path = create_sample_module(tmp_path, source, DeferredFileLoader)
     assert spec.loader
-
-    module = importlib.util.module_from_spec(spec)
 
     with pytest.raises(SyntaxError) as exc_info:
         spec.loader.exec_module(module)
 
-    assert exc_info.value.filename == str(path)
+    assert exc_info.value.filename == str(module_path)
     assert exc_info.value.lineno == 4
     assert exc_info.value.offset == 5
     assert exc_info.value.text == "    with defer_imports_until_use:\n        from inspect import signature"
@@ -508,25 +485,13 @@ def test():
     return inspect.signature(test)
 """
 
-    # Boilerplate to dynamically create and load this module.
-    tmp_file = tmp_path / "sample.py"
-    tmp_file.write_text(source, encoding="utf-8")
-
-    module_name = "sample"
-    path = tmp_file.resolve()
-
-    loader = DeferredFileLoader(module_name, str(path))
-    spec = importlib.util.spec_from_file_location(module_name, path, loader=loader)
-
-    assert spec
+    spec, module, module_path = create_sample_module(tmp_path, source, DeferredFileLoader)
     assert spec.loader
-
-    module = importlib.util.module_from_spec(spec)
 
     with pytest.raises(SyntaxError) as exc_info:
         spec.loader.exec_module(module)
 
-    assert exc_info.value.filename == str(path)
+    assert exc_info.value.filename == str(module_path)
     assert exc_info.value.lineno == 4
     assert exc_info.value.offset == 5
     assert exc_info.value.text == "    with defer_imports_until_use:\n        import inspect"
@@ -540,25 +505,13 @@ with defer_imports_until_use:
     from typing import *
 """
 
-    # Boilerplate to dynamically create and load this module.
-    tmp_file = tmp_path / "sample.py"
-    tmp_file.write_text(source, encoding="utf-8")
-
-    module_name = "sample"
-    path = tmp_file.resolve()
-
-    loader = DeferredFileLoader(module_name, str(path))
-    spec = importlib.util.spec_from_file_location(module_name, path, loader=loader)
-
-    assert spec
+    spec, module, module_path = create_sample_module(tmp_path, source, DeferredFileLoader)
     assert spec.loader
-
-    module = importlib.util.module_from_spec(spec)
 
     with pytest.raises(SyntaxError) as exc_info:
         spec.loader.exec_module(module)
 
-    assert exc_info.value.filename == str(path)
+    assert exc_info.value.filename == str(module_path)
     assert exc_info.value.lineno == 4
     assert exc_info.value.offset == 5
     assert exc_info.value.text == "from typing import *"
@@ -573,7 +526,7 @@ with defer_imports_until_use:
     import importlib.abc
     import importlib.util
 """
-    spec, module = create_sample_module(tmp_path, source, DeferredFileLoader)
+    spec, module, _ = create_sample_module(tmp_path, source, DeferredFileLoader)
     assert spec.loader
     spec.loader.exec_module(module)
 
@@ -623,7 +576,7 @@ with defer_imports_until_use:
     import asyncio.events
 """
 
-    spec, module = create_sample_module(tmp_path, source, DeferredFileLoader)
+    spec, module, _ = create_sample_module(tmp_path, source, DeferredFileLoader)
     assert spec.loader
     spec.loader.exec_module(module)
 
@@ -638,7 +591,7 @@ with defer_imports_until_use:
     from asyncio import base_futures
 """
 
-    spec, module = create_sample_module(tmp_path, source, DeferredFileLoader)
+    spec, module, _ = create_sample_module(tmp_path, source, DeferredFileLoader)
     assert spec.loader
     spec.loader.exec_module(module)
 
@@ -673,7 +626,7 @@ with defer_imports_until_use:
     assert expected_asyncio_repr not in repr(vars(module))
 
 
-def test_relative_imports_1(tmp_path: Path):
+def test_relative_imports(tmp_path: Path):
     """Test a synthetic package that uses relative imports within defer_imports_until_use blocks.
 
     The package has the following structure:
@@ -726,7 +679,7 @@ class B:
 
     module = importlib.util.module_from_spec(spec)
 
-    with temporary_sys_modules_entry(package_name, module):
+    with temp_cache_module(package_name, module):
         spec.loader.exec_module(module)
 
         module_locals_repr = repr(vars(module))
@@ -805,11 +758,51 @@ def Y2():
 
     module = importlib.util.module_from_spec(spec)
 
-    with temporary_sys_modules_entry(package_name, module):
+    with temp_cache_module(package_name, module):
         spec.loader.exec_module(module)
 
         assert module
 
 
-def test_thread_safety():
-    """TODO"""
+def test_thread_safety(tmp_path: Path):
+    """Test if trying to access a lazily loaded import from multiple threads causes race conditions."""
+
+    source = """\
+from deferred import defer_imports_until_use
+
+with defer_imports_until_use:
+    import inspect
+"""
+
+    spec, module, _ = create_sample_module(tmp_path, source, DeferredFileLoader)
+    assert spec.loader
+    spec.loader.exec_module(module)
+
+    import threading
+    import time
+
+    class RaisingThread(threading.Thread):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            self.exc = None
+
+        def run(self) -> None:
+            try:
+                super().run()
+            except Exception as exc:  # pragma: no cover # noqa: BLE001
+                self.exc = exc
+
+    def access_module_attr() -> Any:
+        time.sleep(0.1)
+        return module.inspect.signature
+
+    threads: list[RaisingThread] = []
+
+    for _ in range(20):
+        thread = RaisingThread(target=access_module_attr)
+        threads.append(thread)
+        thread.start()
+
+    for thread in threads:
+        thread.join()
+        assert thread.exc is None
