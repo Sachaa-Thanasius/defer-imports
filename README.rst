@@ -68,7 +68,7 @@ Features and Caveats
 
 -   Python implementation–agnostic, in theory
 
-    -   The only dependency is on locals() at module scope to maintain its current API: specifically, that its return value will be a read-through, *write-through*, dict-like view of the module locals.
+    -   The main dependency is on ``locals()`` at module scope to maintain its current API: specifically, that its return value will be a read-through, *write-through*, dict-like view of the module locals.
 
 -   Not that slow, especially with support from bytecode caching
 -   Doesn't support lazy importing in class or function scope
