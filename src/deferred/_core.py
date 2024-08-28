@@ -388,15 +388,15 @@ class DeferredImportProxy:
     def __init__(
         self,
         name: str,
-        global_ns: dict[str, object],
-        local_ns: dict[str, object],
-        fromlist: _tp.Optional[tuple[str, ...]],
+        global_ns: _tp.MutableMapping[str, object],
+        local_ns: _tp.MutableMapping[str, object],
+        fromlist: _tp.Sequence[str],
         level: int = 0,
     ) -> None:
         self.defer_proxy_name = name
         self.defer_proxy_global_ns = global_ns
         self.defer_proxy_local_ns = local_ns
-        self.defer_proxy_fromlist: tuple[str, ...] = fromlist if (fromlist is not None) else ()
+        self.defer_proxy_fromlist = fromlist
         self.defer_proxy_level = level
 
         # Only used in cases of non-from-import submodule aliasing a la "import a.b as c".
@@ -446,7 +446,7 @@ class DeferredImportKey(str):
     def __new__(cls, key: str, proxy: DeferredImportProxy, /):
         return super().__new__(cls, key)
 
-    def __init__(self, key: str, proxy: DeferredImportProxy, /):
+    def __init__(self, key: str, proxy: DeferredImportProxy, /) -> None:
         self.defer_key_str = str(key)
         self.defer_key_proxy = proxy
         self.is_recursing = False
@@ -460,6 +460,7 @@ class DeferredImportKey(str):
         if self.defer_key_str != value:
             return False
 
+        # The recursion guard allows self-referential imports within __init__.py files.
         if not self.is_recursing:
             self.is_recursing = True
 
@@ -483,28 +484,27 @@ class DeferredImportKey(str):
         module_vars = vars(module)
         for attr_key, attr_val in vars(proxy).items():
             if isinstance(attr_val, DeferredImportProxy) and not hasattr(module, attr_key):
-                # NOTE: This originally used setattr(), but I found that pypy normalizes the attr name to a str, losing
-                #       the DeferredImportKey properties.
+                # NOTE: This could have used setattr() if pypy didn't normalize the attr name to a str, so we must
+                #       resort to direct placement in the module's __dict__ to avoid that.
                 module_vars[DeferredImportKey(attr_key, attr_val)] = attr_val
                 # Change the namespaces as well to make sure nested proxies are replaced in the right place.
-                attr_val.defer_proxy_global_ns = attr_val.defer_proxy_local_ns = vars(module)
+                attr_val.defer_proxy_global_ns = attr_val.defer_proxy_local_ns = module_vars
 
         # Replace the proxy with the resolved module or module attribute in the relevant namespace.
-
-        # First, get the regular string key and the relevant namespace.
+        # 1. Let the regular string key and the relevant namespace.
         key = self.defer_key_str
         namespace = proxy.defer_proxy_local_ns
 
-        # Second, remove the deferred key to avoid it sticking around.
+        # 2. Replace the deferred version of the key to avoid it sticking around.
         # NOTE: This is necessary to prevent recursive resolution for proxies, since __eq__ will be triggered again.
         _is_def_tok = is_deferred.set(True)
         try:
-            # TODO: Figure out why this works and del namespace[key] doesn't.
+            # TODO: Figure out why this works, but del namespace[key] doesn't.
             namespace[key] = namespace.pop(key)
         finally:
             is_deferred.reset(_is_def_tok)
 
-        # Finally, resolve any requested attribute access.
+        # 3. Resolve any requested attribute access.
         if proxy.defer_proxy_fromlist:
             namespace[key] = getattr(module, proxy.defer_proxy_fromlist[0])
         elif proxy.defer_proxy_sub:
@@ -513,7 +513,7 @@ class DeferredImportKey(str):
             namespace[key] = module
 
 
-def calc___package__(globals: dict[str, _tp.Any]) -> _tp.Optional[str]:
+def calc___package__(globals: _tp.MutableMapping[str, _tp.Any]) -> _tp.Optional[str]:
     """Calculate what __package__ should be.
 
     __package__ is not guaranteed to be defined or could be set to None
@@ -567,13 +567,15 @@ def resolve_name(name: str, package: str, level: int) -> str:
 
 def deferred___import__(  # noqa: ANN202
     name: str,
-    globals: dict[str, object],
-    locals: dict[str, object],
-    fromlist: _tp.Optional[tuple[str, ...]] = None,
+    globals: _tp.MutableMapping[str, object],
+    locals: _tp.MutableMapping[str, object],
+    fromlist: _tp.Optional[_tp.Sequence[str]] = None,
     level: int = 0,
     /,
 ):
     """An limited replacement for __import__ that supports deferred imports by returning proxies."""
+
+    fromlist = fromlist or ()
 
     # Resolve the names of relative imports.
     if level > 0:

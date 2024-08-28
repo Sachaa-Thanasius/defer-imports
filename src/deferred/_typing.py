@@ -14,8 +14,10 @@ __all__ = (
     "Generator",
     "Iterable",
     "ModuleType",
+    "MutableMapping",
     "Optional",
     "ReadableBuffer",
+    "Sequence",
     "StrPath",
     "Union",
     "final",
@@ -86,6 +88,12 @@ def __getattr__(name: str) -> object:  # pragma: no cover  # noqa: PLR0911, PLR0
         globals()["ModuleType"] = ModuleType
         return ModuleType
 
+    if name == "MutableMapping":
+        from collections.abc import MutableMapping
+
+        globals()["MutableMapping"] = MutableMapping
+        return MutableMapping
+
     if name == "Optional":
         from typing import Optional
 
@@ -102,6 +110,12 @@ def __getattr__(name: str) -> object:  # pragma: no cover  # noqa: PLR0911, PLR0
 
         globals()["ReadableBuffer"] = ReadableBuffer
         return ReadableBuffer
+
+    if name == "Sequence":
+        from collections.abc import Sequence
+
+        globals()["Sequence"] = Sequence
+        return Sequence
 
     if name == "StrPath":
         import os

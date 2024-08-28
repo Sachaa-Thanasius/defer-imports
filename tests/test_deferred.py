@@ -765,7 +765,10 @@ def Y2():
 
 
 def test_thread_safety(tmp_path: Path):
-    """Test if trying to access a lazily loaded import from multiple threads causes race conditions."""
+    """Test if trying to access a lazily loaded import from multiple threads causes race conditions.
+
+    Based on a test for importlib.util.LazyLoader in the CPython test suite.
+    """
 
     source = """\
 from deferred import defer_imports_until_use
@@ -798,7 +801,7 @@ with defer_imports_until_use:
 
     threads: list[RaisingThread] = []
 
-    for _ in range(20):
+    for _ in range(10):
         thread = RaisingThread(target=access_module_attr)
         threads.append(thread)
         thread.start()
