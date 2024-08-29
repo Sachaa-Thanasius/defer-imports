@@ -1,5 +1,9 @@
+# SPDX-FileCopyrightText: 2024-present Sachaa-Thanasius
+#
+# SPDX-License-Identifier: MIT
+
 # pyright: reportUnsupportedDunderAll=none
-# ruff: noqa: F822
+
 """A __getattr__-based lazy import shim for typing- and annotation-related symbols."""
 
 import sys

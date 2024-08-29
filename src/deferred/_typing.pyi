@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2024-present Sachaa-Thanasius
+#
+# SPDX-License-Identifier: MIT
+
 import os
 
 from typing_extensions import TypeAlias

@@ -121,8 +121,8 @@ extend-ignore = [
     "UP038",   # isinstance performs better with tuples than unions.
     "PT001",   # pytest recommends against empty parentheses on pytest.fixture.
     "PD011",   # Erroneous issue that triggers for any .values attribute access at all.
-    "RUF002",  # Leave ambiguous characters alone.
-    "PLR2004", # Leave magic numbers alone.
+    "PLR2004", # I'll determine what counts as a magic number.
+    "RUF002",  # I'll determine what counts as an ambiguous character.
     # ---- Recommended by Ruff when using Ruff format
     "E111",
     "E114",
@@ -152,8 +152,11 @@ keep-runtime-typing = true
     "F403",
     "F405",
 ]
-"src/deferred/**/*.py" = [
+"src/deferred/_core.py" = [
     "A002", # Allow some shadowing of builtins by parameter names.
+]
+"src/deferred/_typing.py" = [
+    "F822", # __all__ has names that will be provided by module-level __getattr__.
 ]
 # ---- Test code
 "tests/**/*.py" = [

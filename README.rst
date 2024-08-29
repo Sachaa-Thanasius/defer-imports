@@ -34,6 +34,8 @@ This can be installed via pip:
 
     python -m pip install git@https://github.com/Sachaa-Thanasius/deferred
 
+Additionally, ``deferred`` can easily be vendored. It has zero dependencies and is fairly small (less than 1,000 lines of code), so you can copy the code into your application.
+
 
 Example
 =======
