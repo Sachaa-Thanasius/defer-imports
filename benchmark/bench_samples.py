@@ -1,6 +1,8 @@
 # pyright: reportUnusedImport=none
 """Simple benchark script for comparing the import time of the Python standard library when using regular imports,
 deferred-influence imports, and slothy-influenced imports.
+
+The sample scripts being imported are generated with benchmark/generate_samples.py.
 """
 
 import platform
@@ -93,12 +95,11 @@ def main() -> None:
     exec_order = args.exec_order or list(BENCH_FUNCS)
 
     # Perform benchmarking.
-    # TODO: Investigate how to make multiple iterations work.
+    # TODO: Investigate how to make multiple iterations work. Seems like caching is unavoidable.
     results = {type_: BENCH_FUNCS[type_]() for type_ in exec_order}
     minimum = min(results.values())
 
-    # Format and print outcomes.
-
+    # Format and print results as an reST-style list table.
     impl_header = "Implementation"
     impl_len = len(impl_header)
     impl_divider = "=" * impl_len
@@ -120,8 +121,9 @@ def main() -> None:
     else:
         print("Run once with bytecode caches allowed")
 
-    print()
     divider = "  ".join((impl_divider, version_divider, benchmark_divider, time_divider))
+
+    print()
     print(divider)
     print(impl_header, version_header, benchmark_header, time_header, sep="  ")
     print(divider)
@@ -131,12 +133,11 @@ def main() -> None:
 
     for bench_type, result in results.items():
         formatted_result = f"{result:.5f}s ({result / minimum:.2f}x)"
-
         print(
-            f"{impl:{impl_len}}",
-            f"{version:{version_len}}",
-            f"{bench_type:{benchmark_len}}",
-            f"{formatted_result:{time_len}}",
+            impl.ljust(impl_len),
+            version.ljust(version_len),
+            bench_type.ljust(benchmark_len),
+            formatted_result.ljust(time_len),
             sep="  ",
         )
 

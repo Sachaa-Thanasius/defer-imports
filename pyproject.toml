@@ -145,6 +145,7 @@ extend-ignore = [
     "ISC001",
     "ISC002",
     # ---- Project-specific rules
+    "SIM108", # Ternaries can be less readable than multiline if-else.
 ]
 unfixable = [
     "ERA", # Prevent unlikely erroneous deletion.
