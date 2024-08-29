@@ -86,27 +86,27 @@ Implementation  Version  Benchmark   Time
 CPython         3.9      regular     0.48585s (409.31x)
 CPython         3.9      slothy      0.00269s (2.27x)
 CPython         3.9      deferred    0.00119s (1.00x)
---              --       --          --
+\-\-            \-\-     \-\-        \-\-
 CPython         3.10     regular     0.41860s (313.20x)
 CPython         3.10     slothy      0.00458s (3.43x)   
 CPython         3.10     deferred    0.00134s (1.00x)
---              --       --          --
+\-\-            \-\-     \-\-        \-\-
 CPython         3.11     regular     0.60501s (279.51x)
 CPython         3.11     slothy      0.00570s (2.63x)
 CPython         3.11     deferred    0.00216s (1.00x)
---              --       --          --
+\-\-            \-\-     \-\-        \-\-
 CPython         3.12     regular     0.53233s (374.40x)
 CPython         3.12     slothy      0.00552s (3.88x)
 CPython         3.12     deferred    0.00142s (1.00x)   
---              --       --          --
+\-\-            \-\-     \-\-        \-\-
 CPython         3.13     regular     0.53704s (212.19x)
 CPython         3.13     slothy      0.00319s (1.26x)
 CPython         3.13     deferred    0.00253s (1.00x)   
---              --       --          --
+\-\-            \-\-     \-\-        \-\-
 PyPy            3.9      regular     1.06363s (385.50x)
 PyPy            3.9      slothy      0.00417s (1.51x)
 PyPy            3.9      deferred    0.00276s (1.00x)
---              --       --          --
+\-\-            \-\-     \-\-        \-\-
 PyPy            3.10     regular     0.93010s (218.42x)
 PyPy            3.10     slothy      0.01166s (2.74x)
 PyPy            3.10     deferred    0.00426s (1.00x)
