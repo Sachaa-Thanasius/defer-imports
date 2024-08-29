@@ -7,12 +7,12 @@ from pathlib import Path
 STDLIB_IMPORTS = """\
 import __future__
 
-# import _bootlocale # Doesn't exist on 3.11 on Windows
+# import _bootlocale  # Doesn't exist on 3.11 on Windows
 import _collections_abc
 import _compat_pickle
 import _compression
 
-# import _dummy_thread # Doesn't exist in 3.9+ in WSL
+# import _dummy_thread  # Doesn't exist in 3.9+ in WSL
 import _markupbase
 import _osx_support
 import _py_abc
@@ -21,15 +21,16 @@ import _pyio
 import _sitebuiltins
 import _strptime
 
-# import _sysconfigdata_m_darwin_darwin # Doesn't exist in 3.9+ in WSL
+# import _sysconfigdata_m_darwin_darwin  # Doesn't exist in 3.9+ in WSL
 import _threading_local
 import _weakrefset
 import abc
-import aifc
+
+# import aifc  # Removed in 3.13+
 import argparse
 import ast
 
-# import asynchat # Imports select, which doesn't exist on Windows
+# import asynchat  # Imports select, which doesn't exist on Windows
 import asyncio
 import asyncio.base_events
 import asyncio.base_futures
@@ -54,7 +55,7 @@ import asyncio.tasks
 import asyncio.transports
 
 # import asyncio.unix_events  # Not available on Windows
-import asyncore
+# import asyncore  # Not available on 3.12+
 import base64
 import bdb
 
@@ -62,9 +63,10 @@ import bdb
 import bisect
 import bz2
 import calendar
-import cgi
-import cgitb
-import chunk
+
+# import cgi  # Removed in 3.13+
+# import cgitb  # Removed in 3.13+
+# import chunk  # Removed in 3.13+
 import cmd
 import code
 import codecs
@@ -94,7 +96,7 @@ import ctypes.macholib
 import ctypes.macholib.dyld
 import ctypes.macholib.dylib
 
-# import ctypes.macholib.framework # Doesn't exist in 3.9+ in WSL
+# import ctypes.macholib.framework  # Doesn't exist in 3.9+ in WSL
 import ctypes.util
 import dataclasses
 import datetime
@@ -340,8 +342,9 @@ import http.server
 
 # import idlelib  # Doesn't exist in 3.9+ in WSL
 import imaplib
-import imghdr
-import imp
+
+# import imghdr  # Removed in 3.13+
+# import imp  # Not available on 3.12+
 import importlib
 import importlib._bootstrap
 import importlib._bootstrap_external
@@ -365,7 +368,8 @@ import logging.config
 import logging.handlers
 import lzma
 import mailbox
-import mailcap
+
+# import mailcap  # Removed in 3.13+
 import mimetypes
 import modulefinder
 import multiprocessing
@@ -392,7 +396,8 @@ import multiprocessing.spawn
 import multiprocessing.synchronize
 import multiprocessing.util
 import netrc
-import nntplib
+
+# import nntplib  # Removed in 3.13+
 import ntpath
 import nturl2path
 import numbers
@@ -404,7 +409,8 @@ import pathlib
 import pdb
 import pickle
 import pickletools
-import pipes
+
+# import pipes  # Removed in 3.13+
 import pkgutil
 import platform
 import plistlib
@@ -436,7 +442,8 @@ import shutil
 import signal
 import site
 import smtplib
-import sndhdr
+
+# import sndhdr  # Removed in 3.13+
 import socket
 import socketserver
 import sqlite3
@@ -454,14 +461,15 @@ import string
 import stringprep
 import struct
 import subprocess
-import sunau
 
+# import sunau  # Removed in 3.13+
 # import symbol  # Not available on Windows
-import symtable
+# import symtable  # Doesn't work on pypy3.9 since _symtable doesn't exist.
 import sysconfig
 import tabnanny
 import tarfile
-import telnetlib
+
+# import telnetlib  # Removed in 3.13+
 import tempfile
 import textwrap
 
@@ -472,8 +480,8 @@ import token
 import tokenize
 import trace
 import traceback
-import tracemalloc
 
+# import tracemalloc  # Doesn't work on pypy3.9 since _tracemalloc doesn't exist.
 # import tty  # Not available on Windows
 import types
 import typing
@@ -493,7 +501,8 @@ import urllib.parse
 import urllib.request
 import urllib.response
 import urllib.robotparser
-import uu
+
+# import uu  # Removed in 3.13+
 import uuid
 import venv
 import warnings
@@ -506,7 +515,8 @@ import wsgiref.headers
 import wsgiref.simple_server
 import wsgiref.util
 import wsgiref.validate
-import xdrlib
+
+# import xdrlib  # Removed in 3.13+
 import xml
 import xml.dom
 import xml.dom.domreg

@@ -41,7 +41,19 @@ Source = "https://github.com/Sachaa-Thanasius/deferred"
 packages = ["src/deferred"]
 
 
-# ---- Testing config
+# -------- Benchmark config
+
+[tool.hatch.envs.benchmark]
+dependencies = ["slothy"]
+
+[[tool.hatch.envs.benchmark.matrix]]
+python = ["3.9", "3.10", "3.11", "3.12", "3.13", "pypy3.9", "pypy3.10"]
+
+[tool.hatch.envs.benchmark.scripts]
+bench = "python -m benchmark.bench_samples --remove-pycache"
+
+
+# -------- Testing config
 
 [[tool.hatch.envs.hatch-test.matrix]]
 python = ["3.9", "3.10", "3.11", "3.12", "3.13", "pypy3.9", "pypy3.10"]

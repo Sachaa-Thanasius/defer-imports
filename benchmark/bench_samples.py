@@ -3,6 +3,7 @@
 deferred-influence imports, and slothy-influenced imports.
 """
 
+import platform
 import sys
 import time
 from pathlib import Path
@@ -84,30 +85,62 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    # Perform benchmarking.
+    # Do any extra setup.
     if args.remove_pycache:
         remove_pycaches()
         sys.dont_write_bytecode = True
 
     exec_order = args.exec_order or list(BENCH_FUNCS)
 
+    # Perform benchmarking.
     # TODO: Investigate how to make multiple iterations work.
     results = {type_: BENCH_FUNCS[type_]() for type_ in exec_order}
     minimum = min(results.values())
 
     # Format and print outcomes.
-    header = "Time to import most of the stdlib"
-    subheader = f"(with caching = {not args.remove_pycache})"
-    separator = "-" * max(len(header), len(subheader))
 
-    print("\n")
-    print(header)
-    print(separator)
-    print(subheader)
-    print(separator)
+    impl_header = "Implementation"
+    impl_len = len(impl_header)
+    impl_divider = "=" * impl_len
 
-    for type_, result in results.items():
-        print(f"{f'{type_}:':15} {result:.7f}s  ({result / minimum:.2f}x)")
+    version_header = "Version"
+    version_len = len(version_header)
+    version_divider = "=" * version_len
+
+    benchmark_len = 10
+    benchmark_header = "Benchmark".ljust(benchmark_len)
+    benchmark_divider = "=" * benchmark_len
+
+    time_len = 19
+    time_header = "Time".ljust(time_len)
+    time_divider = "=" * time_len
+
+    if args.remove_pycache:
+        print(f"Run once with __pycache__ folders removed and {sys.dont_write_bytecode=}")
+    else:
+        print("Run once with bytecode caches allowed")
+
+    print()
+    divider = "  ".join((impl_divider, version_divider, benchmark_divider, time_divider))
+    print(divider)
+    print(impl_header, version_header, benchmark_header, time_header, sep="  ")
+    print(divider)
+
+    impl = platform.python_implementation()
+    version = f"{sys.version_info.major}.{sys.version_info.minor}"
+
+    for bench_type, result in results.items():
+        formatted_result = f"{result:.5f}s ({result / minimum:.2f}x)"
+
+        print(
+            f"{impl:{impl_len}}",
+            f"{version:{version_len}}",
+            f"{bench_type:{benchmark_len}}",
+            f"{formatted_result:{time_len}}",
+            sep="  ",
+        )
+
+    print(divider)
 
 
 if __name__ == "__main__":
