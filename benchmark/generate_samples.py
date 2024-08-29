@@ -549,8 +549,8 @@ def main() -> None:
 
     # regular imports
     regular_path = bench_path / "sample_regular.py"
-    regular_contents = "\n".join((PYRIGHT_IGNORE_DIRECTIVES, GENERATED_BY_COMMENT, STDLIB_IMPORTS)) + "\n"
-    regular_path.write_text(regular_contents)
+    regular_contents = "\n".join((PYRIGHT_IGNORE_DIRECTIVES, GENERATED_BY_COMMENT, STDLIB_IMPORTS))
+    regular_path.write_text(regular_contents, encoding="utf-8")
 
     # deferred-instrumented and deferred-hooked imports
     deferred_path = bench_path / "sample_deferred.py"
@@ -561,9 +561,9 @@ def main() -> None:
         "\n"
         "\n"
         "with defer_imports_until_use:\n"
-        f"{INDENTED_STDLIB_IMPORTS}\n"
+        f"{INDENTED_STDLIB_IMPORTS}"
     )
-    deferred_path.write_text(deferred_contents)
+    deferred_path.write_text(deferred_contents, encoding="utf-8")
 
     # slothy-hooked imports
     slothy_path = bench_path / "sample_slothy.py"
@@ -574,9 +574,9 @@ def main() -> None:
         "\n"
         "\n"
         "with lazy_importing():\n"
-        f"{INDENTED_STDLIB_IMPORTS}\n"
+        f"{INDENTED_STDLIB_IMPORTS}"
     )
-    slothy_path.write_text(slothy_contents)
+    slothy_path.write_text(slothy_contents, encoding="utf-8")
 
 
 if __name__ == "__main__":

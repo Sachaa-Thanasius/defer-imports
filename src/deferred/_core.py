@@ -303,7 +303,7 @@ class DeferredFileLoader(SourceFileLoader):
         # NOTE: InspectLoader is the virtual superclass of SourceFileLoader thanks to ABC registration, so typeshed
         #       reflects that. However, there's a slight mismatch in source_to_code signatures. Make a PR?
 
-        # Defer to regular machinery if the module is empty or doesn't use defer_imports_until_use.
+        # Fall back to regular importlib machinery if the module is empty or doesn't use defer_imports_until_use.
         if not data:
             return super().source_to_code(data, path, _optimize=_optimize)  # pyright: ignore # See note above.
 

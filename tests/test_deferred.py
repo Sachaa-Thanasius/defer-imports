@@ -19,6 +19,7 @@ from typing import Any, cast
 import pytest
 
 from deferred._core import (
+    BYTECODE_HEADER,
     DEFERRED_PATH_HOOK,
     DeferredFileLoader,
     DeferredInstrumenter,
@@ -647,21 +648,24 @@ with defer_imports_until_use:
     from . import a
     from .a import A
     from .b import B
-"""
+""",
+        encoding="utf-8",
     )
     sample_package_path.joinpath("a.py").write_text(
         """\
 class A:
     def __init__(self, val: object):
         self.val = val
-"""
+""",
+        encoding="utf-8",
     )
     sample_package_path.joinpath("b.py").write_text(
         """\
 class B:
     def __init__(self, val: object):
         self.val = val
-"""
+""",
+        encoding="utf-8",
     )
 
     package_name = "sample_package"
@@ -711,13 +715,15 @@ from deferred import defer_imports_until_use
 
 with defer_imports_until_use:
     import circular_package.main
-"""
+""",
+        encoding="utf-8",
     )
     circular_package_path.joinpath("main.py").write_text(
         """\
 from .x import X2
 X2()
-"""
+""",
+        encoding="utf-8",
     )
     circular_package_path.joinpath("x.py").write_text(
         """\
@@ -740,7 +746,8 @@ from .x import X2
 
 def Y2():
     return X2()
-"""
+""",
+        encoding="utf-8",
     )
 
     package_name = "circular_package"
@@ -765,7 +772,7 @@ def Y2():
 
 
 def test_thread_safety(tmp_path: Path):
-    """Test if trying to access a lazily loaded import from multiple threads causes race conditions.
+    """Test that trying to access a lazily loaded import from multiple threads doesn't cause race conditions.
 
     Based on a test for importlib.util.LazyLoader in the CPython test suite.
     """
@@ -809,3 +816,27 @@ with defer_imports_until_use:
     for thread in threads:
         thread.join()
         assert thread.exc is None
+
+
+def test_deferred_header_in_instrumented_pycache(tmp_path: Path):
+    """Test that the deferred-specific bytecode header is being prepended to the bytecode cache files of
+    deferred-instrumented modules.
+    """
+
+    source = """\
+from deferred import defer_imports_until_use
+
+with defer_imports_until_use:
+    import asyncio
+"""
+
+    spec, module, path = create_sample_module(tmp_path, source, DeferredFileLoader)
+    assert spec.loader
+    spec.loader.exec_module(module)
+
+    expected_cache = Path(importlib.util.cache_from_source(str(path)))
+    assert expected_cache.is_file()
+
+    with expected_cache.open("rb") as fp:
+        header = fp.read(len(BYTECODE_HEADER))
+    assert header == BYTECODE_HEADER
