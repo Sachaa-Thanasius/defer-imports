@@ -160,13 +160,14 @@ keep-runtime-typing = true
 ]
 # ---- Test code
 "tests/**/*.py" = [
-    "T201",   # Allow printing.
-    "T203",   # Allow pretty printing.
+    "T201",   # Printing is fine.
+    "T203",   # Pretty printing is fine.
     "ANN201", # Don't need return annotations for tests.
     "S102",   # exec is used to test for NameError within a module's namespace.
 ]
 "benchmark/**/*.py" = [
-    "F401",   # Allow unused imports; we're testing import speed.
+    "T201",   # Printing is fine.
+    "F401",   # Unused imports are fine; we're testing import speed.
     "ERA001", # Allow commented code.
 ]
 

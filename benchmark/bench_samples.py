@@ -1,9 +1,9 @@
 # pyright: reportUnusedImport=none
-# ruff: noqa: T201
 """Simple benchark script for comparing the import time of the Python standard library when using regular imports,
 deferred-influence imports, and slothy-influenced imports.
 """
 
+import sys
 import time
 from pathlib import Path
 
@@ -26,7 +26,12 @@ def remove_pycaches() -> None:
 
     for file in Path().rglob("*.py[co]"):
         file.unlink()
+
     for dir_ in Path().rglob("__pycache__"):
+        # Sometimes, files with atypical names are still in these.
+        for file in dir_.iterdir():
+            if file.is_file():
+                file.unlink()
         dir_.rmdir()
 
 
@@ -62,26 +67,47 @@ BENCH_FUNCS = {
 def main() -> None:
     import argparse
 
+    # Get arguments from user.
     parser = argparse.ArgumentParser()
-    parser.add_argument("--remove-pycache", action="store_true", help="Recursively remove pycache files in cwd")
-    parser.add_argument("--exec-order", action="extend", nargs=3, type=str)
+    parser.add_argument(
+        "--remove-pycache",
+        action="store_true",
+        help="Whether to remove pycache files in cwd beforehand and ensure bytecode isn't written",
+    )
+    parser.add_argument(
+        "--exec-order",
+        action="extend",
+        nargs=3,
+        choices=BENCH_FUNCS.keys(),
+        type=str,
+        help="The order in which the the influences (or not influenced) imports are run",
+    )
     args = parser.parse_args()
 
+    # Perform benchmarking.
     if args.remove_pycache:
         remove_pycaches()
+        sys.dont_write_bytecode = True
 
-    if args.exec_order:
-        results = {type_: BENCH_FUNCS[type_]() for type_ in args.exec_order}
-    else:
-        results = {type_: func() for type_, func in BENCH_FUNCS.items()}
+    exec_order = args.exec_order or list(BENCH_FUNCS)
 
-    header = "Time to import stdlib"
+    # TODO: Investigate how to make multiple iterations work.
+    results = {type_: BENCH_FUNCS[type_]() for type_ in exec_order}
+    minimum = min(results.values())
 
-    print()
+    # Format and print outcomes.
+    header = "Time to import most of the stdlib"
+    subheader = f"(with caching = {not args.remove_pycache})"
+    separator = "-" * max(len(header), len(subheader))
+
+    print("\n")
     print(header)
-    print("-" * len(header))
+    print(separator)
+    print(subheader)
+    print(separator)
+
     for type_, result in results.items():
-        print(f"{f'{type_}:':15} {result}")
+        print(f"{f'{type_}:':15} {result:.7f}s  ({result / minimum:.2f}x)")
 
 
 if __name__ == "__main__":

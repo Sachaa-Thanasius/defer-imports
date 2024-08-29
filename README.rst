@@ -12,7 +12,7 @@ deferred
     :target: https://opensource.org/licenses/MIT
     :alt: License: MIT
 
-An pure-Python implementation of PEP 690–esque lazy imports, but at a user's behest within a ``defer_imports_until_use`` context manager.
+An pure-Python implementation of `PEP 690 <https://peps.python.org/pep-0690/>`_–esque lazy imports, but at a user's behest within a ``defer_imports_until_use`` context manager.
 
 
 Installation
@@ -26,7 +26,7 @@ This can be installed via pip:
 
     python -m pip install git@https://github.com/Sachaa-Thanasius/deferred
 
-Additionally, ``deferred`` can easily be vendored. It has zero dependencies and is fairly small (less than 1,000 lines of code), so you can copy the code into your application.
+Additionally, ``deferred`` can easily be vendored; it has zero dependencies and is fairly small (less than 1,000 lines of code).
 
 
 Example
@@ -91,18 +91,16 @@ Lazy imports, in theory, alleviate several pain points that Python has currently
 -   `apipkg <https://github.com/pytest-dev/apipkg>`_
 -   `modutil <https://github.com/brettcannon/modutil>`_
 -   `SPEC 1 <https://scientific-python.org/specs/spec-0001/>`_
--   And many more.
+-   And countless more.
 
-Then along came `slothy <https://github.com/bswck/slothy>`_, a library that seems to do it better, having been constructed with feedback from multiple CPython core developers as well as one of the minds behind PEP 690. Its core concept is powerful, and it's the main inspiration for this project. However, the library also ties itself to specific Python runtimes by depending on the existence of frames that represent the call stack. While that's fine — PEP 690's implementation was for CPython specifically, after all — I thought, after discussion with and feedback from others, that there might be a way that is less dependent on the specific Python runtime being used, more "pure", and thus might be more maintainable in the long run.
-
-Thus, ``deferred``.
+Then along came `slothy <https://github.com/bswck/slothy>`_, a library that seems to do it better, having been constructed with feedback from multiple CPython core developers as well as one of the minds behind PEP 690. It was the main inspiration for this project. However, the library also (currently) ties itself to specific Python implementations by depending on the existence of frames that represent the call stack. That's perfectly fine; PEP 690's implementation was for CPython specifically, and to my knowledge, the most popular Python runtimes provide call stack access in some form. Still, I thought that there might be a way to do something similar while remaining implementation-independent, avoiding as many internal APIs as possible. After feedback and discussion, that thought crystalized into this library.
 
 
 Acknowledgements
 ================
 
 -   `PEP 690 <https://peps.python.org/pep-0690/>`_ and its authors, for pushing lazy imports to the point of almost being accepted as a core part of CPython's import system.
--   Jelle Zijlstra, for so easily creating the core concept that ``slothy`` and now ``deferred`` rely on and sharing it in a `gist <https://gist.github.com/JelleZijlstra/23c01ceb35d1bc8f335128f59a32db4c>`_.
+-   Jelle Zijlstra, for so easily creating and sharing a `sample implementation <https://gist.github.com/JelleZijlstra/23c01ceb35d1bc8f335128f59a32db4c>`_ of the core concept that ``slothy`` and now ``deferred`` use.
 -   `slothy <https://github.com/bswck/slothy>`_, for making something great with that concept.
 -   All the packages mentioned in "Why" above, for filling people's needs and laying the groundwork for what's come.
--   Sinbad, for the feedback and for pushing me towards a hybrid approach.
+-   Sinbad, for the feedback.

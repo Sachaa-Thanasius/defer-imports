@@ -459,7 +459,8 @@ import tarfile
 import telnetlib
 import tempfile
 import textwrap
-import this
+
+# import this  # Low impact, and clogs stdout when running benchmark
 import threading
 import timeit
 import token
