@@ -2,23 +2,15 @@
 deferred
 ========
 
-|License| |Pyright| |Ruff| |pre-commit|
+|CI Status| |License|
+
+.. |CI Status| image:: https://github.com/Sachaa-Thanasius/deferred/actions/workflows/ci.yml/badge.svg
+    :target: https://github.com/Sachaa-Thanasius/deferred/actions/workflows/ci.yml
+    :alt: CI Status
 
 .. |License| image:: https://img.shields.io/github/license/Sachaa-Thanasius/deferred.svg
     :target: https://opensource.org/licenses/MIT
     :alt: License: MIT
-
-.. |Pyright| image:: https://img.shields.io/badge/pyright-checked-informational.svg
-    :target: https://github.com/microsoft/pyright/
-    :alt: Type-checker: Pyright
-
-.. |Ruff| image:: https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json
-    :target: https://github.com/astral-sh/ruff
-    :alt: Linter and Formatter: Ruff
-
-.. |pre-commit| image:: https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit
-    :target: https://github.com/pre-commit/pre-commit
-    :alt: pre-commit
 
 An pure-Python implementation of PEP 690–esque lazy imports, but at a user's behest within a ``defer_imports_until_use`` context manager.
 
