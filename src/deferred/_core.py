@@ -76,7 +76,7 @@ class DeferredInstrumenter(ast.NodeTransformer):
         """Get the source code corresponding to the given data."""
 
         if isinstance(self.data, ast.AST):
-            # NOTE: An attempt is made here; node location information likely won't match up.
+            # NOTE: An attempt is made here, but the node location information likely won't match up.
             return ast.unparse(self.data)
         elif isinstance(self.data, str):  # noqa: RET505 # Readability
             return self.data
@@ -177,6 +177,23 @@ class DeferredInstrumenter(ast.NodeTransformer):
 
         return new_import_nodes
 
+    @staticmethod
+    def check_With_for_defer_usage(node: ast.With) -> bool:
+        return len(node.items) == 1 and (
+            (
+                # Allow "with defer_imports_until_use".
+                isinstance(node.items[0].context_expr, ast.Name)
+                and node.items[0].context_expr.id == "defer_imports_until_use"
+            )
+            or (
+                # Allow "with deferred.defer_imports_until_use".
+                isinstance(node.items[0].context_expr, ast.Attribute)
+                and isinstance(node.items[0].context_expr.value, ast.Name)
+                and node.items[0].context_expr.value.id == "deferred"
+                and node.items[0].context_expr.attr == "defer_imports_until_use"
+            )
+        )
+
     def visit_With(self, node: ast.With) -> ast.AST:
         """Check that "with defer_imports_until_use" blocks are valid and if so, hook all imports within.
 
@@ -189,23 +206,7 @@ class DeferredInstrumenter(ast.NodeTransformer):
                 3. "defer_imports_until_use" block contains a wildcard import.
         """
 
-        if not (
-            len(node.items) == 1
-            and (
-                (
-                    # Allow "with defer_imports_until_use".
-                    isinstance(node.items[0].context_expr, ast.Name)
-                    and node.items[0].context_expr.id == "defer_imports_until_use"
-                )
-                or (
-                    # Allow "with deferred.defer_imports_until_use".
-                    isinstance(node.items[0].context_expr, ast.Attribute)
-                    and isinstance(node.items[0].context_expr.value, ast.Name)
-                    and node.items[0].context_expr.value.id == "deferred"
-                    and node.items[0].context_expr.attr == "defer_imports_until_use"
-                )
-            )
-        ):
+        if not self.check_With_for_defer_usage(node):
             return self.generic_visit(node)
 
         if self.scope_depth != 0:
@@ -322,22 +323,7 @@ class DeferredFileLoader(SourceFileLoader):
         """Check if the given AST uses "with defer_imports_until_use". Also assume "utf-8" is the the encoding."""
 
         uses_defer = any(
-            isinstance(node, ast.With)
-            and len(node.items) == 1
-            and (
-                (
-                    # Allow "with defer_imports_until_use".
-                    isinstance(node.items[0].context_expr, ast.Name)
-                    and node.items[0].context_expr.id == "defer_imports_until_use"
-                )
-                or (
-                    # Allow "with deferred.defer_imports_until_use".
-                    isinstance(node.items[0].context_expr, ast.Attribute)
-                    and isinstance(node.items[0].context_expr.value, ast.Name)
-                    and node.items[0].context_expr.value.id == "deferred"
-                    and node.items[0].context_expr.attr == "defer_imports_until_use"
-                )
-            )
+            isinstance(node, ast.With) and DeferredInstrumenter.check_With_for_defer_usage(node)
             for node in ast.walk(data)
         )
         encoding = "utf-8"
@@ -494,7 +480,7 @@ class DeferredImportKey(str):
     When referenced, the key will replace itself in the namespace with the resolved import or the right name from it.
     """
 
-    __slots__ = ("defer_key_str", "defer_key_proxy", "is_recursing")
+    __slots__ = ("defer_key_str", "defer_key_proxy", "is_recursing", "_lock")
 
     def __new__(cls, key: str, proxy: DeferredImportProxy, /):
         return super().__new__(cls, key)
@@ -532,6 +518,8 @@ class DeferredImportKey(str):
 
         # Perform the original __import__ and pray.
         module: _tp.ModuleType = original_import.get()(*proxy.defer_proxy_import_args)
+        # FIXME: The below print is enough to trigger a race condition.
+        # print(f"{module=}, {proxy.defer_proxy_name=}, {proxy.defer_proxy_fromlist=}, {proxy.defer_proxy_sub=}")  # noqa: ERA001
 
         # Transfer nested proxies over to the resolved module.
         module_vars = vars(module)

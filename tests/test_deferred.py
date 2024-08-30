@@ -434,6 +434,30 @@ with defer_imports_until_use:
     assert module.MySignature is sys.modules["inspect"].Signature
 
 
+def test_deferred_header_in_instrumented_pycache(tmp_path: Path):
+    """Test that the deferred-specific bytecode header is being prepended to the bytecode cache files of
+    deferred-instrumented modules.
+    """
+
+    source = """\
+from deferred import defer_imports_until_use
+
+with defer_imports_until_use:
+    import asyncio
+"""
+
+    spec, module, path = create_sample_module(tmp_path, source, DeferredFileLoader)
+    assert spec.loader
+    spec.loader.exec_module(module)
+
+    expected_cache = Path(importlib.util.cache_from_source(str(path)))
+    assert expected_cache.is_file()
+
+    with expected_cache.open("rb") as fp:
+        header = fp.read(len(BYTECODE_HEADER))
+    assert header == BYTECODE_HEADER
+
+
 def test_error_if_non_import(tmp_path: Path):
     source = """\
 from deferred import defer_imports_until_use
@@ -807,7 +831,7 @@ with defer_imports_until_use:
             finally:
                 del self._target, self._args, self._kwargs  # pyright: ignore
 
-    def access_module_attr() -> Any:
+    def access_module_attr() -> object:
         time.sleep(0.2)
         return module.inspect.signature
 
@@ -821,38 +845,20 @@ with defer_imports_until_use:
     for thread in threads:
         thread.join()
         assert callable(thread.result)  # pyright: ignore
-        # FIXME: Spurious error in pypy3.10 only; sometimes the accessed signature isn't resolved?
+        # FIXME: Error on various versions; sometimes the accessed signature isn't resolved?
+        #        Recreatable by putting "print(module)" after line 525:
+        #        module: _tp.ModuleType = original_import.get()(*proxy.defer_proxy_import_args)  # noqa: ERA001
+        #
+        # The error:
         #    AssertionError: assert False
         #     +  where False = callable(<proxy for 'import inspect as ...'>)
         #     +    where <proxy for 'import inspect as ...'> = <CapturingThread(Thread 4, stopped 22024)>.result
         assert thread.exc is None
 
 
-def test_deferred_header_in_instrumented_pycache(tmp_path: Path):
-    """Test that the deferred-specific bytecode header is being prepended to the bytecode cache files of
-    deferred-instrumented modules.
-    """
-
-    source = """\
-from deferred import defer_imports_until_use
-
-with defer_imports_until_use:
-    import asyncio
-"""
-
-    spec, module, path = create_sample_module(tmp_path, source, DeferredFileLoader)
-    assert spec.loader
-    spec.loader.exec_module(module)
-
-    expected_cache = Path(importlib.util.cache_from_source(str(path)))
-    assert expected_cache.is_file()
-
-    with expected_cache.open("rb") as fp:
-        header = fp.read(len(BYTECODE_HEADER))
-    assert header == BYTECODE_HEADER
-
-
 def test_import_stdlib():
     """Test that we can import most of the stdlib."""
 
-    import tests.sample_deferred  # pyright: ignore [reportUnusedImport]
+    import tests.stdlib_imports
+
+    assert tests.stdlib_imports
