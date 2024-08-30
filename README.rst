@@ -78,42 +78,36 @@ There are two ways of measuring activation and/or import time currently:
 
 -   ``python -m benchmark.bench_samples`` (run with ``--help`` to see more information)
 
-Run once with ``__pycache__`` folders removed and ``sys.dont_write_bytecode=True``:
+    -   To prevent bytecode caching from impacting the benchmark, run with `python -B <https://docs.python.org/3/using/cmdline.html#cmdoption-B>`_, which will set ``sys.dont_write_bytecode`` to ``True``.
+    -   PyPy is excluded from the benchmark since it takes time to ramp up. 
 
-==============  =======  ==========  ===================
-Implementation  Version  Benchmark   Time
-==============  =======  ==========  ===================
-CPython         3.9      regular     0.48585s (409.31x)
-CPython         3.9      slothy      0.00269s (2.27x)
-CPython         3.9      deferred    0.00119s (1.00x)
-\-\-            \-\-     \-\-        \-\-
-CPython         3.10     regular     0.41860s (313.20x)
-CPython         3.10     slothy      0.00458s (3.43x)   
-CPython         3.10     deferred    0.00134s (1.00x)
-\-\-            \-\-     \-\-        \-\-
-CPython         3.11     regular     0.60501s (279.51x)
-CPython         3.11     slothy      0.00570s (2.63x)
-CPython         3.11     deferred    0.00216s (1.00x)
-\-\-            \-\-     \-\-        \-\-
-CPython         3.12     regular     0.53233s (374.40x)
-CPython         3.12     slothy      0.00552s (3.88x)
-CPython         3.12     deferred    0.00142s (1.00x)   
-\-\-            \-\-     \-\-        \-\-
-CPython         3.13     regular     0.53704s (212.19x)
-CPython         3.13     slothy      0.00319s (1.26x)
-CPython         3.13     deferred    0.00253s (1.00x)   
-\-\-            \-\-     \-\-        \-\-
-PyPy            3.9      regular     1.06363s (385.50x)
-PyPy            3.9      slothy      0.00417s (1.51x)
-PyPy            3.9      deferred    0.00276s (1.00x)
-\-\-            \-\-     \-\-        \-\-
-PyPy            3.10     regular     0.93010s (218.42x)
-PyPy            3.10     slothy      0.01166s (2.74x)
-PyPy            3.10     deferred    0.00426s (1.00x)
-==============  =======  ==========  ===================
+    -   (Run once with ``__pycache__`` folders removed and ``sys.dont_write_bytecode=True``):
 
+        ==============  =======  ==========  ===================
+        Implementation  Version  Benchmark   Time
+        ==============  =======  ==========  ===================
+        CPython         3.9      regular     0.48585s (409.31x)
+        CPython         3.9      slothy      0.00269s (2.27x)
+        CPython         3.9      deferred    0.00119s (1.00x)
+        \-\-            \-\-     \-\-        \-\-
+        CPython         3.10     regular     0.41860s (313.20x)
+        CPython         3.10     slothy      0.00458s (3.43x)   
+        CPython         3.10     deferred    0.00134s (1.00x)
+        \-\-            \-\-     \-\-        \-\-
+        CPython         3.11     regular     0.60501s (279.51x)
+        CPython         3.11     slothy      0.00570s (2.63x)
+        CPython         3.11     deferred    0.00216s (1.00x)
+        \-\-            \-\-     \-\-        \-\-
+        CPython         3.12     regular     0.53233s (374.40x)
+        CPython         3.12     slothy      0.00552s (3.88x)
+        CPython         3.12     deferred    0.00142s (1.00x)   
+        \-\-            \-\-     \-\-        \-\-
+        CPython         3.13     regular     0.53704s (212.19x)
+        CPython         3.13     slothy      0.00319s (1.26x)
+        CPython         3.13     deferred    0.00253s (1.00x)
+        ==============  =======  ==========  ===================
 
--   ``python -m timeit -n 1 -r 1 -- "import deferred"`` (substitute ``deferred`` with other modules, e.g. ``slothy``, to compare)
+-   ``python -m timeit -n 1 -r 1 -- "import deferred"`` (substitute ``deferred`` with other modules, e.g. ``slothy``, to compare). This has great variance, so only value the resulting time relative to another import's time.
 
 
 Why?
@@ -137,4 +131,4 @@ Acknowledgements
 -   `PEP 690 <https://peps.python.org/pep-0690/>`_ and its authors, for pushing lazy imports to the point of almost being accepted as a core part of CPython's import system.
 -   Jelle Zijlstra, for so easily creating and sharing a `sample implementation <https://gist.github.com/JelleZijlstra/23c01ceb35d1bc8f335128f59a32db4c>`_ that ``slothy`` and ``deferred`` are based on.
 -   `slothy <https://github.com/bswck/slothy>`_, for inspiring this project.
--   Sinbad, for the feedback.
+-   Sinbad, for the initial feedback.

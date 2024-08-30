@@ -73,11 +73,6 @@ def main() -> None:
     # Get arguments from user.
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--remove-pycache",
-        action="store_true",
-        help="Whether to remove pycache files in cwd beforehand and ensure bytecode isn't written",
-    )
-    parser.add_argument(
         "--exec-order",
         action="extend",
         nargs=3,
@@ -88,9 +83,8 @@ def main() -> None:
     args = parser.parse_args()
 
     # Do any extra setup.
-    if args.remove_pycache:
+    if sys.dont_write_bytecode:
         remove_pycaches()
-        sys.dont_write_bytecode = True
 
     exec_order = args.exec_order or list(BENCH_FUNCS)
 
@@ -116,10 +110,10 @@ def main() -> None:
     time_header = "Time".ljust(time_len)
     time_divider = "=" * time_len
 
-    if args.remove_pycache:
-        print(f"Run once with __pycache__ folders removed and {sys.dont_write_bytecode=}")
+    if sys.dont_write_bytecode:
+        print("Run once with __pycache__ folders removed and bytecode caching disallowed")
     else:
-        print("Run once with bytecode caches allowed")
+        print("Run once with bytecode caching allowed")
 
     divider = "  ".join((impl_divider, version_divider, benchmark_divider, time_divider))
 

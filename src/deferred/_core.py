@@ -25,11 +25,16 @@ from importlib.machinery import (
 from . import _typing as _tp
 
 
+__version__ = "0.0.1"
+
+
 # region -------- Compile-time hook
 
 
-BYTECODE_HEADER = b"deferred0.0.1"
+BYTECODE_HEADER = f"deferred{__version__}".encode()
 """Custom header for deferred-instrumented bytecode files. Should be updated with every version release."""
+
+SourceDataType: _tp.TypeAlias = "_tp.Union[_tp.ReadableBuffer, str, ast.Module, ast.Expression, ast.Interactive]"
 
 
 class DeferredInstrumenter(ast.NodeTransformer):
@@ -37,12 +42,7 @@ class DeferredInstrumenter(ast.NodeTransformer):
     results are assigned to custom keys in the global namespace.
     """
 
-    def __init__(
-        self,
-        filepath: _tp.Union[_tp.StrPath, _tp.ReadableBuffer],
-        data: _tp.Union[_tp.ReadableBuffer, str, ast.Module, ast.Expression, ast.Interactive],
-        encoding: str,
-    ) -> None:
+    def __init__(self, filepath: _tp.Union[_tp.StrPath, _tp.ReadableBuffer], data: SourceDataType, encoding: str):
         self.filepath = filepath
         self.data = data
         self.encoding = encoding
@@ -51,7 +51,7 @@ class DeferredInstrumenter(ast.NodeTransformer):
     def instrument(self) -> _tp.Any:
         """Transform the tree created from the given data and filepath."""
 
-        if isinstance(self.data, ast.AST):
+        if isinstance(self.data, ast.AST):  # noqa: SIM108 # Readability
             to_visit = self.data
         else:
             to_visit = ast.parse(self.data, self.filepath, "exec")
@@ -73,20 +73,21 @@ class DeferredInstrumenter(ast.NodeTransformer):
     visit_ClassDef = _visit_scope
 
     def _decode_source(self) -> str:
-        newline_decoder = io.IncrementalNewlineDecoder(None, translate=True)
-        return newline_decoder.decode(self.data.decode(self.encoding))  # pyright: ignore
+        """Get the source code corresponding to the given data."""
+
+        if isinstance(self.data, ast.AST):
+            # NOTE: An attempt is made here; node location information likely won't match up.
+            return ast.unparse(self.data)
+        elif isinstance(self.data, str):  # noqa: RET505 # Readability
+            return self.data
+        else:
+            newline_decoder = io.IncrementalNewlineDecoder(None, translate=True)
+            return newline_decoder.decode(self.data.decode(self.encoding))  # pyright: ignore
 
     def _get_node_context(self, node: ast.stmt):  # noqa: ANN202 # Version-dependent and too verbose.
         """Get the location context for a node. That context will be used as an argument to SyntaxError."""
 
-        if isinstance(self.data, ast.AST):
-            source = ast.unparse(self.data)
-        elif isinstance(self.data, str):
-            source = self.data
-        else:
-            source = self._decode_source()
-
-        text = ast.get_source_segment(source, node, padded=True)
+        text = ast.get_source_segment(self._decode_source(), node, padded=True)
         context = (str(self.filepath), node.lineno, node.col_offset + 1, text)
         if sys.version_info >= (3, 10):  # pragma: >=3.10 cover
             end_col_offset = (node.end_col_offset + 1) if (node.end_col_offset is not None) else None
@@ -321,9 +322,7 @@ class DeferredFileLoader(SourceFileLoader):
         """Check if the given AST uses "with defer_imports_until_use". Also assume "utf-8" is the the encoding."""
 
         uses_defer = any(
-            node
-            for node in ast.walk(data)
-            if isinstance(node, ast.With)
+            isinstance(node, ast.With)
             and len(node.items) == 1
             and (
                 (
@@ -339,13 +338,14 @@ class DeferredFileLoader(SourceFileLoader):
                     and node.items[0].context_expr.attr == "defer_imports_until_use"
                 )
             )
+            for node in ast.walk(data)
         )
         encoding = "utf-8"
         return encoding, uses_defer
 
     def source_to_code(  # pyright: ignore [reportIncompatibleMethodOverride]
         self,
-        data: _tp.Union[_tp.ReadableBuffer, str, ast.Module, ast.Expression, ast.Interactive],
+        data: SourceDataType,
         path: _tp.Union[_tp.StrPath, _tp.ReadableBuffer],
         *,
         _optimize: int = -1,
@@ -445,7 +445,7 @@ class DeferredImportProxy:
         local_ns: _tp.MutableMapping[str, object],
         fromlist: _tp.Sequence[str],
         level: int = 0,
-    ) -> None:
+    ):
         self.defer_proxy_name = name
         self.defer_proxy_global_ns = global_ns
         self.defer_proxy_local_ns = local_ns
@@ -477,13 +477,13 @@ class DeferredImportProxy:
 
         return f"<proxy for {imp_stmt!r}>"
 
-    def __getattr__(self, attr: str, /):
+    def __getattr__(self, name: str, /):
         sub_proxy = type(self)(*self.defer_proxy_import_args)
 
-        if attr in self.defer_proxy_fromlist:
-            sub_proxy.defer_proxy_fromlist = (attr,)
+        if name in self.defer_proxy_fromlist:
+            sub_proxy.defer_proxy_fromlist = (name,)
         else:
-            sub_proxy.defer_proxy_sub = attr
+            sub_proxy.defer_proxy_sub = name
 
         return sub_proxy
 
@@ -499,7 +499,7 @@ class DeferredImportKey(str):
     def __new__(cls, key: str, proxy: DeferredImportProxy, /):
         return super().__new__(cls, key)
 
-    def __init__(self, key: str, proxy: DeferredImportProxy, /) -> None:
+    def __init__(self, key: str, proxy: DeferredImportProxy, /):
         self.defer_key_str = str(key)
         self.defer_key_proxy = proxy
         self.is_recursing = False
@@ -649,9 +649,9 @@ def deferred___import__(  # noqa: ANN202
             # Nest submodule proxies as needed.
             # TODO: Is there a better way to do this or maybe a better place for it? Modifying a member of the
             #       passed-in locals isn't ideal.
-            for bound, attr_name in enumerate(name_parts[1:], start=2):
+            for limit, attr_name in enumerate(name_parts[1:], start=2):
                 if attr_name not in vars(parent):
-                    nested_proxy = DeferredImportProxy(".".join(name_parts[:bound]), globals, locals, (), level)
+                    nested_proxy = DeferredImportProxy(".".join(name_parts[:limit]), globals, locals, (), level)
                     nested_proxy.defer_proxy_sub = attr_name
                     setattr(parent, attr_name, nested_proxy)
                     parent = nested_proxy

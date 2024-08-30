@@ -23,6 +23,7 @@ __all__ = (
     "ReadableBuffer",
     "Sequence",
     "StrPath",
+    "TypeAlias",
     "Union",
     "final",
 )
@@ -47,7 +48,7 @@ def final(f: object) -> object:
     return f
 
 
-def __getattr__(name: str) -> object:  # pragma: no cover  # noqa: PLR0911, PLR0912
+def __getattr__(name: str) -> object:  # pragma: no cover  # noqa: PLR0911, PLR0912, PLR0915
     # Let's cache the return values in the global namespace to avoid subsequent calls to __getattr__ if possible.
 
     if name == "T":
@@ -127,6 +128,17 @@ def __getattr__(name: str) -> object:  # pragma: no cover  # noqa: PLR0911, PLR0
 
         globals()["StrPath"] = StrPath = Union[str, os.PathLike[str]]
         return StrPath
+
+    if name == "TypeAlias":
+        if sys.version_info >= (3, 10):
+            from typing import TypeAlias
+        else:
+
+            class TypeAlias:
+                """Placeholder for typing.TypeAlias."""
+
+        globals()["TypeAlias"] = TypeAlias
+        return TypeAlias
 
     if name == "Union":
         from typing import Union

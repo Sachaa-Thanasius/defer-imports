@@ -4,8 +4,6 @@
 
 import os
 
-from typing_extensions import TypeAlias
-
 __all__ = (
     "T",
     "TYPING",
@@ -20,6 +18,7 @@ __all__ = (
     "ReadableBuffer",
     "Sequence",
     "StrPath",
+    "TypeAlias",
     "Union",
     "final",
 )
@@ -28,7 +27,7 @@ from collections.abc import Generator, Iterable, MutableMapping, Sequence
 from types import CodeType, ModuleType
 from typing import TYPE_CHECKING as TYPING, Any, Final, Optional, TypeVar, Union, final
 
-from typing_extensions import Buffer as ReadableBuffer
+from typing_extensions import Buffer as ReadableBuffer, TypeAlias
 
 T = TypeVar("T")  # noqa: PYI001
 

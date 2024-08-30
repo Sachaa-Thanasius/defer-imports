@@ -576,6 +576,9 @@ def main() -> None:
     )
     deferred_path.write_text(deferred_contents, encoding="utf-8")
 
+    tests_path = Path().resolve() / "tests" / "sample_deferred.py"
+    tests_path.write_text(deferred_contents, encoding="utf-8")
+
     # slothy-hooked imports
     slothy_path = bench_path / "sample_slothy.py"
     slothy_contents = (
