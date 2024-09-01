@@ -3,12 +3,12 @@ deferred
 ========
 
 .. image:: https://github.com/Sachaa-Thanasius/deferred/actions/workflows/ci.yml/badge.svg
-    :target: https://github.com/Sachaa-Thanasius/deferred/actions/workflows/ci.yml
-    :alt: CI Status
+   :target: https://github.com/Sachaa-Thanasius/deferred/actions/workflows/ci.yml
+   :alt: CI Status
 
 .. image:: https://img.shields.io/github/license/Sachaa-Thanasius/deferred.svg
-    :target: https://opensource.org/licenses/MIT
-    :alt: License: MIT
+   :target: https://opensource.org/licenses/MIT
+   :alt: License: MIT
 
 An pure-Python implementation of `PEP 690 <https://peps.python.org/pep-0690/>`_–esque lazy imports, but at a user's behest within a ``defer_imports_until_use`` context manager.
 
@@ -59,16 +59,22 @@ Documentation
 See this README as well as docstrings and comments in the code.
 
 
-Features and Caveats
---------------------
+Features
+--------
 
 -   Python implementation–agnostic, in theory
 
     -   The main dependency is on ``locals()`` at module scope to maintain its current API: specifically, that its return value will be a read-through, *write-through*, dict-like view of the module locals.
 
 -   Supports all valid Python import statements.
+
+
+Caveats
+-------
+
 -   Doesn't support lazy importing in class or function scope
 -   Doesn't support wildcard imports
+-   (WIP) Has an initial setup cost that could be smaller. 
 
 
 Benchmarks
@@ -125,6 +131,17 @@ Lazy imports, in theory, alleviate several pain points that Python has currently
 -   And countless more.
 
 Then along came `slothy <https://github.com/bswck/slothy>`_, a library that seems to do it better, having been constructed with feedback from multiple CPython core developers as well as one of the minds behind PEP 690. It was the main inspiration for this project. However, the library (currently) also ties itself to specific Python implementations by depending on the existence of frames that represent the call stack. That's perfectly fine; PEP 690's implementation was for CPython specifically, and to my knowledge, the most popular Python runtimes provide call stack access in some form. Still, I thought that there might be a way to do something similar while remaining implementation-independent, avoiding as many internal APIs as possible. After feedback and discussion, that thought crystalized into this library.
+
+
+How?
+====
+The core of this package is quite simple: when import statments are executed, the resulting values are special proxies representing the delayed import, which are then saved in the local namespace with special keys instead of normal string keys. When a user requests the normal string key corresponding to the import, the relevant import is executed and both the special key and the proxy replace themselves with the correct string key and import result. Everything stems from this.
+
+The ``defer_imports_until_used`` context manager is what causes the proxies to be returned by the import statements: it temporarily replaces ``builtins.__import__`` with a version that will give back proxies that store the arguments needed to execute the *actual* import at a later time.
+
+Those proxies don't use those stored ``__import__`` arguments themselves, though; the aforementioned special keys are what use the proxy's stored arguments to trigger the late import. These keys are aware of the namespace, the *dictionary*, they live in, are aware of the proxy they are the key for, and have overriden their ``__eq__`` and ``__hash__`` methods so that they know when they've been queried. In a sense, they're almost like descriptors, but instead of "owning the dot", they're "owning the brackets". Once they've been matched (i.e. someone uses the name of the import), they can use the proxy's stored ``__import__`` arguments to execute the late import and *replace themselves* in the local namespace. That way, as soon as the name of the deferred import is referenced, all a user sees in the local namespace is a normal string key and the result of the resolved import.
+
+The final step is actually assigning these special proxies to the special keys. After all, Python name binding semantics only allow regular strings to be used as variable names/namespace keys; how can this be bypassed? Well, this is where a little bit of instrumentation comes into play. When a user calls ``deferred.install_deferred_import_hook()`` to set up the ``deferred`` machinery (see :ref:`Setup`), what they are actually doing is installing an import hook that will modify the code of any given Python file that users the ``defer_imports_until_use`` context manager. It adds a few lines of code such that the return values of imports within the context manager are reassigned to special keys in the local namespace, accessed and modified via ``locals()``. With this method, we can avoid using frame hacks to modify the locals and even avoid changing the contract of ``builtins.__import__``, which specifically says it does not modify the global or local namespaces that are passed into it.
 
 
 Acknowledgements
