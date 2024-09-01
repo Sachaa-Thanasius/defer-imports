@@ -657,15 +657,15 @@ def test_relative_imports(tmp_path: Path):
 
     The package has the following structure:
         .
-        └───sample_package
+        └───sample_pkg
             ├───__init__.py
             ├───a.py
             └───b.py
     """
 
-    sample_package_path = tmp_path / "sample_package"
-    sample_package_path.mkdir()
-    sample_package_path.joinpath("__init__.py").write_text(
+    sample_pkg_path = tmp_path / "sample_pkg"
+    sample_pkg_path.mkdir()
+    sample_pkg_path.joinpath("__init__.py").write_text(
         """\
 from deferred import defer_imports_until_use
 
@@ -676,7 +676,7 @@ with defer_imports_until_use:
 """,
         encoding="utf-8",
     )
-    sample_package_path.joinpath("a.py").write_text(
+    sample_pkg_path.joinpath("a.py").write_text(
         """\
 class A:
     def __init__(self, val: object):
@@ -684,7 +684,7 @@ class A:
 """,
         encoding="utf-8",
     )
-    sample_package_path.joinpath("b.py").write_text(
+    sample_pkg_path.joinpath("b.py").write_text(
         """\
 class B:
     def __init__(self, val: object):
@@ -693,8 +693,8 @@ class B:
         encoding="utf-8",
     )
 
-    package_name = "sample_package"
-    package_init_path = str(sample_package_path / "__init__.py")
+    package_name = "sample_pkg"
+    package_init_path = str(sample_pkg_path / "__init__.py")
 
     loader = DeferredFileLoader(package_name, package_init_path)
     spec = importlib.util.spec_from_file_location(
@@ -712,12 +712,12 @@ class B:
         spec.loader.exec_module(module)
 
         module_locals_repr = repr(vars(module))
-        assert "<key for 'a' import>: <proxy for 'from sample_package import a'>" in module_locals_repr
-        assert "<key for 'A' import>: <proxy for 'from sample_package.a import A'>" in module_locals_repr
-        assert "<key for 'B' import>: <proxy for 'from sample_package.b import B'>" in module_locals_repr
+        assert "<key for 'a' import>: <proxy for 'from sample_pkg import a'>" in module_locals_repr
+        assert "<key for 'A' import>: <proxy for 'from sample_pkg.a import A'>" in module_locals_repr
+        assert "<key for 'B' import>: <proxy for 'from sample_pkg.b import B'>" in module_locals_repr
 
         assert module.A
-        assert repr(module.A("hello")).startswith("<sample_package.a.A object at")
+        assert repr(module.A("hello")).startswith("<sample_pkg.a.A object at")
 
 
 def test_circular_imports(tmp_path: Path):
@@ -725,32 +725,32 @@ def test_circular_imports(tmp_path: Path):
 
     The package has the following structure:
         .
-        └───circular_package
+        └───circular_pkg
             ├───__init__.py
             ├───main.py
             ├───x.py
             └───y.py
     """
 
-    circular_package_path = tmp_path / "circular_package"
-    circular_package_path.mkdir()
-    circular_package_path.joinpath("__init__.py").write_text(
+    circular_pkg_path = tmp_path / "circular_pkg"
+    circular_pkg_path.mkdir()
+    circular_pkg_path.joinpath("__init__.py").write_text(
         """\
 from deferred import defer_imports_until_use
 
 with defer_imports_until_use:
-    import circular_package.main
+    import circular_pkg.main
 """,
         encoding="utf-8",
     )
-    circular_package_path.joinpath("main.py").write_text(
+    circular_pkg_path.joinpath("main.py").write_text(
         """\
 from .x import X2
 X2()
 """,
         encoding="utf-8",
     )
-    circular_package_path.joinpath("x.py").write_text(
+    circular_pkg_path.joinpath("x.py").write_text(
         """\
 def X1():
     return "X"
@@ -762,7 +762,7 @@ def X2():
 """
     )
 
-    circular_package_path.joinpath("y.py").write_text(
+    circular_pkg_path.joinpath("y.py").write_text(
         """\
 def Y1():
     return "Y"
@@ -775,8 +775,8 @@ def Y2():
         encoding="utf-8",
     )
 
-    package_name = "circular_package"
-    package_init_path = str(circular_package_path / "__init__.py")
+    package_name = "circular_pkg"
+    package_init_path = str(circular_pkg_path / "__init__.py")
 
     loader = DeferredFileLoader(package_name, package_init_path)
     spec = importlib.util.spec_from_file_location(
@@ -794,6 +794,14 @@ def Y2():
         spec.loader.exec_module(module)
 
         assert module
+
+
+def test_import_stdlib():
+    """Test that we can import most of the stdlib."""
+
+    import tests.stdlib_imports
+
+    assert tests.stdlib_imports
 
 
 def test_thread_safety(tmp_path: Path):
@@ -848,9 +856,60 @@ with defer_imports_until_use:
         assert thread.exc is None
 
 
-def test_import_stdlib():
-    """Test that we can import most of the stdlib."""
+@pytest.mark.skip(reason="Leaking patch problem is currently out of scope.")
+def test_leaking_patch(tmp_path: Path):
+    """Test a synthetic package that demonstrates the "leaking patch" problem.
 
-    import tests.stdlib_imports
+    Source: https://github.com/bswck/slothy/tree/bd0828a8dd9af63ca5c85340a70a14a76a6b714f/tests/leaking_patch
 
-    assert tests.stdlib_imports
+    The package has the following structure:
+        .
+        └───leaking_patch_pkg
+            ├───__init__.py
+            ├───a.py
+            ├───b.py
+            └───patcher.py
+    """
+
+    leaking_patch_pkg_path = tmp_path / "leaking_patch_pkg"
+    leaking_patch_pkg_path.mkdir()
+    leaking_patch_pkg_path.joinpath("__init__.py").touch()
+    leaking_patch_pkg_path.joinpath("a.py").write_text(
+        """\
+from deferred import defer_imports_until_use
+
+with defer_imports_until_use:
+    from .b import B
+""",
+        encoding="utf-8",
+    )
+    leaking_patch_pkg_path.joinpath("b.py").write_text('B = "original thing"')
+    leaking_patch_pkg_path.joinpath("patching.py").write_text(
+        """\
+from unittest import mock
+
+patcher = mock.patch("leaking_patch_pkg.b.B", "patched thing", create=True)
+mock_B = patcher.start()
+""",
+        encoding="utf-8",
+    )
+
+    package_name = "leaking_patch_pkg"
+    package_init_path = str(leaking_patch_pkg_path / "__init__.py")
+
+    loader = DeferredFileLoader(package_name, package_init_path)
+    spec = importlib.util.spec_from_file_location(
+        package_name,
+        package_init_path,
+        loader=loader,
+        submodule_search_locations=[],  # A signal that this is a package.
+    )
+    assert spec
+    assert spec.loader
+
+    module = importlib.util.module_from_spec(spec)
+
+    with temp_cache_module(package_name, module):
+        spec.loader.exec_module(module)
+        exec(f"import {package_name}.patching; from {package_name}.b import B", vars(module))
+        assert module.B == "original thing"
