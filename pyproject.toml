@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "deferred"
-description = "Yet another attempt at implementing lazy imports in Python."
+description = "Lazy imports with regular syntax in pure Python."
 requires-python = ">=3.9"
 license = "MIT"
 authors = [
@@ -55,7 +55,7 @@ features = ["benchmark"]
 python = ["3.9", "3.10", "3.11", "3.12", "3.13"]
 
 [tool.hatch.envs.benchmark.scripts]
-bench = "python -m benchmark.bench_samples --remove-pycache"
+bench = "python -B -m benchmark.bench_samples"
 
 
 # -------- Test config
@@ -140,6 +140,7 @@ extend-ignore = [
     "PD011",   # Erroneous issue that triggers for any .values attribute access at all.
     "PLR2004", # I'll determine what counts as a magic number.
     "RUF002",  # I'll determine what counts as an ambiguous character.
+
     # ---- Recommended by Ruff when using Ruff format
     "E111",
     "E114",
@@ -149,6 +150,7 @@ extend-ignore = [
     "E501",
     "ISC001",
     "ISC002",
+
     # ---- Project-specific rules
 ]
 unfixable = [
@@ -176,6 +178,7 @@ keep-runtime-typing = true
 "src/deferred/_typing.py" = [
     "F822", # __all__ has names that will be provided by module-level __getattr__.
 ]
+
 # ---- Test code
 "tests/**/*.py" = [
     "T201",   # Printing is fine.
