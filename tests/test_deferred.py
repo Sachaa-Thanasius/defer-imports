@@ -845,14 +845,6 @@ with defer_imports_until_use:
     for thread in threads:
         thread.join()
         assert callable(thread.result)  # pyright: ignore
-        # FIXME: Error on various versions; sometimes the accessed signature isn't resolved?
-        #        Recreatable by putting "print(module)" after line 525:
-        #        module: _tp.ModuleType = original_import.get()(*proxy.defer_proxy_import_args)  # noqa: ERA001
-        #
-        # The error:
-        #    AssertionError: assert False
-        #     +  where False = callable(<proxy for 'import inspect as ...'>)
-        #     +    where <proxy for 'import inspect as ...'> = <CapturingThread(Thread 4, stopped 22024)>.result
         assert thread.exc is None
 
 

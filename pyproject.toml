@@ -154,6 +154,7 @@ extend-ignore = [
 unfixable = [
     "ERA", # Prevent unlikely erroneous deletion.
 ]
+typing-modules = ["deferred._typing"]
 
 [tool.ruff.lint.isort]
 lines-after-imports = 2
@@ -184,7 +185,7 @@ keep-runtime-typing = true
 ]
 "tests/stdlib_imports.py" = [
     "F401",   # Unused imports are fine; we're testing import success.
-    "ERA001", # Plenty of imports are commented out with explanation in comment.
+    "ERA001", # Plenty of imports are commented out with explanations next to them.
 ]
 "benchmark/**/*.py" = [
     "T201",   # Printing is fine.
