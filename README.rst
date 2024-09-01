@@ -80,8 +80,8 @@ There are two ways of measuring activation and/or import time currently:
 
     -   To prevent bytecode caching from impacting the benchmark, run with `python -B <https://docs.python.org/3/using/cmdline.html#cmdoption-B>`_, which will set ``sys.dont_write_bytecode`` to ``True``.
     -   PyPy is excluded from the benchmark since it takes time to ramp up. 
-
-    -   (Run once with ``__pycache__`` folders removed and ``sys.dont_write_bytecode=True``):
+    -   This benchmark excludes the cost of registering ``deferred``'s import hook since that has a one-time startup cost that will hopefully be reduced in time. 
+    -   Results after one run: (Run once with ``__pycache__`` folders removed and ``sys.dont_write_bytecode=True``):
 
         ==============  =======  ==========  ===================
         Implementation  Version  Benchmark   Time

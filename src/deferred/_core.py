@@ -31,7 +31,7 @@ __version__ = "0.0.1"
 # region -------- Compile-time hook
 
 
-SourceDataType: _tp.TypeAlias = "_tp.Union[_tp.ReadableBuffer, str, ast.Module, ast.Expression, ast.Interactive]"
+SourceData: _tp.TypeAlias = "_tp.Union[_tp.ReadableBuffer, str, ast.Module, ast.Expression, ast.Interactive]"
 
 BYTECODE_HEADER = f"deferred{__version__}".encode()
 """Custom header for deferred-instrumented bytecode files. Should be updated with every version release."""
@@ -42,7 +42,7 @@ class DeferredInstrumenter(ast.NodeTransformer):
     results are assigned to custom keys in the global namespace.
     """
 
-    def __init__(self, filepath: _tp.Union[_tp.StrPath, _tp.ReadableBuffer], data: SourceDataType, encoding: str):
+    def __init__(self, filepath: _tp.Union[_tp.StrPath, _tp.ReadableBuffer], data: SourceData, encoding: str) -> None:
         self.filepath = filepath
         self.data = data
         self.encoding = encoding
@@ -331,7 +331,7 @@ class DeferredFileLoader(SourceFileLoader):
 
     def source_to_code(  # pyright: ignore [reportIncompatibleMethodOverride]
         self,
-        data: SourceDataType,
+        data: SourceData,
         path: _tp.Union[_tp.StrPath, _tp.ReadableBuffer],
         *,
         _optimize: int = -1,
@@ -431,7 +431,7 @@ class DeferredImportProxy:
         local_ns: _tp.MutableMapping[str, object],
         fromlist: _tp.Sequence[str],
         level: int = 0,
-    ):
+    ) -> None:
         self.defer_proxy_name = name
         self.defer_proxy_global_ns = global_ns
         self.defer_proxy_local_ns = local_ns
@@ -487,7 +487,7 @@ class DeferredImportKey(str):
     def __new__(cls, key: str, proxy: DeferredImportProxy, /):
         return super().__new__(cls, key)
 
-    def __init__(self, key: str, proxy: DeferredImportProxy, /):
+    def __init__(self, key: str, proxy: DeferredImportProxy, /) -> None:
         self.defer_key_str = str(key)
         self.defer_key_proxy = proxy
         self.is_recursing = False
@@ -680,6 +680,8 @@ def install_defer_import_hook() -> None:
     #           Calls 3 among other things.
     #       3)  PathFinder.invalidate_caches() - Works, but it's heavy due to importing importlib.metadata.
     #       ?)  inlining - Copy the implementation of 3 sans importlib.metdata part? Might be incorrect.
+    #       ?)  Switch approach entirely to avoid having to do this invalidation? Not entirely sure how. The
+    #           sys.path_hooks route is also us being good citizens; wouldn't anything else be more intrusive?
     #
     # Goal: Avoid further increasing startup time on first runs, i.e. before any bytecode caching.
     for i, hook in enumerate(sys.path_hooks):
