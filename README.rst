@@ -108,6 +108,7 @@ There are two ways of measuring activation and/or import time currently:
         ==============  =======  ==========  ===================
 
 -   ``python -m timeit -n 1 -r 1 -- "import deferred"``
+
     -   Substitute ``deferred`` with other modules, e.g. ``slothy``, to compare.
     -   This has great variance, so only value the resulting time relative to another import's time in the same process if possible.
 
