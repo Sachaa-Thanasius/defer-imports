@@ -13,14 +13,7 @@ import itertools
 import sys
 import tokenize
 import warnings
-from importlib.machinery import (
-    BYTECODE_SUFFIXES,
-    SOURCE_SUFFIXES,
-    FileFinder,
-    ModuleSpec,
-    PathFinder,
-    SourceFileLoader,
-)
+from importlib.machinery import BYTECODE_SUFFIXES, SOURCE_SUFFIXES, FileFinder, ModuleSpec, PathFinder, SourceFileLoader
 
 from . import _typing as _tp
 
@@ -505,7 +498,7 @@ class DeferredImportKey(str):
 
         # NOTE: This RLock prevents a scenario where the proxy begins resolution in one thread, but before it completes
         #       resolution, a context switch occurs and another thread that tries to resolve the same proxy just gets
-        #       the proxy back before it has been resolved and replaced. This also partially happens because
+        #       the proxy back, since it hasn't been resolved and replaced yet. This also partially happens because
         #       is_recursing is a guard that is only intended for one thread, but other threads will see it without the
         #       RLock.
         with self._rlock:
@@ -667,23 +660,14 @@ def deferred___import__(  # noqa: ANN202
 def install_defer_import_hook() -> None:
     """Insert deferred's path hook right before the default FileFinder one in sys.path_hooks.
 
-    This can be called in a few places, e.g. __init__.py of a package, a .pth file in site-packages, etc.
+    This can be called in a few places, e.g. __init__.py of a package, a .pth file in site packages, etc.
     """
 
     if DEFERRED_PATH_HOOK in sys.path_hooks:
         return
 
-    # TODO: Consider all options for finder cache invalidation. Some form of it is necessary because we went the
-    #       sys.path_hooks route.
-    #       1)  sys.path_importer_cache.clear() - Not enough. Everything breaks.
-    #       2)  importlib.invalidate_caches() - Works, but might be overkill since it hits every meta path finder.
-    #           Calls 3 among other things.
-    #       3)  PathFinder.invalidate_caches() - Works, but it's heavy due to importing importlib.metadata.
-    #       ?)  inlining - Copy the implementation of 3 sans importlib.metdata part? Might be incorrect.
-    #       ?)  Switch approach entirely to avoid having to do this invalidation? Not entirely sure how. The
-    #           sys.path_hooks route is also us being good citizens; wouldn't anything else be more intrusive?
-    #
-    # Goal: Avoid further increasing startup time on first runs, i.e. before any bytecode caching.
+    # NOTE: PathFinder.invalidate_caches() is expensive because it imports importlib.metadata, but we have to just bear
+    #       that for now, unfortunately. Price of being a good citizen, I suppose.
     for i, hook in enumerate(sys.path_hooks):
         if hook.__qualname__.startswith("FileFinder.path_hook"):
             sys.path_hooks.insert(i, DEFERRED_PATH_HOOK)
@@ -699,7 +683,7 @@ def uninstall_defer_import_hook() -> None:
     except ValueError:
         pass
     else:
-        # TODO: See comment in install_defer_import_hook. Sync here.
+        # NOTE: Whatever invalidation mechanism install_defer_import_hook() uses must be used here as well.
         PathFinder.invalidate_caches()
 
 
@@ -723,13 +707,15 @@ class DeferredContext:
 defer_imports_until_use: _tp.Final[DeferredContext] = DeferredContext()
 """A context manager within which imports occur lazily.
 
+This will not work correctly if install_defer_import_hook() was not called first elsewhere.
+
 Raises
 ------
 SyntaxError
     If defer_imports_until_use is used improperly, e.g.:
         1. It is being used in a class or function scope.
-        2. Its block contains a statement that isn't an import.
-        3. Its block contains a wildcard import.
+        2. It contains a statement that isn't an import.
+        3. It contains a wildcard import.
 
 Notes
 -----

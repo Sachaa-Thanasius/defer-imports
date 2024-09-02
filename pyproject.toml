@@ -15,6 +15,7 @@ classifiers = [
     "Natural Language :: English",
     "Operating System :: OS Independent",
     "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -84,7 +85,6 @@ source = ["deferred", "tests"]
 [tool.coverage.report]
 # It's a work in progress.
 fail_under = 90
-exclude_lines = ["^\\s*(?:el)?if TYPING:"]
 
 
 # -------- Linter config
@@ -176,7 +176,7 @@ keep-runtime-typing = true
     "A002", # Allow some shadowing of builtins by parameter names.
 ]
 "src/deferred/_typing.py" = [
-    "F822", # __all__ has names that will be provided by module-level __getattr__.
+    "F822", # __all__ has names that are only provided by module-level __getattr__.
 ]
 
 # ---- Test code

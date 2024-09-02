@@ -6,12 +6,13 @@
 
 """A __getattr__-based lazy import shim for typing- and annotation-related symbols."""
 
+from __future__ import annotations
+
 import sys
 
 
 __all__ = (
     "T",
-    "TYPING",
     "Any",
     "CodeType",
     "Final",
@@ -27,9 +28,6 @@ __all__ = (
     "Union",
     "final",
 )
-
-TYPING = False
-"""Constant that is True at type-checking time but False at runtime. Similar to typing.TYPE_CHECKING."""
 
 
 def final(f: object) -> object:

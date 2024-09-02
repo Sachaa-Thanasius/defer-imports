@@ -89,7 +89,6 @@ def main() -> None:
     exec_order = args.exec_order or list(BENCH_FUNCS)
 
     # Perform benchmarking.
-    # TODO: Investigate how to make multiple iterations work. Seems like caching is unavoidable.
     results = {type_: BENCH_FUNCS[type_]() for type_ in exec_order}
     minimum = min(results.values())
 
@@ -110,30 +109,26 @@ def main() -> None:
     time_header = "Time".ljust(time_len)
     time_divider = "=" * time_len
 
+    divider = "  ".join((impl_divider, version_divider, benchmark_divider, time_divider))
+
+    impl = platform.python_implementation().ljust(impl_len)
+    version = f"{sys.version_info.major}.{sys.version_info.minor}".ljust(version_len)
+
     if sys.dont_write_bytecode:
         print("Run once with __pycache__ folders removed and bytecode caching disallowed")
     else:
         print("Run once with bytecode caching allowed")
-
-    divider = "  ".join((impl_divider, version_divider, benchmark_divider, time_divider))
 
     print()
     print(divider)
     print(impl_header, version_header, benchmark_header, time_header, sep="  ")
     print(divider)
 
-    impl = platform.python_implementation()
-    version = f"{sys.version_info.major}.{sys.version_info.minor}"
-
     for bench_type, result in results.items():
-        formatted_result = f"{result:.5f}s ({result / minimum:.2f}x)"
-        print(
-            impl.ljust(impl_len),
-            version.ljust(version_len),
-            bench_type.ljust(benchmark_len),
-            formatted_result.ljust(time_len),
-            sep="  ",
-        )
+        fmt_bench_type = bench_type.ljust(benchmark_len)
+        fmt_result = f"{result:.5f}s ({result / minimum:.2f}x)".ljust(time_len)
+
+        print(impl, version, fmt_bench_type, fmt_result, sep="  ")
 
     print(divider)
 

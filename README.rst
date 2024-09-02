@@ -11,7 +11,7 @@ deferred
     :target: https://opensource.org/licenses/MIT
 
 
-An pure-Python implementation of `PEP 690 <https://peps.python.org/pep-0690/>`_–esque lazy imports, but at a user's behest within a ``defer_imports_until_use`` context manager.
+A pure-Python implementation of `PEP 690 <https://peps.python.org/pep-0690/>`_–esque lazy imports, but at a user's behest within a ``defer_imports_until_use`` context manager.
 
 
 Installation
@@ -23,7 +23,7 @@ This can be installed via pip::
 
     python -m pip install git@https://github.com/Sachaa-Thanasius/deferred
 
-Additionally, ``deferred`` can easily be vendored; it has zero dependencies and is fairly small (less than 1,000 lines of code).
+It can also easily be vendored, as it has zero dependencies and is less than 1,000 lines of code.
 
 
 Example
@@ -43,6 +43,7 @@ Example
 
 Setup
 =====
+
 ``deferred`` hooks into the Python import system with a path hook. That path hook needs to be registered before code using ``defer_imports_until_use`` is executed. To do that, include the following somewhere such that it will be executed before your code:
 
 .. code:: python
@@ -65,7 +66,7 @@ Features
 
     -   The main dependency is on ``locals()`` at module scope to maintain its current API: specifically, that its return value will be a read-through, *write-through*, dict-like view of the module locals.
 
--   Supports all valid Python import statements.
+-   Supports all syntactically valid Python import statements.
 
 
 Caveats
@@ -84,8 +85,8 @@ There are two ways of measuring activation and/or import time currently:
 -   ``python -m benchmark.bench_samples`` (run with ``--help`` to see more information)
 
     -   To prevent bytecode caching from impacting the benchmark, run with `python -B <https://docs.python.org/3/using/cmdline.html#cmdoption-B>`_, which will set ``sys.dont_write_bytecode`` to ``True``.
-    -   PyPy is excluded from the benchmark since it takes time to ramp up. 
-    -   This benchmark excludes the cost of registering ``deferred``'s import hook since that has a one-time startup cost that will hopefully be reduced in time. 
+    -   PyPy is excluded since it takes time to ramp up. 
+    -   The cost of registering ``deferred``'s import hook is excluded since that is a one-time startup cost that will hopefully be reduced in time. 
     -   Results after one run: (Run once with ``__pycache__`` folders removed and ``sys.dont_write_bytecode=True``):
 
         ==============  =======  ==========  ===================
@@ -126,7 +127,8 @@ Lazy imports, in theory, alleviate several pain points that Python has currently
 -   `demandimport <https://github.com/bwesterb/py-demandimport>`_
 -   `apipkg <https://github.com/pytest-dev/apipkg>`_
 -   `modutil <https://github.com/brettcannon/modutil>`_
--   `SPEC 1 <https://scientific-python.org/specs/spec-0001/>`_
+-   `metamodule <https://github.com/njsmith/metamodule/>`_
+-   `SPEC 1 <https://scientific-python.org/specs/spec-0001/>`_ and its implementation, `lazy-loader <https://github.com/scientific-python/lazy-loader>`_
 -   And countless more.
 
 Then along came `slothy <https://github.com/bswck/slothy>`_, a library that seems to do it better, having been constructed with feedback from multiple CPython core developers as well as one of the minds behind PEP 690. It was the main inspiration for this project. However, the library (currently) also ties itself to specific Python implementations by depending on the existence of frames that represent the call stack. That's perfectly fine; PEP 690's implementation was for CPython specifically, and to my knowledge, the most popular Python runtimes provide call stack access in some form. Still, I thought that there might be a way to do something similar while remaining implementation-independent, avoiding as many internal APIs as possible. After feedback and discussion, that thought crystalized into this library.
@@ -141,14 +143,14 @@ The ``defer_imports_until_used`` context manager is what causes the proxies to b
 
 Those proxies don't use those stored ``__import__`` arguments themselves, though; the aforementioned special keys are what use the proxy's stored arguments to trigger the late import. These keys are aware of the namespace, the *dictionary*, they live in, are aware of the proxy they are the key for, and have overriden their ``__eq__`` and ``__hash__`` methods so that they know when they've been queried. In a sense, they're almost like descriptors, but instead of "owning the dot", they're "owning the brackets". Once they've been matched (i.e. someone uses the name of the import), they can use the proxy's stored ``__import__`` arguments to execute the late import and *replace themselves* in the local namespace. That way, as soon as the name of the deferred import is referenced, all a user sees in the local namespace is a normal string key and the result of the resolved import.
 
-The final step is actually assigning these special proxies to the special keys. After all, Python name binding semantics only allow regular strings to be used as variable names/namespace keys; how can this be bypassed? Well, this is where a little bit of instrumentation comes into play. When a user calls ``deferred.install_deferred_import_hook()`` to set up the ``deferred`` machinery (see :ref:`Setup<Setup>`), what they are actually doing is installing an import hook that will modify the code of any given Python file that users the ``defer_imports_until_use`` context manager. It adds a few lines of code such that the return values of imports within the context manager are reassigned to special keys in the local namespace, accessed and modified via ``locals()``. With this method, we can avoid using frame hacks to modify the locals and even avoid changing the contract of ``builtins.__import__``, which specifically says it does not modify the global or local namespaces that are passed into it.
+The final step is actually assigning these special proxies to the special keys. After all, Python name binding semantics only allow regular strings to be used as variable names/namespace keys; how can this be bypassed? Well, this is where a little bit of instrumentation comes into play. When a user calls ``deferred.install_deferred_import_hook()`` to set up the ``deferred`` machinery (see "Setup" above), what they are actually doing is installing an import hook that will modify the code of any given Python file that users the ``defer_imports_until_use`` context manager. It adds a few lines of code such that the return values of imports within the context manager are reassigned to special keys in the local namespace, accessed and modified via ``locals()``. With this method, we can avoid using frame hacks to modify the locals and even avoid changing the contract of ``builtins.__import__``, which specifically says it does not modify the global or local namespaces that are passed into it.
 
 
 Acknowledgements
 ================
 
--   All the packages mentioned in "Why" above.
+-   All the packages mentioned in "Why?" above.
 -   `PEP 690 <https://peps.python.org/pep-0690/>`_ and its authors, for pushing lazy imports to the point of almost being accepted as a core part of CPython's import system.
 -   Jelle Zijlstra, for so easily creating and sharing a `sample implementation <https://gist.github.com/JelleZijlstra/23c01ceb35d1bc8f335128f59a32db4c>`_ that ``slothy`` and ``deferred`` are based on.
 -   `slothy <https://github.com/bswck/slothy>`_, for inspiring this project.
--   Sinbad, for the initial feedback.
+-   Sinbad, for all his feedback.
