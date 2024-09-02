@@ -824,16 +824,19 @@ with defer_imports_until_use:
     import threading
     import time
 
+    _missing = type("Missing", (), {})
+
     class CapturingThread(threading.Thread):
+        """Thread subclass that captures a returned result or raised exception from the called target."""
+
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             super().__init__(*args, **kwargs)
-            self.result = None
-            self.exc = None
+            self.result = _missing
+            self.exc = _missing
 
         def run(self) -> None:  # pragma: no cover
             try:
-                if self._target is not None:  # pyright: ignore
-                    self.result = self._target(*self._args, **self._kwargs)  # pyright: ignore
+                self.result = self._target(*self._args, **self._kwargs)  # pyright: ignore
             except Exception as exc:  # noqa: BLE001
                 self.exc = exc
             finally:
@@ -852,8 +855,9 @@ with defer_imports_until_use:
 
     for thread in threads:
         thread.join()
+        # FIXME: There's another race condition in here somehow. Hard to reproduce, so we'll handle it later.
+        assert thread.exc is _missing
         assert callable(thread.result)  # pyright: ignore
-        assert thread.exc is None
 
 
 @pytest.mark.skip(reason="Leaking patch problem is currently out of scope.")
@@ -883,7 +887,7 @@ with defer_imports_until_use:
 """,
         encoding="utf-8",
     )
-    leaking_patch_pkg_path.joinpath("b.py").write_text('B = "original thing"')
+    leaking_patch_pkg_path.joinpath("b.py").write_text('B = "original thing"', encoding="utf-8")
     leaking_patch_pkg_path.joinpath("patching.py").write_text(
         """\
 from unittest import mock
@@ -913,3 +917,48 @@ mock_B = patcher.start()
         spec.loader.exec_module(module)
         exec(f"import {package_name}.patching; from {package_name}.b import B", vars(module))
         assert module.B == "original thing"
+
+
+@pytest.mark.skipif(sys.version_info < (3, 12), reason="type statements are only valid in 3.12+")
+def test_type_statement_312(tmp_path: Path):
+    """Test that the loading still occurs when a type statement resolves in python 3.12+.
+
+    The package has the following structure:
+        .
+        └───type_stmt_pkg
+            ├───__init__.py
+            └───exp.py
+    """
+
+    type_stmt_pkg_path = tmp_path / "type_stmt_pkg"
+    type_stmt_pkg_path.mkdir()
+    type_stmt_pkg_path.joinpath("__init__.py").write_text(
+        """\
+from deferred import defer_imports_until_use
+
+with defer_imports_until_use:
+    from .exp import Expensive
+
+type ManyExpensive = tuple[Expensive, ...]
+"""
+    )
+    type_stmt_pkg_path.joinpath("exp.py").write_text("class Expensive: ...", encoding="utf-8")
+
+    package_name = "type_stmt_pkg"
+    package_init_path = str(type_stmt_pkg_path / "__init__.py")
+
+    loader = DeferredFileLoader(package_name, package_init_path)
+    spec = importlib.util.spec_from_file_location(
+        package_name,
+        package_init_path,
+        loader=loader,
+        submodule_search_locations=[],  # A signal that this is a package.
+    )
+    assert spec
+    assert spec.loader
+
+    module = importlib.util.module_from_spec(spec)
+
+    with temp_cache_module(package_name, module):
+        spec.loader.exec_module(module)
+        assert str(module.ManyExpensive.__value__) == "tuple[type_stmt_pkg.exp.Expensive, ...]"

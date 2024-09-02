@@ -464,7 +464,8 @@ class DeferredImportProxy:
         elif name == self.defer_proxy_name.rpartition(".")[2]:
             sub_proxy.defer_proxy_sub = name
         else:
-            raise AttributeError(name)
+            msg = f"module {self.defer_proxy_name!r} has no attribute {name!r}"
+            raise AttributeError(msg)
 
         return sub_proxy
 
@@ -475,7 +476,7 @@ class DeferredImportKey(str):
     When referenced, the key will replace itself in the namespace with the resolved import or the right name from it.
     """
 
-    __slots__ = ("defer_key_str", "defer_key_proxy", "is_recursing", "_rlock")
+    __slots__ = ("defer_key_str", "defer_key_proxy", "is_resolving", "lock")
 
     def __new__(cls, key: str, proxy: DeferredImportProxy, /):
         return super().__new__(cls, key)
@@ -483,9 +484,9 @@ class DeferredImportKey(str):
     def __init__(self, key: str, proxy: DeferredImportProxy, /) -> None:
         self.defer_key_str = str(key)
         self.defer_key_proxy = proxy
-        self.is_recursing = False
 
-        self._rlock = original_import.get()("threading").RLock()
+        self.is_resolving = False
+        self.lock = original_import.get()("threading").RLock()
 
     def __repr__(self) -> str:
         return f"<key for {self.defer_key_str!r} import>"
@@ -496,15 +497,12 @@ class DeferredImportKey(str):
         if self.defer_key_str != value:
             return False
 
-        # NOTE: This RLock prevents a scenario where the proxy begins resolution in one thread, but before it completes
-        #       resolution, a context switch occurs and another thread that tries to resolve the same proxy just gets
-        #       the proxy back, since it hasn't been resolved and replaced yet. This also partially happens because
-        #       is_recursing is a guard that is only intended for one thread, but other threads will see it without the
-        #       RLock.
-        with self._rlock:
-            # This recursion guard allows self-referential imports within __init__.py files.
-            if not self.is_recursing:
-                self.is_recursing = True
+        # Only the first thread to grab the lock should resolve the deferred import.
+        with self.lock:
+            # Reentrant calls from the same thread shouldn't re-trigger the resolution.
+            # This can be caused by self-referential imports, e.g. within __init__.py files.
+            if not self.is_resolving:
+                self.is_resolving = True
 
                 if not is_deferred.get():
                     self._resolve()
@@ -526,19 +524,21 @@ class DeferredImportKey(str):
         module_vars = vars(module)
         for attr_key, attr_val in vars(proxy).items():
             if isinstance(attr_val, DeferredImportProxy) and not hasattr(module, attr_key):
-                # NOTE: This could have used setattr() if pypy didn't normalize the attr name to a str, so we must
-                #       resort to direct placement in the module's __dict__ to avoid that.
+                # This could have used setattr() if pypy didn't normalize the attr key type to str, so we resort to
+                # direct placement in the module's __dict__ to avoid that.
                 module_vars[DeferredImportKey(attr_key, attr_val)] = attr_val
+
                 # Change the namespaces as well to make sure nested proxies are replaced in the right place.
                 attr_val.defer_proxy_global_ns = attr_val.defer_proxy_local_ns = module_vars
 
         # Replace the proxy with the resolved module or module attribute in the relevant namespace.
+
         # 1. Let the regular string key and the relevant namespace.
         key = self.defer_key_str
         namespace = proxy.defer_proxy_local_ns
 
         # 2. Replace the deferred version of the key to avoid it sticking around.
-        # NOTE: This is necessary to prevent recursive resolution for proxies, since __eq__ will be triggered again.
+        #    This is_deferred usage is necessary to prevent recursive resolution, since __eq__ will be triggered again.
         _is_def_tok = is_deferred.set(True)
         try:
             namespace[key] = namespace.pop(key)

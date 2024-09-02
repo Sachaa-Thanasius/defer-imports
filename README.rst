@@ -26,8 +26,25 @@ This can be installed via pip::
 It can also easily be vendored, as it has zero dependencies and is less than 1,000 lines of code.
 
 
+Usage
+=====
+
+Setup
+-----
+
+``deferred`` hooks into the Python import system with a path hook. That path hook needs to be registered before code using ``defer_imports_until_use`` is executed. To do that, include the following somewhere such that it will be executed before your code:
+
+.. code:: python
+
+    import deferred
+
+    deferred.install_defer_import_hook()
+
+
 Example
-=======
+-------
+
+Assuming the path hook has been registered, you can write something like this:
 
 .. code:: python
 
@@ -41,40 +58,29 @@ Example
     # this import cost can be avoided entirely by making sure all annotations are strings.
 
 
-Setup
-=====
+Use Cases
+---------
 
-``deferred`` hooks into the Python import system with a path hook. That path hook needs to be registered before code using ``defer_imports_until_use`` is executed. To do that, include the following somewhere such that it will be executed before your code:
-
-.. code:: python
-
-    import deferred
-
-    deferred.install_defer_import_hook()
-
-
-Documentation
-=============
-
-See this README as well as docstrings and comments in the code.
+-   If imports are necessary to get symbols that are only used within annotations, but those would cause import chains. The current workaround for this is to perform the problematic imports within ``if typing.TYPE_CHECKING: ...`` blocks and then stringify the fake-imported symbols to prevent NameErrors at runtime from the symbols not existing; however, resulting annotations are difficult to introspect with standard library introspection tools, since they assume the symbols exist. With ``deferred``, however, those imports can be deferred, annotations can be stringified (or deferred under PEP 649 semantics), and the deferred imports would only occur when the annotations are introspected/evaluated for the sake of making the contained symbols exist at runtime, thus making the imports not circular and almost zero cost.
+-   If imports are expensive but only necessary for certain code paths that won't always be hit, e.g. in subcommands in CLI tools.
 
 
 Features
---------
+========
 
--   Python implementation–agnostic, in theory
+-   Python implementation–agnostic, in theory.
 
-    -   The main dependency is on ``locals()`` at module scope to maintain its current API: specifically, that its return value will be a read-through, *write-through*, dict-like view of the module locals.
+    -   The library mainly depends on ``locals()`` at module scope to maintain its current API: specifically, that its return value will be a read-through, *write-through*, dict-like view of the module locals, and that a reference to that view can be passed around.
 
 -   Supports all syntactically valid Python import statements.
 
 
 Caveats
--------
+========
 
--   Doesn't support lazy importing in class or function scope
--   Doesn't support wildcard imports
--   (WIP) Has an initial setup cost that could be smaller. 
+-   Doesn't support lazy importing in class or function scope.
+-   Doesn't support wildcard imports.
+-   (WIP) Has an initial setup cost that could be smaller.
 
 
 Benchmarks
