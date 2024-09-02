@@ -32,7 +32,7 @@ Usage
 Setup
 -----
 
-``deferred`` hooks into the Python import system with a path hook. That path hook needs to be registered before code using ``defer_imports_until_use`` is executed. To do that, include the following somewhere such that it will be executed before your code:
+``deferred`` hooks into the Python import system with a path hook. That path hook needs to be registered before code using ``defer_imports_until_use`` is parsed. To do that, include the following somewhere such that it will be executed before your code:
 
 .. code:: python
 
@@ -54,33 +54,66 @@ Assuming the path hook has been registered, you can write something like this:
         import inspect
         from typing import TypeVar
 
-    # inspect and TypeVar won't be imported until referenced. For imports that are only used for annotations,
-    # this import cost can be avoided entirely by making sure all annotations are strings.
+    # inspect and TypeVar won't be imported until referenced.
 
 
 Use Cases
 ---------
 
--   If imports are necessary to get symbols that are only used within annotations, but those would cause import chains. The current workaround for this is to perform the problematic imports within ``if typing.TYPE_CHECKING: ...`` blocks and then stringify the fake-imported symbols to prevent NameErrors at runtime from the symbols not existing; however, resulting annotations are difficult to introspect with standard library introspection tools, since they assume the symbols exist. With ``deferred``, however, those imports can be deferred, annotations can be stringified (or deferred under PEP 649 semantics), and the deferred imports would only occur when the annotations are introspected/evaluated for the sake of making the contained symbols exist at runtime, thus making the imports not circular and almost zero cost.
--   If imports are expensive but only necessary for certain code paths that won't always be hit, e.g. in subcommands in CLI tools.
+-   If imports are necessary to get symbols that are only used within annotations, but such imports would cause import chains.
+
+    The current workaround for this is to perform the problematic imports within ``if typing.TYPE_CHECKING: ...`` blocks and then stringify the fake-imported, nonexistent symbols to prevent NameErrors at runtime; however, resulting annotations are difficult to introspect with standard library introspection tools, since they assume the symbols exist.
+
+    With ``deferred``, however, those imports can be deferred, annotations can be stringified (or late-evaluated under PEP 649 semantics), and the deferred imports would only occur for the sake of making the contained symbols exist at runtime *if** the annotations are inspected/evaluated, thus making the imports not circular and close to free in most circumstances.
+
+-   If expensive imports are only necessary for certain code paths that won't always be taken, e.g. in subcommands in CLI tools.
 
 
 Features
 ========
 
--   Python implementation–agnostic, in theory.
+-   Supports multiple Python runtimes/implementations, in theory.
 
     -   The library mainly depends on ``locals()`` at module scope to maintain its current API: specifically, that its return value will be a read-through, *write-through*, dict-like view of the module locals, and that a reference to that view can be passed around.
 
 -   Supports all syntactically valid Python import statements.
+-   Doesn't break type-checkers like pyright and mypy.
 
 
 Caveats
-========
+=======
 
 -   Doesn't support lazy importing in class or function scope.
 -   Doesn't support wildcard imports.
--   (WIP) Has an initial setup cost that could be smaller.
+-   Has a relatively hefty one-time setup cost.
+-   Doesn't have an API for giving users a choice to automatically defer all imports on a module, library, or application scale.
+
+
+Why?
+====
+
+Lazy imports, in theory, alleviate several pain points that Python has currently. I'm not alone in thinking that; `PEP 690 <https://peps.python.org/pep-0690/>`_ was put forth to integrate lazy imports into CPython for that reason and explains the benefits much better than I can. While that proposal was rejected, there are other options in the form of third-party libraries that implement lazy importing, albeit with some constraints. Most do not have an API that is as general and ergonomic as what PEP 690 laid out, but they didn't aim to fill those shoes in the first place. Some examples:
+
+-   `demandimport <https://github.com/bwesterb/py-demandimport>`_
+-   `apipkg <https://github.com/pytest-dev/apipkg>`_
+-   `modutil <https://github.com/brettcannon/modutil>`_
+-   `metamodule <https://github.com/njsmith/metamodule/>`_
+-   `SPEC 1 <https://scientific-python.org/specs/spec-0001/>`_ and its implementation, `lazy-loader <https://github.com/scientific-python/lazy-loader>`_
+-   And countless more
+
+Then along came `slothy <https://github.com/bswck/slothy>`_, a library that seems to do it better, having been constructed with feedback from multiple CPython core developers as well as one of the minds behind PEP 690. It was the main inspiration for this project. However, the library (currently) also ties itself to specific Python implementations by depending on the existence of frames that represent the call stack. That's perfectly fine; PEP 690's implementation was for CPython specifically, and to my knowledge, the most popular Python runtimes provide call stack access in some form. Still, I thought that there might be a way to do something similar while remaining implementation-independent, avoiding as many internal APIs as possible. After feedback and discussion, that thought crystalized into this library.
+
+
+How?
+====
+
+The core of this package is quite simple: when import statments are executed, the resulting values are special proxies representing the delayed import, which are then saved in the local namespace with special keys instead of normal string keys. When a user requests the normal string key corresponding to the import, the relevant import is executed and both the special key and the proxy replace themselves with the correct string key and import result. Everything stems from this.
+
+The ``defer_imports_until_used`` context manager is what causes the proxies to be returned by the import statements: it temporarily replaces ``builtins.__import__`` with a version that will give back proxies that store the arguments needed to execute the *actual* import at a later time.
+
+Those proxies don't use those stored ``__import__`` arguments themselves, though; the aforementioned special keys are what use the proxy's stored arguments to trigger the late import. These keys are aware of the namespace, the *dictionary*, they live in, are aware of the proxy they are the key for, and have overriden their ``__eq__`` and ``__hash__`` methods so that they know when they've been queried. In a sense, they're almost like descriptors, but instead of "owning the dot", they're "owning the brackets". Once they've been matched (i.e. someone uses the name of the import), they can use the proxy's stored ``__import__`` arguments to execute the late import and *replace themselves* in the local namespace. That way, as soon as the name of the deferred import is referenced, all a user sees in the local namespace is a normal string key and the result of the resolved import.
+
+The final step is actually assigning these special proxies to the special keys. After all, Python name binding semantics only allow regular strings to be used as variable names/namespace keys; how can this be bypassed? Well, this is where a little bit of instrumentation comes into play. When a user calls ``deferred.install_deferred_import_hook()`` to set up the ``deferred`` machinery (see "Setup" above), what they are actually doing is installing an import hook that will modify the code of any given Python file that users the ``defer_imports_until_use`` context manager. It adds a few lines of code such that the return values of imports within the context manager are reassigned to special keys in the local namespace, accessed and modified via ``locals()``. With this method, we can avoid using frame hacks to modify the locals and even avoid changing the contract of ``builtins.__import__``, which specifically says it does not modify the global or local namespaces that are passed into it.
 
 
 Benchmarks
@@ -123,33 +156,6 @@ There are two ways of measuring activation and/or import time currently:
 
     -   Substitute ``deferred`` with other modules, e.g. ``slothy``, to compare.
     -   This has great variance, so only value the resulting time relative to another import's time in the same process if possible.
-
-
-Why?
-====
-
-Lazy imports, in theory, alleviate several pain points that Python has currently. I'm not alone in thinking that; `PEP 690 <https://peps.python.org/pep-0690/>`_ was put forth to integrate lazy imports into CPython for that reason and explains the benefits much better than I can. While that was rejected, there are other options in the form of third-party libraries that implement lazy importing, albeit with some constraints. Most do not have an API that is as general and ergonomic as what PEP 690 laid out, but they didn't aim to fill those shoes in the first place. Some examples:
-
--   `demandimport <https://github.com/bwesterb/py-demandimport>`_
--   `apipkg <https://github.com/pytest-dev/apipkg>`_
--   `modutil <https://github.com/brettcannon/modutil>`_
--   `metamodule <https://github.com/njsmith/metamodule/>`_
--   `SPEC 1 <https://scientific-python.org/specs/spec-0001/>`_ and its implementation, `lazy-loader <https://github.com/scientific-python/lazy-loader>`_
--   And countless more.
-
-Then along came `slothy <https://github.com/bswck/slothy>`_, a library that seems to do it better, having been constructed with feedback from multiple CPython core developers as well as one of the minds behind PEP 690. It was the main inspiration for this project. However, the library (currently) also ties itself to specific Python implementations by depending on the existence of frames that represent the call stack. That's perfectly fine; PEP 690's implementation was for CPython specifically, and to my knowledge, the most popular Python runtimes provide call stack access in some form. Still, I thought that there might be a way to do something similar while remaining implementation-independent, avoiding as many internal APIs as possible. After feedback and discussion, that thought crystalized into this library.
-
-
-How?
-====
-
-The core of this package is quite simple: when import statments are executed, the resulting values are special proxies representing the delayed import, which are then saved in the local namespace with special keys instead of normal string keys. When a user requests the normal string key corresponding to the import, the relevant import is executed and both the special key and the proxy replace themselves with the correct string key and import result. Everything stems from this.
-
-The ``defer_imports_until_used`` context manager is what causes the proxies to be returned by the import statements: it temporarily replaces ``builtins.__import__`` with a version that will give back proxies that store the arguments needed to execute the *actual* import at a later time.
-
-Those proxies don't use those stored ``__import__`` arguments themselves, though; the aforementioned special keys are what use the proxy's stored arguments to trigger the late import. These keys are aware of the namespace, the *dictionary*, they live in, are aware of the proxy they are the key for, and have overriden their ``__eq__`` and ``__hash__`` methods so that they know when they've been queried. In a sense, they're almost like descriptors, but instead of "owning the dot", they're "owning the brackets". Once they've been matched (i.e. someone uses the name of the import), they can use the proxy's stored ``__import__`` arguments to execute the late import and *replace themselves* in the local namespace. That way, as soon as the name of the deferred import is referenced, all a user sees in the local namespace is a normal string key and the result of the resolved import.
-
-The final step is actually assigning these special proxies to the special keys. After all, Python name binding semantics only allow regular strings to be used as variable names/namespace keys; how can this be bypassed? Well, this is where a little bit of instrumentation comes into play. When a user calls ``deferred.install_deferred_import_hook()`` to set up the ``deferred`` machinery (see "Setup" above), what they are actually doing is installing an import hook that will modify the code of any given Python file that users the ``defer_imports_until_use`` context manager. It adds a few lines of code such that the return values of imports within the context manager are reassigned to special keys in the local namespace, accessed and modified via ``locals()``. With this method, we can avoid using frame hacks to modify the locals and even avoid changing the contract of ``builtins.__import__``, which specifically says it does not modify the global or local namespaces that are passed into it.
 
 
 Acknowledgements

@@ -921,7 +921,7 @@ mock_B = patcher.start()
 
 @pytest.mark.skipif(sys.version_info < (3, 12), reason="type statements are only valid in 3.12+")
 def test_type_statement_312(tmp_path: Path):
-    """Test that the loading still occurs when a type statement resolves in python 3.12+.
+    """Test that a proxy within a type statement doesn't resolve until accessed via .__value__.
 
     The package has the following structure:
         .
@@ -961,4 +961,12 @@ type ManyExpensive = tuple[Expensive, ...]
 
     with temp_cache_module(package_name, module):
         spec.loader.exec_module(module)
+        expected_proxy_repr = "<key for 'Expensive' import>: <proxy for 'from type_stmt_pkg.exp import Expensive'>"
+
+        assert expected_proxy_repr in repr(vars(module))
+
+        assert str(module.ManyExpensive) == "ManyExpensive"
+        assert expected_proxy_repr in repr(vars(module))
+
         assert str(module.ManyExpensive.__value__) == "tuple[type_stmt_pkg.exp.Expensive, ...]"
+        assert expected_proxy_repr not in repr(vars(module))

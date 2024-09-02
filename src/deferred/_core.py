@@ -31,7 +31,7 @@ BYTECODE_HEADER = f"deferred{__version__}".encode()
 
 
 class DeferredInstrumenter(ast.NodeTransformer):
-    """AST transformer that "instruments" imports within "with defer_imports_until_use: ..." blocks so that their
+    """AST transformer that instruments imports within "with defer_imports_until_use: ..." blocks so that their
     results are assigned to custom keys in the global namespace.
     """
 
@@ -89,30 +89,54 @@ class DeferredInstrumenter(ast.NodeTransformer):
 
     @staticmethod
     def _create_import_name_replacement(name: str) -> ast.If:
-        """Create an AST for changing the name of a variable in locals if the variable is a deferred proxy."""
+        """Create an AST for changing the name of a variable in locals if the variable is a deferred proxy.
+
+        The resulting node if unparsed is almost equivalent to the following::
+
+            if type(name) is @DeferredImportProxy:
+                @temp_proxy = @local_ns.pop("name")
+                local_ns[@DeferredImportKey("name", temp_proxy)] = @temp_proxy
+        """
 
         if "." in name:
             name = name.partition(".")[0]
 
-        # NOTE: Creating the AST directly is also an option, but this feels more maintainable.
-        if_tree = ast.parse(
-            f"if type({name}) is DeferredImportProxy:\n"
-            f"    temp_proxy = local_ns.pop('{name}')\n"
-            f"    local_ns[DeferredImportKey('{name}', temp_proxy)] = temp_proxy"
+        return ast.If(
+            test=ast.Compare(
+                left=ast.Call(
+                    func=ast.Name("type", ctx=ast.Load()),
+                    args=[ast.Name(name, ctx=ast.Load())],
+                    keywords=[],
+                ),
+                ops=[ast.Is()],
+                comparators=[ast.Name("@DeferredImportProxy", ctx=ast.Load())],
+            ),
+            body=[
+                ast.Assign(
+                    targets=[ast.Name("@temp_proxy", ctx=ast.Store())],
+                    value=ast.Call(
+                        func=ast.Attribute(value=ast.Name("@local_ns", ctx=ast.Load()), attr="pop", ctx=ast.Load()),
+                        args=[ast.Constant(name)],
+                        keywords=[],
+                    ),
+                ),
+                ast.Assign(
+                    targets=[
+                        ast.Subscript(
+                            value=ast.Name("@local_ns", ctx=ast.Load()),
+                            slice=ast.Call(
+                                func=ast.Name("@DeferredImportKey", ctx=ast.Load()),
+                                args=[ast.Constant(name), ast.Name("@temp_proxy", ctx=ast.Load())],
+                                keywords=[],
+                            ),
+                            ctx=ast.Store(),
+                        )
+                    ],
+                    value=ast.Name("@temp_proxy", ctx=ast.Load()),
+                ),
+            ],
+            orelse=[],
         )
-        if_node = if_tree.body[0]
-        assert isinstance(if_node, ast.If)
-
-        # Adjust some of the names to be inaccessible by normal users.
-        for node in ast.walk(if_node):
-            if isinstance(node, ast.Name) and node.id in {
-                "temp_proxy",
-                "local_ns",
-                "DeferredImportProxy",
-                "DeferredImportKey",
-            }:
-                node.id = f"@{node.id}"
-        return if_node
 
     @staticmethod
     def _initialize_local_ns() -> ast.Assign:
@@ -236,16 +260,15 @@ class DeferredInstrumenter(ast.NodeTransformer):
 
             position += 1
 
-        # Import key and proxy classes.
-        key_class = DeferredImportKey.__name__
-        proxy_class = DeferredImportProxy.__name__
+        defer_class_names = ("DeferredImportKey", "DeferredImportProxy")
 
-        defer_aliases = [ast.alias(name=name, asname=f"@{name}") for name in (key_class, proxy_class)]
+        # Import key and proxy classes.
+        defer_aliases = [ast.alias(name=name, asname=f"@{name}") for name in defer_class_names]
         key_and_proxy_import = ast.ImportFrom(module="deferred._core", names=defer_aliases, level=0)
         node.body.insert(position, key_and_proxy_import)
 
         # Clean up the namespace.
-        key_and_proxy_names: list[ast.expr] = [ast.Name(f"@{name}", ctx=ast.Del()) for name in (key_class, proxy_class)]
+        key_and_proxy_names: list[ast.expr] = [ast.Name(f"@{name}", ctx=ast.Del()) for name in defer_class_names]
         node.body.append(ast.Delete(targets=key_and_proxy_names))
 
         return self.generic_visit(node)
@@ -683,7 +706,7 @@ def uninstall_defer_import_hook() -> None:
     except ValueError:
         pass
     else:
-        # NOTE: Whatever invalidation mechanism install_defer_import_hook() uses must be used here as well.
+        # NOTE: Whatever invalidation mechanism install_defer_import_hook() uses should be used here as well.
         PathFinder.invalidate_caches()
 
 
@@ -705,7 +728,7 @@ class DeferredContext:
 
 
 defer_imports_until_use: _tp.Final[DeferredContext] = DeferredContext()
-"""A context manager within which imports occur lazily.
+"""A context manager within which imports occur lazily. Not reentrant.
 
 This will not work correctly if install_defer_import_hook() was not called first elsewhere.
 
