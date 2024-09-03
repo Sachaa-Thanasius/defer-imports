@@ -1,6 +1,6 @@
 # pyright: reportUnusedImport=none
 """Simple benchark script for comparing the import time of the Python standard library when using regular imports,
-deferred-influence imports, and slothy-influenced imports.
+defer_imports-influence imports, and slothy-influenced imports.
 
 The sample scripts being imported are generated with benchmark/generate_samples.py.
 """
@@ -10,7 +10,7 @@ import sys
 import time
 from pathlib import Path
 
-import deferred
+import defer_imports
 
 
 class CatchTime:
@@ -44,13 +44,13 @@ def bench_regular() -> float:
     return ct.elapsed
 
 
-def bench_deferred() -> float:
-    deferred.install_defer_import_hook()
+def bench_defer_imports() -> float:
+    defer_imports.install_defer_import_hook()
 
     with CatchTime() as ct:
-        import benchmark.sample_deferred
+        import benchmark.sample_defer_imports
 
-    deferred.uninstall_defer_import_hook()
+    defer_imports.uninstall_defer_import_hook()
     return ct.elapsed
 
 
@@ -63,7 +63,7 @@ def bench_slothy() -> float:
 BENCH_FUNCS = {
     "regular": bench_regular,
     "slothy": bench_slothy,
-    "deferred": bench_deferred,
+    "defer_imports": bench_defer_imports,
 }
 
 

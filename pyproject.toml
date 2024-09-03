@@ -3,14 +3,12 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "deferred"
+name = "defer-imports"
 description = "Lazy imports with regular syntax in pure Python."
 requires-python = ">=3.9"
 license = "MIT"
 readme = { file = "README.rst", content-type = "text/x-rst" }
-authors = [
-    { name = "Sachaa-Thanasius", email = "111999343+Sachaa-Thanasius@users.noreply.github.com" },
-]
+authors = [{ name = "Sachaa-Thanasius" }]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Natural Language :: English",
@@ -31,21 +29,21 @@ classifiers = [
 dynamic = ["version"]
 
 [tool.hatch.version]
-path = "src/deferred/_core.py"
+path = "src/defer_imports/_core.py"
 
 [project.optional-dependencies]
 benchmark = ["slothy"]
 test = ["pytest"]
-cov = ["deferred[test]", "coverage", "covdefaults"]
-dev = ["deferred[benchmark,cov]", "pre-commit"]
+cov = ["defer-imports[test]", "coverage", "covdefaults"]
+dev = ["defer-imports[benchmark,cov]", "pre-commit"]
 
 [project.urls]
-Documentation = "https://github.com/Sachaa-Thanasius/deferred#readme"
-Issues = "https://github.com/Sachaa-Thanasius/deferred/issues"
-Source = "https://github.com/Sachaa-Thanasius/deferred"
+Documentation = "https://github.com/Sachaa-Thanasius/defer-imports#readme"
+Issues = "https://github.com/Sachaa-Thanasius/defer-imports/issues"
+Source = "https://github.com/Sachaa-Thanasius/defer-imports"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/deferred"]
+packages = ["src/defer_imports"]
 
 
 # -------- Benchmark config
@@ -77,11 +75,11 @@ addopts = [
 ]
 
 [tool.coverage.paths]
-deferred = ["src"]
+defer_imports = ["src"]
 
 [tool.coverage.run]
 plugins = ["covdefaults"]
-source = ["deferred", "tests"]
+source = ["defer_imports", "tests"]
 
 [tool.coverage.report]
 # It's a work in progress.
@@ -157,7 +155,7 @@ extend-ignore = [
 unfixable = [
     "ERA", # Prevent unlikely erroneous deletion.
 ]
-typing-modules = ["deferred._typing"]
+typing-modules = ["defer_imports._typing"]
 
 [tool.ruff.lint.isort]
 lines-after-imports = 2
@@ -173,10 +171,10 @@ keep-runtime-typing = true
     "F403",
     "F405",
 ]
-"src/deferred/_core.py" = [
+"src/defer_imports/_core.py" = [
     "A002", # Allow some shadowing of builtins by parameter names.
 ]
-"src/deferred/_typing.py" = [
+"src/defer_imports/_typing.py" = [
     "F822", # __all__ has names that are only provided by module-level __getattr__.
 ]
 
@@ -201,7 +199,7 @@ keep-runtime-typing = true
 # -------- Type-checker config
 
 [tool.pyright]
-include = ["src/deferred", "tests"]
+include = ["src/defer_imports", "tests"]
 pythonVersion = "3.9"
 pythonPlatform = "All"
 typeCheckingMode = "strict"

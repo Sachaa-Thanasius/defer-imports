@@ -8,8 +8,8 @@ from ._core import DeferredImportKey, DeferredImportProxy, DeferredInstrumenter
 
 
 class DeferredInteractiveConsole(InteractiveConsole):
-    """An emulator of the interactive Python interpreter, but with deferred's compile-time hook baked in to ensure that
-    defer_imports_until_use works as intended directly in the console.
+    """An emulator of the interactive Python interpreter, but with defer_import's compile-time hook baked in to ensure that
+    defer_imports.until_use works as intended directly in the console.
     """
 
     def __init__(self) -> None:

@@ -38,7 +38,7 @@ jobs:
         uses: jakebailey/pyright-action@v2
         with:
           python-version: ${{ matrix.python-version }}
-          verify-types: deferred
+          verify-types: defer-imports
 
   test:
     runs-on: ${{ matrix.os }}

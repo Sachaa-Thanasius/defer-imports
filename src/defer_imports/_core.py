@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-"""The implementation details for deferred's magic."""
+"""The implementation details for defer_imports's magic."""
 
 from __future__ import annotations
 
@@ -28,12 +28,12 @@ __version__ = "0.0.1"
 
 SourceData: _tp.TypeAlias = "_tp.Union[_tp.ReadableBuffer, str, ast.Module, ast.Expression, ast.Interactive]"
 
-BYTECODE_HEADER = f"deferred{__version__}".encode()
-"""Custom header for deferred-instrumented bytecode files. Should be updated with every version release."""
+BYTECODE_HEADER = f"defer_imports{__version__}".encode()
+"""Custom header for defer_imports-instrumented bytecode files. Should be updated with every version release."""
 
 
 class DeferredInstrumenter(ast.NodeTransformer):
-    """AST transformer that instruments imports within "with defer_imports_until_use: ..." blocks so that their
+    """AST transformer that instruments imports within "with defer_imports.until_use: ..." blocks so that their
     results are assigned to custom keys in the global namespace.
     """
 
@@ -54,7 +54,7 @@ class DeferredInstrumenter(ast.NodeTransformer):
         return ast.fix_missing_locations(self.visit(to_visit))
 
     def _visit_scope(self, node: ast.AST) -> ast.AST:
-        """Track Python scope changes. Used to determine if defer_imports_until_use usage is valid."""
+        """Track Python scope changes. Used to determine if defer_imports.until_use usage is valid."""
 
         self.scope_depth += 1
         try:
@@ -91,7 +91,7 @@ class DeferredInstrumenter(ast.NodeTransformer):
 
     @staticmethod
     def _create_import_name_replacement(name: str) -> ast.If:
-        """Create an AST for changing the name of a variable in locals if the variable is a deferred proxy.
+        """Create an AST for changing the name of a variable in locals if the variable is a defer_imports proxy.
 
         The resulting node if unparsed is almost equivalent to the following::
 
@@ -177,12 +177,12 @@ class DeferredInstrumenter(ast.NodeTransformer):
             node = import_nodes[i]
 
             if not isinstance(node, (ast.Import, ast.ImportFrom)):
-                msg = "with defer_imports_until_use blocks must only contain import statements"
+                msg = "with defer_imports.until_use blocks must only contain import statements"
                 raise SyntaxError(msg, self._get_node_context(node))  # noqa: TRY004
 
             for alias in node.names:
                 if alias.name == "*":
-                    msg = "import * not allowed in with defer_imports_until_use blocks"
+                    msg = "import * not allowed in with defer_imports.until_use blocks"
                     raise SyntaxError(msg, self._get_node_context(node))
 
                 new_import_nodes.insert(i + 1, self._create_import_name_replacement(alias.asname or alias.name))
@@ -199,49 +199,42 @@ class DeferredInstrumenter(ast.NodeTransformer):
     @staticmethod
     def check_With_for_defer_usage(node: ast.With) -> bool:
         return len(node.items) == 1 and (
-            (
-                # Allow "with defer_imports_until_use".
-                isinstance(node.items[0].context_expr, ast.Name)
-                and node.items[0].context_expr.id == "defer_imports_until_use"
-            )
-            or (
-                # Allow "with deferred.defer_imports_until_use".
-                isinstance(node.items[0].context_expr, ast.Attribute)
-                and isinstance(node.items[0].context_expr.value, ast.Name)
-                and node.items[0].context_expr.value.id == "deferred"
-                and node.items[0].context_expr.attr == "defer_imports_until_use"
-            )
+            # Allow "with defer_imports.until_use".
+            isinstance(node.items[0].context_expr, ast.Attribute)
+            and isinstance(node.items[0].context_expr.value, ast.Name)
+            and node.items[0].context_expr.value.id == "defer_imports"
+            and node.items[0].context_expr.attr == "until_use"
         )
 
     def visit_With(self, node: ast.With) -> ast.AST:
-        """Check that "with defer_imports_until_use" blocks are valid and if so, hook all imports within.
+        """Check that "with defer_imports.until_use" blocks are valid and if so, hook all imports within.
 
         Raises
         ------
         SyntaxError:
             If any of the following conditions are met, in order of priority:
-                1. "defer_imports_until_use" is being used in a class or function scope.
-                2. "defer_imports_until_use" block contains a statement that isn't an import.
-                3. "defer_imports_until_use" block contains a wildcard import.
+                1. "defer_imports.until_use" is being used in a class or function scope.
+                2. "defer_imports.until_use" block contains a statement that isn't an import.
+                3. "defer_imports.until_use" block contains a wildcard import.
         """
 
         if not self.check_With_for_defer_usage(node):
             return self.generic_visit(node)
 
         if self.scope_depth != 0:
-            msg = "with defer_imports_until_use only allowed at module level"
+            msg = "with defer_imports.until_use only allowed at module level"
             raise SyntaxError(msg, self._get_node_context(node))
 
         node.body = self._substitute_import_keys(node.body)
         return node
 
     def visit_Module(self, node: ast.Module) -> ast.AST:
-        """Insert imports necessary to make defer_imports_until_use work properly. The import is placed after the
+        """Insert imports necessary to make defer_imports.until_use work properly. The import is placed after the
         module docstring and after __future__ imports.
 
         Notes
         -----
-        This assumes the module is not empty and "with defer_imports_until_use" is used somewhere in it.
+        This assumes the module is not empty and "with defer_imports.until_use" is used somewhere in it.
         """
 
         expect_docstring = True
@@ -266,7 +259,7 @@ class DeferredInstrumenter(ast.NodeTransformer):
 
         # Import key and proxy classes.
         defer_aliases = [ast.alias(name=name, asname=f"@{name}") for name in defer_class_names]
-        key_and_proxy_import = ast.ImportFrom(module="deferred._core", names=defer_aliases, level=0)
+        key_and_proxy_import = ast.ImportFrom(module="defer_imports._core", names=defer_aliases, level=0)
         node.body.insert(position, key_and_proxy_import)
 
         # Clean up the namespace.
@@ -300,52 +293,45 @@ def sliding_window(iterable: _tp.Iterable[_tp.T], n: int) -> _tp.Iterable[tuple[
         yield tuple(window)
 
 
-class DeferredFileLoader(SourceFileLoader):
-    """A file loader that instruments .py files which use "with defer_imports_until_use: ..."."""
+def check_source_for_defer_usage(data: _tp.Union[_tp.ReadableBuffer, str]) -> tuple[str, bool]:
+    """Get the encoding of the given code and also check if it uses "with defer_imports.until_use"."""
 
-    @staticmethod
-    def check_source_for_defer_usage(data: _tp.Union[_tp.ReadableBuffer, str]) -> tuple[str, bool]:
-        """Get the encoding of the given code and also check if it uses "with defer_imports_until_use"."""
+    tok_NAME, tok_OP = tokenize.NAME, tokenize.OP
 
-        tok_NAME, tok_OP = tokenize.NAME, tokenize.OP
-
-        if isinstance(data, str):
-            token_stream = tokenize.generate_tokens(io.StringIO(data).readline)
-            encoding = "utf-8"
-        else:
-            token_stream = tokenize.tokenize(io.BytesIO(data).readline)
-            encoding = next(token_stream).string
-
-        uses_defer = any(
-            match_token(tok1, type=tok_NAME, string="with")
-            and (
-                (
-                    # Allow "with defer_imports_until_use".
-                    match_token(tok2, type=tok_NAME, string="defer_imports_until_use")
-                    and match_token(tok3, type=tok_OP, string=":")
-                )
-                or (
-                    # Allow "with deferred.defer_imports_until_use".
-                    match_token(tok2, type=tok_NAME, string="deferred")
-                    and match_token(tok3, type=tok_OP, string=".")
-                    and match_token(tok4, type=tok_NAME, string="defer_imports_until_use")
-                )
-            )
-            for tok1, tok2, tok3, tok4 in sliding_window(token_stream, 4)
-        )
-
-        return encoding, uses_defer
-
-    @staticmethod
-    def check_ast_for_defer_usage(data: ast.AST) -> tuple[str, bool]:
-        """Check if the given AST uses "with defer_imports_until_use". Also assume "utf-8" is the the encoding."""
-
-        uses_defer = any(
-            isinstance(node, ast.With) and DeferredInstrumenter.check_With_for_defer_usage(node)
-            for node in ast.walk(data)
-        )
+    if isinstance(data, str):
+        token_stream = tokenize.generate_tokens(io.StringIO(data).readline)
         encoding = "utf-8"
-        return encoding, uses_defer
+    else:
+        token_stream = tokenize.tokenize(io.BytesIO(data).readline)
+        encoding = next(token_stream).string
+
+    uses_defer = any(
+        match_token(tok1, type=tok_NAME, string="with")
+        and match_token(tok2, type=tok_NAME, string="defer_imports")
+        and match_token(tok3, type=tok_OP, string=".")
+        and match_token(tok4, type=tok_NAME, string="until_use")
+        for tok1, tok2, tok3, tok4 in sliding_window(token_stream, 4)
+    )
+
+    return encoding, uses_defer
+
+
+def check_ast_for_defer_usage(data: ast.AST) -> tuple[str, bool]:
+    """Check if the given AST uses "with defer_imports.until_use". Also assume "utf-8" is the the encoding."""
+
+    uses_defer = any(
+        isinstance(node, ast.With) and DeferredInstrumenter.check_With_for_defer_usage(node) for node in ast.walk(data)
+    )
+    encoding = "utf-8"
+    return encoding, uses_defer
+
+
+class DeferredFileLoader(SourceFileLoader):
+    """A file loader that instruments .py files which use "with defer_imports.until_use: ..."."""
+
+    @staticmethod
+    def check_for_defer_usage(data: SourceData) -> tuple[str, bool]:
+        return check_ast_for_defer_usage(data) if isinstance(data, ast.AST) else check_source_for_defer_usage(data)
 
     def source_to_code(  # pyright: ignore [reportIncompatibleMethodOverride]
         self,
@@ -360,10 +346,7 @@ class DeferredFileLoader(SourceFileLoader):
         if not data:
             return super().source_to_code(data, path, _optimize=_optimize)  # pyright: ignore # See note above.
 
-        if isinstance(data, ast.AST):
-            encoding, uses_defer = self.check_ast_for_defer_usage(data)
-        else:
-            encoding, uses_defer = self.check_source_for_defer_usage(data)
+        encoding, uses_defer = self.check_for_defer_usage(data)
 
         if not uses_defer:
             return super().source_to_code(data, path, _optimize=_optimize)  # pyright: ignore # See note above.
@@ -376,7 +359,7 @@ class DeferredFileLoader(SourceFileLoader):
 
         Notes
         -----
-        If the path points to a bytecode file, check for a deferred-specific header. If the header is invalid, raise
+        If the path points to a bytecode file, check for a defer_imports-specific header. If the header is invalid, raise
         OSError to invalidate the bytecode; importlib._boostrap_external.SourceLoader.get_code expects this [1]_.
 
         Another option is to monkeypatch importlib.util.cache_from_source, as beartype [2]_ and typeguard [3]_ do, but that seems
@@ -394,12 +377,12 @@ class DeferredFileLoader(SourceFileLoader):
         if not path.endswith(tuple(BYTECODE_SUFFIXES)):
             return data
 
-        if not data.startswith(b"deferred"):
-            msg = '"deferred" header missing from bytecode'
+        if not data.startswith(b"defer_imports"):
+            msg = '"defer_imports" header missing from bytecode'
             raise OSError(msg)
 
         if not data.startswith(BYTECODE_HEADER):
-            msg = '"deferred" header is outdated'
+            msg = '"defer_imports" header is outdated'
             raise OSError(msg)
 
         return data[len(BYTECODE_HEADER) :]
@@ -409,7 +392,7 @@ class DeferredFileLoader(SourceFileLoader):
 
         Notes
         -----
-        If the file is a bytecode one, prepend a deferred-specific header to it. That way, instrumented bytecode can be
+        If the file is a bytecode one, prepend a defer_imports-specific header to it. That way, instrumented bytecode can be
         identified and invalidated later if necessary [1]_.
 
         References
@@ -637,7 +620,6 @@ def deferred___import__(  # noqa: ANN202
     locals: _tp.MutableMapping[str, object],
     fromlist: _tp.Optional[_tp.Sequence[str]] = None,
     level: int = 0,
-    /,
 ):
     """An limited replacement for __import__ that supports deferred imports by returning proxies."""
 
@@ -683,7 +665,7 @@ def deferred___import__(  # noqa: ANN202
 
 
 def install_defer_import_hook() -> None:
-    """Insert deferred's path hook right before the default FileFinder one in sys.path_hooks.
+    """Insert defer_imports's path hook right before the default FileFinder one in sys.path_hooks.
 
     This can be called in a few places, e.g. __init__.py of a package, a .pth file in site packages, etc.
     """
@@ -701,7 +683,7 @@ def install_defer_import_hook() -> None:
 
 
 def uninstall_defer_import_hook() -> None:
-    """Remove deferred's path hook if it's in sys.path_hooks."""
+    """Remove defer_imports's path hook if it's in sys.path_hooks."""
 
     try:
         sys.path_hooks.remove(DEFERRED_PATH_HOOK)
@@ -714,7 +696,7 @@ def uninstall_defer_import_hook() -> None:
 
 @_tp.final
 class DeferredContext:
-    """The type for defer_imports_until_use."""
+    """The type for defer_imports.until_use."""
 
     __slots__ = ("_import_ctx_token", "_defer_ctx_token")
 
@@ -729,7 +711,7 @@ class DeferredContext:
         builtins.__import__ = original_import.get()
 
 
-defer_imports_until_use: _tp.Final[DeferredContext] = DeferredContext()
+until_use: _tp.Final[DeferredContext] = DeferredContext()
 """A context manager within which imports occur lazily. Not reentrant.
 
 This will not work correctly if install_defer_import_hook() was not called first elsewhere.
@@ -737,7 +719,7 @@ This will not work correctly if install_defer_import_hook() was not called first
 Raises
 ------
 SyntaxError
-    If defer_imports_until_use is used improperly, e.g.:
+    If defer_imports.until_use is used improperly, e.g.:
         1. It is being used in a class or function scope.
         2. It contains a statement that isn't an import.
         3. It contains a wildcard import.

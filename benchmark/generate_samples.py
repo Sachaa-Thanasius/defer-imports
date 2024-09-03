@@ -1,4 +1,4 @@
-"""Generate sample scripts with the same set of imports but influenced by different libraries, e.g. deferred."""
+"""Generate sample scripts with the same set of imports but influenced by different libraries, e.g. defer_imports."""
 
 from pathlib import Path
 
@@ -563,21 +563,21 @@ def main() -> None:
     regular_contents = "\n".join((PYRIGHT_IGNORE_DIRECTIVES, GENERATED_BY_COMMENT, STDLIB_IMPORTS))
     regular_path.write_text(regular_contents, encoding="utf-8")
 
-    # deferred-instrumented and deferred-hooked imports
-    deferred_path = bench_path / "sample_deferred.py"
-    deferred_contents = (
+    # defer_imports-instrumented and defer_imports-hooked imports
+    defer_imports_path = bench_path / "sample_defer_imports.py"
+    defer_imports_contents = (
         f"{PYRIGHT_IGNORE_DIRECTIVES}\n"
         f"{GENERATED_BY_COMMENT}\n"
-        "from deferred import defer_imports_until_use\n"
+        "import defer_imports\n"
         "\n"
         "\n"
-        "with defer_imports_until_use:\n"
+        "with defer_imports.until_use:\n"
         f"{INDENTED_STDLIB_IMPORTS}"
     )
-    deferred_path.write_text(deferred_contents, encoding="utf-8")
+    defer_imports_path.write_text(defer_imports_contents, encoding="utf-8")
 
     tests_path = Path().resolve() / "tests" / "stdlib_imports.py"
-    tests_path.write_text(deferred_contents, encoding="utf-8")
+    tests_path.write_text(defer_imports_contents, encoding="utf-8")
 
     # slothy-hooked imports
     slothy_path = bench_path / "sample_slothy.py"

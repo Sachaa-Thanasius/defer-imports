@@ -1,4 +1,4 @@
-"""Tests for deferred.
+"""Tests for defer_imports.
 
 Notes
 -----
@@ -15,7 +15,7 @@ from typing import Any, cast
 
 import pytest
 
-from deferred._core import (
+from defer_imports._core import (
     BYTECODE_HEADER,
     DEFERRED_PATH_HOOK,
     DeferredFileLoader,
@@ -60,7 +60,7 @@ def temp_cache_module(name: str, module: ModuleType):
             """'''Module docstring here'''""",
             '''\
 """Module docstring here"""
-from deferred._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
 del @DeferredImportKey, @DeferredImportProxy
 ''',
             id="Inserts statements after module docstring",
@@ -69,7 +69,7 @@ del @DeferredImportKey, @DeferredImportProxy
             """from __future__ import annotations""",
             """\
 from __future__ import annotations
-from deferred._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
 del @DeferredImportKey, @DeferredImportProxy
 """,
             id="Inserts statements after __future__ import",
@@ -78,16 +78,16 @@ del @DeferredImportKey, @DeferredImportProxy
             """\
 from contextlib import nullcontext
 
-from deferred import defer_imports_until_use
+import defer_imports
 
-with defer_imports_until_use, nullcontext():
+with defer_imports.until_use, nullcontext():
     import inspect
 """,
             """\
-from deferred._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
 from contextlib import nullcontext
-from deferred import defer_imports_until_use
-with defer_imports_until_use, nullcontext():
+import defer_imports
+with defer_imports.until_use, nullcontext():
     import inspect
 del @DeferredImportKey, @DeferredImportProxy
 """,
@@ -95,15 +95,15 @@ del @DeferredImportKey, @DeferredImportProxy
         ),
         pytest.param(
             """\
-from deferred import defer_imports_until_use
+import defer_imports
 
-with defer_imports_until_use:
+with defer_imports.until_use:
     import inspect
 """,
             """\
-from deferred._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
-from deferred import defer_imports_until_use
-with defer_imports_until_use:
+from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+import defer_imports
+with defer_imports.until_use:
     @local_ns = locals()
     @temp_proxy = None
     import inspect
@@ -117,17 +117,16 @@ del @DeferredImportKey, @DeferredImportProxy
         ),
         pytest.param(
             """\
-from deferred import defer_imports_until_use
+import defer_imports
 
-
-with defer_imports_until_use:
+with defer_imports.until_use:
     import importlib
     import importlib.abc
 """,
             """\
-from deferred._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
-from deferred import defer_imports_until_use
-with defer_imports_until_use:
+from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+import defer_imports
+with defer_imports.until_use:
     @local_ns = locals()
     @temp_proxy = None
     import importlib
@@ -145,15 +144,15 @@ del @DeferredImportKey, @DeferredImportProxy
         ),
         pytest.param(
             """\
-from deferred import defer_imports_until_use
+import defer_imports
 
-with defer_imports_until_use:
+with defer_imports.until_use:
     from . import a
 """,
             """\
-from deferred._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
-from deferred import defer_imports_until_use
-with defer_imports_until_use:
+from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+import defer_imports
+with defer_imports.until_use:
     @local_ns = locals()
     @temp_proxy = None
     from . import a
@@ -167,15 +166,15 @@ del @DeferredImportKey, @DeferredImportProxy
         ),
         pytest.param(
             """\
-import deferred
+import defer_imports
 
-with deferred.defer_imports_until_use:
+with defer_imports.until_use:
     from . import a
 """,
             """\
-from deferred._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
-import deferred
-with deferred.defer_imports_until_use:
+from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+import defer_imports
+with defer_imports.until_use:
     @local_ns = locals()
     @temp_proxy = None
     from . import a
@@ -185,12 +184,12 @@ with deferred.defer_imports_until_use:
     del @temp_proxy, @local_ns
 del @DeferredImportKey, @DeferredImportProxy
 """,
-            id="with deferred.defer_imports_until_use",
+            id="with defer_imports.until_use",
         ),
     ],
 )
 def test_instrumentation(before: str, after: str):
-    """Test what code is generated by the instrumentation side of deferred."""
+    """Test what code is generated by the instrumentation side of defer_imports."""
 
     import ast
     import io
@@ -204,7 +203,7 @@ def test_instrumentation(before: str, after: str):
 
 
 def test_path_hook_installation():
-    """Test the API for putting/removing the deferred path hook from sys.path_hooks."""
+    """Test the API for putting/removing the defer_imports path hook from sys.path_hooks."""
 
     # It shouldn't be on there by default.
     assert DEFERRED_PATH_HOOK not in sys.path_hooks
@@ -250,9 +249,9 @@ def test_not_deferred(tmp_path: Path):
 
 def test_regular_import(tmp_path: Path):
     source = """\
-from deferred import defer_imports_until_use
+import defer_imports
 
-with defer_imports_until_use:
+with defer_imports.until_use:
     import inspect
 """
 
@@ -274,9 +273,9 @@ with defer_imports_until_use:
 
 def test_regular_import_with_rename(tmp_path: Path):
     source = """\
-from deferred import defer_imports_until_use
+import defer_imports
 
-with defer_imports_until_use:
+with defer_imports.until_use:
     import inspect as gin
 """
 
@@ -307,9 +306,9 @@ with defer_imports_until_use:
 
 def test_regular_import_nested(tmp_path: Path):
     source = """\
-from deferred import defer_imports_until_use
+import defer_imports
 
-with defer_imports_until_use:
+with defer_imports.until_use:
     import importlib.abc
 """
 
@@ -329,9 +328,9 @@ with defer_imports_until_use:
 
 def test_regular_import_nested_with_rename(tmp_path: Path):
     source = """\
-from deferred import defer_imports_until_use
+import defer_imports
 
-with defer_imports_until_use:
+with defer_imports.until_use:
     import collections.abc as xyz
 """
 
@@ -378,9 +377,9 @@ with defer_imports_until_use:
 
 def test_from_import(tmp_path: Path):
     source = """\
-from deferred import defer_imports_until_use
+import defer_imports
 
-with defer_imports_until_use:
+with defer_imports.until_use:
     from inspect import isfunction, signature
 """
 
@@ -409,9 +408,9 @@ with defer_imports_until_use:
 
 def test_from_import_with_rename(tmp_path: Path):
     source = """\
-from deferred import defer_imports_until_use
+import defer_imports
 
-with defer_imports_until_use:
+with defer_imports.until_use:
     from inspect import Signature as MySignature
 """
 
@@ -435,14 +434,14 @@ with defer_imports_until_use:
 
 
 def test_deferred_header_in_instrumented_pycache(tmp_path: Path):
-    """Test that the deferred-specific bytecode header is being prepended to the bytecode cache files of
-    deferred-instrumented modules.
+    """Test that the defer_imports-specific bytecode header is being prepended to the bytecode cache files of
+    defer_imports-instrumented modules.
     """
 
     source = """\
-from deferred import defer_imports_until_use
+import defer_imports
 
-with defer_imports_until_use:
+with defer_imports.until_use:
     import asyncio
 """
 
@@ -460,9 +459,9 @@ with defer_imports_until_use:
 
 def test_error_if_non_import(tmp_path: Path):
     source = """\
-from deferred import defer_imports_until_use
+import defer_imports
 
-with defer_imports_until_use:
+with defer_imports.until_use:
     print("Hello world")
 """
 
@@ -480,10 +479,10 @@ with defer_imports_until_use:
 
 def test_error_if_import_in_class(tmp_path: Path):
     source = """\
-from deferred import defer_imports_until_use
+import defer_imports
 
 class Example:
-    with defer_imports_until_use:
+    with defer_imports.until_use:
         from inspect import signature
 """
 
@@ -497,15 +496,15 @@ class Example:
     assert exc_info.value.filename == str(module_path)
     assert exc_info.value.lineno == 4
     assert exc_info.value.offset == 5
-    assert exc_info.value.text == "    with defer_imports_until_use:\n        from inspect import signature"
+    assert exc_info.value.text == "    with defer_imports.until_use:\n        from inspect import signature"
 
 
 def test_error_if_import_in_function(tmp_path: Path):
     source = """\
-from deferred import defer_imports_until_use
+import defer_imports
 
 def test():
-    with defer_imports_until_use:
+    with defer_imports.until_use:
         import inspect
 
     return inspect.signature(test)
@@ -520,14 +519,14 @@ def test():
     assert exc_info.value.filename == str(module_path)
     assert exc_info.value.lineno == 4
     assert exc_info.value.offset == 5
-    assert exc_info.value.text == "    with defer_imports_until_use:\n        import inspect"
+    assert exc_info.value.text == "    with defer_imports.until_use:\n        import inspect"
 
 
 def test_error_if_wildcard_import(tmp_path: Path):
     source = """\
-from deferred import defer_imports_until_use
+import defer_imports
 
-with defer_imports_until_use:
+with defer_imports.until_use:
     from typing import *
 """
 
@@ -545,9 +544,9 @@ with defer_imports_until_use:
 
 def test_top_level_and_submodules_1(tmp_path: Path):
     source = """\
-from deferred import defer_imports_until_use
+import defer_imports
 
-with defer_imports_until_use:
+with defer_imports.until_use:
     import importlib
     import importlib.abc
     import importlib.util
@@ -589,9 +588,9 @@ def test_top_level_and_submodules_2(tmp_path: Path):
     source = """\
 from pprint import pprint
 
-from deferred import defer_imports_until_use
+import defer_imports
 
-with defer_imports_until_use:
+with defer_imports.until_use:
     import asyncio
     import asyncio.base_events
     import asyncio.base_futures
@@ -609,9 +608,9 @@ with defer_imports_until_use:
 
 def test_mixed_from_same_module(tmp_path: Path):
     source = """\
-from deferred import defer_imports_until_use
+import defer_imports
 
-with defer_imports_until_use:
+with defer_imports.until_use:
     import asyncio
     from asyncio import base_events
     from asyncio import base_futures
@@ -653,7 +652,7 @@ with defer_imports_until_use:
 
 
 def test_relative_imports(tmp_path: Path):
-    """Test a synthetic package that uses relative imports within defer_imports_until_use blocks.
+    """Test a synthetic package that uses relative imports within defer_imports.until_use blocks.
 
     The package has the following structure:
         .
@@ -667,9 +666,9 @@ def test_relative_imports(tmp_path: Path):
     sample_pkg_path.mkdir()
     sample_pkg_path.joinpath("__init__.py").write_text(
         """\
-from deferred import defer_imports_until_use
+import defer_imports
 
-with defer_imports_until_use:
+with defer_imports.until_use:
     from . import a
     from .a import A
     from .b import B
@@ -736,9 +735,9 @@ def test_circular_imports(tmp_path: Path):
     circular_pkg_path.mkdir()
     circular_pkg_path.joinpath("__init__.py").write_text(
         """\
-from deferred import defer_imports_until_use
+import defer_imports
 
-with defer_imports_until_use:
+with defer_imports.until_use:
     import circular_pkg.main
 """,
         encoding="utf-8",
@@ -811,9 +810,9 @@ def test_thread_safety(tmp_path: Path):
     """
 
     source = """\
-from deferred import defer_imports_until_use
+import defer_imports
 
-with defer_imports_until_use:
+with defer_imports.until_use:
     import inspect
 """
 
@@ -880,9 +879,9 @@ def test_leaking_patch(tmp_path: Path):
     leaking_patch_pkg_path.joinpath("__init__.py").touch()
     leaking_patch_pkg_path.joinpath("a.py").write_text(
         """\
-from deferred import defer_imports_until_use
+import defer_imports
 
-with defer_imports_until_use:
+with defer_imports.until_use:
     from .b import B
 """,
         encoding="utf-8",
@@ -934,9 +933,9 @@ def test_type_statement_312(tmp_path: Path):
     type_stmt_pkg_path.mkdir()
     type_stmt_pkg_path.joinpath("__init__.py").write_text(
         """\
-from deferred import defer_imports_until_use
+import defer_imports
 
-with defer_imports_until_use:
+with defer_imports.until_use:
     from .exp import Expensive
 
 type ManyExpensive = tuple[Expensive, ...]
