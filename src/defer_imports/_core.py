@@ -405,6 +405,13 @@ class DeferredFileLoader(SourceFileLoader):
 
         return super().set_data(path, data, _mode=_mode)
 
+    def exec_module(self, module: _tp.ModuleType) -> None:
+        super().exec_module(module)
+        # NOTE: This is a hack to work around distlib and thereby pip not having accounting for custom loaders when
+        #       indexing resources.
+        #       Ref: https://github.com/pypa/pip/issues/7818
+        module.__loader__ = None
+
 
 DEFERRED_PATH_HOOK = FileFinder.path_hook((DeferredFileLoader, SOURCE_SUFFIXES))
 
