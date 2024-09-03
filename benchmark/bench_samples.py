@@ -10,8 +10,6 @@ import sys
 import time
 from pathlib import Path
 
-import defer_imports
-
 
 class CatchTime:
     """A context manager that measures the time taken to execute its body."""
@@ -45,12 +43,8 @@ def bench_regular() -> float:
 
 
 def bench_defer_imports() -> float:
-    defer_imports.install_defer_import_hook()
-
     with CatchTime() as ct:
         import benchmark.sample_defer_imports
-
-    defer_imports.uninstall_defer_import_hook()
     return ct.elapsed
 
 
@@ -101,7 +95,7 @@ def main() -> None:
     version_len = len(version_header)
     version_divider = "=" * version_len
 
-    benchmark_len = 10
+    benchmark_len = 14
     benchmark_header = "Benchmark".ljust(benchmark_len)
     benchmark_divider = "=" * benchmark_len
 

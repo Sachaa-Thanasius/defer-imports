@@ -3,6 +3,6 @@
 # SPDX-License-Identifier: MIT
 
 if __name__ == "__main__":
-    from ._console import DeferredInteractiveConsole
+    from .console import DeferredInteractiveConsole
 
     raise SystemExit(DeferredInteractiveConsole().interact())
