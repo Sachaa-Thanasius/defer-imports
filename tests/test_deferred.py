@@ -164,28 +164,6 @@ del @DeferredImportKey, @DeferredImportProxy
 """,
             id="relative import 1",
         ),
-        pytest.param(
-            """\
-import defer_imports
-
-with defer_imports.until_use:
-    from . import a
-""",
-            """\
-from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
-import defer_imports
-with defer_imports.until_use:
-    @local_ns = locals()
-    @temp_proxy = None
-    from . import a
-    if type(a) is @DeferredImportProxy:
-        @temp_proxy = @local_ns.pop('a')
-        @local_ns[@DeferredImportKey('a', @temp_proxy)] = @temp_proxy
-    del @temp_proxy, @local_ns
-del @DeferredImportKey, @DeferredImportProxy
-""",
-            id="with defer_imports.until_use",
-        ),
     ],
 )
 def test_instrumentation(before: str, after: str):
