@@ -2,8 +2,8 @@
 #
 # SPDX-License-Identifier: MIT
 
-"""A pure-Python implementation of PEP 690–esque lazy imports, but at a user's behest within a "defer_imports_until_use"
-context manager.
+"""A library that implements PEP 690–esque lazy imports in pure Python, but at a user's behest within a context
+manager.
 """
 
 from ._console import DeferredInteractiveConsole

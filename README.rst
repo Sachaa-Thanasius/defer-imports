@@ -6,6 +6,14 @@ defer-imports
     :alt: License: MIT
     :target: https://opensource.org/licenses/MIT
 
+.. image:: https://img.shields.io/pypi/v/defer-imports.svg
+    :target: https://pypi.org/project/defer-imports
+    :alt: PyPI version info
+
+.. image:: https://img.shields.io/pypi/pyversions/defer-imports.svg
+    :target: ttps://pypi.org/project/defer-imports
+    :alt: PyPI supported Python versions
+
 
 A library that implements `PEP 690 <https://peps.python.org/pep-0690/>`_–esque lazy imports in pure Python, but at a user's behest within a context manager.
 
@@ -17,7 +25,7 @@ Installation
 
 This can be installed via pip::
 
-    python -m pip install git@https://github.com/Sachaa-Thanasius/defer-imports
+    python -m pip install defer-imports
 
 It can also easily be vendored, as it has zero dependencies and is less than 1,000 lines of code.
 
