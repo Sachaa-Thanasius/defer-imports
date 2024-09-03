@@ -47,5 +47,4 @@ class DeferredInteractiveConsole(InteractiveConsole):
 
 
 if __name__ == "__main__":
-    console = DeferredInteractiveConsole()
-    console.interact()
+    DeferredInteractiveConsole().interact()
