@@ -3,15 +3,15 @@ defer-imports
 =============
 
 .. image:: https://img.shields.io/github/license/Sachaa-Thanasius/defer-imports.svg
-    :alt: License: MIT
     :target: https://opensource.org/licenses/MIT
+    :alt: License: MIT
 
 .. image:: https://img.shields.io/pypi/v/defer-imports.svg
     :target: https://pypi.org/project/defer-imports
     :alt: PyPI version info
 
 .. image:: https://img.shields.io/pypi/pyversions/defer-imports.svg
-    :target: ttps://pypi.org/project/defer-imports
+    :target: https://pypi.org/project/defer-imports
     :alt: PyPI supported Python versions
 
 
