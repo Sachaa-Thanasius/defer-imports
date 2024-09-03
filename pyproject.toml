@@ -201,6 +201,7 @@ keep-runtime-typing = true
 # -------- Type-checker config
 
 [tool.pyright]
+include = ["src/deferred", "tests", "benchmark"]
 pythonVersion = "3.9"
 pythonPlatform = "All"
 typeCheckingMode = "strict"
