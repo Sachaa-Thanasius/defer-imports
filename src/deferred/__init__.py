@@ -6,7 +6,14 @@
 context manager.
 """
 
+from ._console import DeferredInteractiveConsole
 from ._core import __version__, defer_imports_until_use, install_defer_import_hook, uninstall_defer_import_hook
 
 
-__all__ = ("__version__", "defer_imports_until_use", "install_defer_import_hook", "uninstall_defer_import_hook")
+__all__ = (
+    "__version__",
+    "defer_imports_until_use",
+    "install_defer_import_hook",
+    "uninstall_defer_import_hook",
+    "DeferredInteractiveConsole",
+)

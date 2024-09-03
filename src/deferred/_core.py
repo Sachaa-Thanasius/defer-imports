@@ -2,6 +2,8 @@
 #
 # SPDX-License-Identifier: MIT
 
+"""The implementation details for deferred's magic."""
+
 from __future__ import annotations
 
 import ast
