@@ -41,13 +41,13 @@ class DeferredInstrumenter(ast.NodeTransformer):
         self.encoding = encoding
         self.scope_depth = 0
 
-    def instrument(self) -> _tp.Any:
+    def instrument(self, mode: str = "exec") -> _tp.Any:
         """Transform the tree created from the given data and filepath."""
 
         if isinstance(self.data, ast.AST):  # noqa: SIM108 # Readability
             to_visit = self.data
         else:
-            to_visit = ast.parse(self.data, self.filepath, "exec")
+            to_visit = ast.parse(self.data, self.filepath, mode)
 
         return ast.fix_missing_locations(self.visit(to_visit))
 

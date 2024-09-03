@@ -82,7 +82,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    # Do any extra setup.
+    # Do any remaining setup.
     if sys.dont_write_bytecode:
         remove_pycaches()
 
