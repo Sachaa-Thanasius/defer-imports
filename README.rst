@@ -36,13 +36,17 @@ Usage
 Setup
 -----
 
-``defer-imports`` hooks into the Python import system with a path hook. That path hook needs to be registered before code using the import-delaying context manager, ``defer_imports.until_use``, is parsed. To do that, include the following somewhere such that it will be executed before your code:
+This library uses a ``.pth`` file to register an import hook on interpreter startup. The hook is put in front of the built-in file finder's `path hook <https://docs.python.org/3/library/importlib.html#importlib.machinery.FileFinder.path_hook>`_ on `sys.path_hooks <https://docs.python.org/3/library/sys.html#sys.path_hooks>`_, and is responsible for the instrumentation side of this library. That should work fine if you're using a regular setup with site packages, where that ``.pth`` file should end up.
+
+However, if your environment is atypical, you might need to manually register that path hook to have your code be correctly processed by this package. Do so in a file away from the rest of your code, before any of it executes. For example:
 
 .. code:: python
 
     import defer_imports
 
     defer_imports.install_defer_import_hook()
+
+    import your_code
 
 
 Example

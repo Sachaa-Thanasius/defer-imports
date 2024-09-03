@@ -183,29 +183,27 @@ def test_instrumentation(before: str, after: str):
 def test_path_hook_installation():
     """Test the API for putting/removing the defer_imports path hook from sys.path_hooks."""
 
-    # It shouldn't be on there by default.
-    assert DEFERRED_PATH_HOOK not in sys.path_hooks
-    before_length = len(sys.path_hooks)
-
-    # It should be present after calling install.
-    install_defer_import_hook()
+    before_path_hooks = list(sys.path_hooks)
+    # Thanks to the .pth file, it should be on there by default.
     assert DEFERRED_PATH_HOOK in sys.path_hooks
-    assert len(sys.path_hooks) == before_length + 1
+    before_length = len(sys.path_hooks)
 
     # Calling install shouldn't do anything if it's already on sys.path_hooks.
     install_defer_import_hook()
     assert DEFERRED_PATH_HOOK in sys.path_hooks
-    assert len(sys.path_hooks) == before_length + 1
+    assert len(sys.path_hooks) == before_length
 
     # Calling uninstall should remove it.
     uninstall_defer_import_hook()
     assert DEFERRED_PATH_HOOK not in sys.path_hooks
-    assert len(sys.path_hooks) == before_length
+    assert len(sys.path_hooks) == before_length - 1
 
     # Calling uninstall if it's not present should do nothing to sys.path_hooks.
     uninstall_defer_import_hook()
     assert DEFERRED_PATH_HOOK not in sys.path_hooks
-    assert len(sys.path_hooks) == before_length
+    assert len(sys.path_hooks) == before_length - 1
+
+    sys.path_hooks = before_path_hooks
 
 
 def test_empty(tmp_path: Path):

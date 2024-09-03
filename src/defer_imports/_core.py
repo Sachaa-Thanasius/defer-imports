@@ -20,7 +20,7 @@ from importlib.machinery import BYTECODE_SUFFIXES, SOURCE_SUFFIXES, FileFinder, 
 from . import _typing as _tp
 
 
-__version__ = "0.0.1"
+__version__ = "0.0.1dev"
 
 
 # region -------- Compile-time hook
@@ -664,10 +664,15 @@ def deferred___import__(  # noqa: ANN202
 # region -------- Public API
 
 
-def install_defer_import_hook() -> None:
+def install_defer_import_hook(*, invalidate_caches: bool = True) -> None:
     """Insert defer_imports's path hook right before the default FileFinder one in sys.path_hooks.
 
     This can be called in a few places, e.g. __init__.py of a package, a .pth file in site packages, etc.
+
+    Parameters
+    ----------
+    invalidate_caches: bool, default=True
+        Whether to invalidate the caches on all path entry finders.
     """
 
     if DEFERRED_PATH_HOOK in sys.path_hooks:
@@ -678,7 +683,8 @@ def install_defer_import_hook() -> None:
     for i, hook in enumerate(sys.path_hooks):
         if hook.__qualname__.startswith("FileFinder.path_hook"):
             sys.path_hooks.insert(i, DEFERRED_PATH_HOOK)
-            PathFinder.invalidate_caches()
+            if invalidate_caches:
+                PathFinder.invalidate_caches()
             return
 
 

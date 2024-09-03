@@ -45,6 +45,17 @@ Source = "https://github.com/Sachaa-Thanasius/defer-imports"
 [tool.hatch.build.targets.wheel]
 packages = ["src/defer_imports"]
 
+[tool.hatch.build.targets.wheel.hooks.autorun]
+# Install defer-import's path hook at startup. With luck, this'll bypass any need for cache invalidation.
+dependencies = ["hatch-autorun"]
+code = """
+try:
+    import defer_imports
+except ImportError:
+    pass
+else:
+    defer_imports.install_defer_import_hook(invalidate_caches=False)
+"""
 
 # -------- Benchmark config
 
