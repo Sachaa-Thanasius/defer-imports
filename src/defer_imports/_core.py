@@ -407,7 +407,7 @@ class DeferredFileLoader(SourceFileLoader):
 
     def exec_module(self, module: _tp.ModuleType) -> None:
         super().exec_module(module)
-        # NOTE: This is a hack to work around distlib and thereby pip not having accounting for custom loaders when
+        # NOTE: This is a hack to work around distlib and thereby pip not accounting for custom loaders when
         #       indexing resources.
         #       Ref: https://github.com/pypa/pip/issues/7818
         module.__loader__ = None
