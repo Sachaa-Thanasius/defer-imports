@@ -101,7 +101,7 @@ def main() -> None:
     version_len = len(version_header)
     version_divider = "=" * version_len
 
-    benchmark_len = 10
+    benchmark_len = 14
     benchmark_header = "Benchmark".ljust(benchmark_len)
     benchmark_divider = "=" * benchmark_len
 
