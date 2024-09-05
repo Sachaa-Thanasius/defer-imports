@@ -7,6 +7,9 @@ from code import InteractiveConsole
 from ._core import DeferredImportKey, DeferredImportProxy, DeferredInstrumenter
 
 
+__all__ = ("DeferredInteractiveConsole",)
+
+
 class DeferredInteractiveConsole(InteractiveConsole):
     """An emulator of the interactive Python interpreter, but with defer_import's compile-time hook baked in to ensure that
     defer_imports.until_use works as intended directly in the console.
