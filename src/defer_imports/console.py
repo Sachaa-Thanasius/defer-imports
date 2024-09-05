@@ -38,7 +38,7 @@ class DeferredInteractiveConsole(InteractiveConsole):
 
         # Case 3: Input is complete.
         try:
-            tree = DeferredInstrumenter(filename, source, "utf-8").instrument(symbol)
+            tree = DeferredInstrumenter(source, filename, "utf-8").instrument(symbol)
             code = compile(tree, filename, symbol)
         except SyntaxError:
             # Case 1, again.

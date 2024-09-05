@@ -37,9 +37,9 @@ class DeferredInstrumenter(ast.NodeTransformer):
     results are assigned to custom keys in the global namespace.
     """
 
-    def __init__(self, filepath: _tp.Union[_tp.StrPath, _tp.ReadableBuffer], data: SourceData, encoding: str) -> None:
-        self.filepath = filepath
+    def __init__(self, data: SourceData, filepath: _tp.Union[_tp.StrPath, _tp.ReadableBuffer], encoding: str) -> None:
         self.data = data
+        self.filepath = filepath
         self.encoding = encoding
         self.scope_depth = 0
 
@@ -269,12 +269,6 @@ class DeferredInstrumenter(ast.NodeTransformer):
         return self.generic_visit(node)
 
 
-def match_token(token: tokenize.TokenInfo, **kwargs: object) -> bool:
-    """Check if a given token's attributes match the given kwargs."""
-
-    return all(getattr(token, name) == val for name, val in kwargs.items())
-
-
 def sliding_window(iterable: _tp.Iterable[_tp.T], n: int) -> _tp.Iterable[tuple[_tp.T, ...]]:
     """Collect data into overlapping fixed-length chunks or blocks.
 
@@ -306,10 +300,10 @@ def check_source_for_defer_usage(data: _tp.Union[_tp.ReadableBuffer, str]) -> tu
         encoding = next(token_stream).string
 
     uses_defer = any(
-        match_token(tok1, type=tok_NAME, string="with")
-        and match_token(tok2, type=tok_NAME, string="defer_imports")
-        and match_token(tok3, type=tok_OP, string=".")
-        and match_token(tok4, type=tok_NAME, string="until_use")
+        (tok1.type == tok_NAME and tok1.string == "with")
+        and (tok2.type == tok_NAME and tok2.string == "defer_imports")
+        and (tok3.type == tok_OP and tok3.string == ".")
+        and (tok4.type == tok_NAME and tok4.string == "until_use")
         for tok1, tok2, tok3, tok4 in sliding_window(token_stream, 4)
     )
 
@@ -351,7 +345,7 @@ class DeferredFileLoader(SourceFileLoader):
         if not uses_defer:
             return super().source_to_code(data, path, _optimize=_optimize)  # pyright: ignore # See note above.
 
-        tree = DeferredInstrumenter(path, data, encoding).instrument()
+        tree = DeferredInstrumenter(data, path, encoding).instrument()
         return super().source_to_code(tree, path, _optimize=_optimize)  # pyright: ignore # See note above.
 
     def get_data(self, path: str) -> bytes:

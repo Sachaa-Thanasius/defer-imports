@@ -175,7 +175,7 @@ def test_instrumentation(before: str, after: str):
 
     before_bytes = before.encode()
     encoding, _ = tokenize.detect_encoding(io.BytesIO(before_bytes).readline)
-    transformed_tree = DeferredInstrumenter("<unknown>", before_bytes, encoding).instrument()
+    transformed_tree = DeferredInstrumenter(before_bytes, "<unknown>", encoding).instrument()
 
     assert f"{ast.unparse(transformed_tree)}\n" == after
 

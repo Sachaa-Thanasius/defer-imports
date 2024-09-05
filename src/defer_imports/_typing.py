@@ -70,7 +70,7 @@ def __getattr__(name: str) -> object:  # pragma: no cover  # noqa: PLR0911
     if name == "T":
         from typing import TypeVar
 
-        globals()["T"] = T = TypeVar("T")  # pyright: ignore [reportGeneralTypeIssues]
+        globals()[name] = T = TypeVar("T")  # pyright: ignore [reportGeneralTypeIssues]
         return T
 
     if name == "ReadableBuffer":
@@ -81,14 +81,14 @@ def __getattr__(name: str) -> object:  # pragma: no cover  # noqa: PLR0911
 
             ReadableBuffer = Union[bytes, bytearray, memoryview]
 
-        globals()["ReadableBuffer"] = ReadableBuffer
+        globals()[name] = ReadableBuffer
         return ReadableBuffer
 
     if name == "StrPath":
         import os
         from typing import Union
 
-        globals()["StrPath"] = StrPath = Union[str, os.PathLike[str]]
+        globals()[name] = StrPath = Union[str, os.PathLike[str]]
         return StrPath
 
     if name == "TypeAlias":
@@ -99,7 +99,7 @@ def __getattr__(name: str) -> object:  # pragma: no cover  # noqa: PLR0911
             class TypeAlias:
                 """Placeholder for typing.TypeAlias."""
 
-        globals()["TypeAlias"] = TypeAlias
+        globals()[name] = TypeAlias
         return TypeAlias
 
     msg = f"module {__name__!r} has no attribute {name!r}"

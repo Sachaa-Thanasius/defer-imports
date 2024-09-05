@@ -576,6 +576,7 @@ def main() -> None:
     )
     defer_imports_path.write_text(defer_imports_contents, encoding="utf-8")
 
+    # Same defer_imports-influenced imports, but for a test in the tests directory
     tests_path = Path().resolve() / "tests" / "stdlib_imports.py"
     tests_path.write_text(defer_imports_contents, encoding="utf-8")
 
