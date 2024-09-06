@@ -78,7 +78,7 @@ def main() -> None:
         nargs=3,
         choices=BENCH_FUNCS.keys(),
         type=str,
-        help="The order in which the the influences (or not influenced) imports are run",
+        help="The order in which the influenced (or not influenced) imports are run",
     )
     args = parser.parse_args()
 

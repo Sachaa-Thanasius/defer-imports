@@ -15,6 +15,7 @@ __all__ = (
     "MutableMapping",
     "Optional",
     "ReadableBuffer",
+    "Self",
     "Sequence",
     "StrPath",
     "TypeAlias",
@@ -26,7 +27,7 @@ from collections.abc import Generator, Iterable, MutableMapping, Sequence
 from types import CodeType, ModuleType
 from typing import Any, Final, Optional, TypeVar, Union, final
 
-from typing_extensions import Buffer as ReadableBuffer, TypeAlias
+from typing_extensions import Buffer as ReadableBuffer, Self, TypeAlias
 
 T = TypeVar("T")  # noqa: PYI001
 

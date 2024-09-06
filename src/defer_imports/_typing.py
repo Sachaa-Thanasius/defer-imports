@@ -22,6 +22,7 @@ __all__ = (
     "MutableMapping",
     "Optional",
     "ReadableBuffer",
+    "Self",
     "Sequence",
     "StrPath",
     "TypeAlias",
@@ -46,7 +47,7 @@ def final(f: object) -> object:
     return f
 
 
-def __getattr__(name: str) -> object:  # pragma: no cover  # noqa: PLR0911
+def __getattr__(name: str) -> object:  # pragma: no cover  # noqa: PLR0911, PLR0912
     # Let's cache the return values in the global namespace to avoid subsequent calls to __getattr__ if possible.
 
     if name in {"Generator", "Iterable", "MutableMapping", "Sequence"}:
@@ -67,12 +68,6 @@ def __getattr__(name: str) -> object:  # pragma: no cover  # noqa: PLR0911
         globals()[name] = res = getattr(types, name)
         return res
 
-    if name == "T":
-        from typing import TypeVar
-
-        globals()[name] = T = TypeVar("T")  # pyright: ignore [reportGeneralTypeIssues]
-        return T
-
     if name == "ReadableBuffer":
         if sys.version_info >= (3, 12):
             from collections.abc import Buffer as ReadableBuffer
@@ -84,12 +79,16 @@ def __getattr__(name: str) -> object:  # pragma: no cover  # noqa: PLR0911
         globals()[name] = ReadableBuffer
         return ReadableBuffer
 
-    if name == "StrPath":
-        import os
-        from typing import Union
+    if name == "Self":
+        if sys.version_info >= (3, 11):
+            from typing import Self
+        else:
 
-        globals()[name] = StrPath = Union[str, os.PathLike[str]]
-        return StrPath
+            class Self:
+                """Placeholder for typing.Self."""
+
+        globals()[name] = Self
+        return Self
 
     if name == "TypeAlias":
         if sys.version_info >= (3, 10):
@@ -102,5 +101,26 @@ def __getattr__(name: str) -> object:  # pragma: no cover  # noqa: PLR0911
         globals()[name] = TypeAlias
         return TypeAlias
 
+    if name == "StrPath":
+        import os
+        from typing import Union
+
+        globals()[name] = StrPath = Union[str, os.PathLike[str]]
+        return StrPath
+
+    if name == "T":
+        from typing import TypeVar
+
+        globals()[name] = T = TypeVar("T")  # pyright: ignore [reportGeneralTypeIssues]
+        return T
+
     msg = f"module {__name__!r} has no attribute {name!r}"
     raise AttributeError(msg)
+
+
+_original_global_names = list(globals())
+
+
+def __dir__() -> list[str]:
+    # This will hopefully make potential debugging easier.
+    return [*_original_global_names, *__all__]

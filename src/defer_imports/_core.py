@@ -46,7 +46,7 @@ class DeferredInstrumenter(ast.NodeTransformer):
     def instrument(self, mode: str = "exec") -> _tp.Any:
         """Transform the tree created from the given data and filepath."""
 
-        if isinstance(self.data, ast.AST):  # noqa: SIM108 # Readability
+        if isinstance(self.data, ast.AST):
             to_visit = self.data
         else:
             to_visit = ast.parse(self.data, self.filepath, mode)
@@ -73,7 +73,7 @@ class DeferredInstrumenter(ast.NodeTransformer):
         if isinstance(self.data, ast.AST):
             # NOTE: An attempt is made here, but the node location information likely won't match up.
             return ast.unparse(self.data)
-        elif isinstance(self.data, str):  # noqa: RET505 # Readability
+        elif isinstance(self.data, str):
             return self.data
         else:
             newline_decoder = io.IncrementalNewlineDecoder(None, translate=True)
@@ -178,7 +178,7 @@ class DeferredInstrumenter(ast.NodeTransformer):
 
             if not isinstance(node, (ast.Import, ast.ImportFrom)):
                 msg = "with defer_imports.until_use blocks must only contain import statements"
-                raise SyntaxError(msg, self._get_node_context(node))  # noqa: TRY004
+                raise SyntaxError(msg, self._get_node_context(node))  # noqa: TRY004 # Syntax error displays better.
 
             for alias in node.names:
                 if alias.name == "*":
@@ -325,7 +325,10 @@ class DeferredFileLoader(SourceFileLoader):
 
     @staticmethod
     def check_for_defer_usage(data: SourceData) -> tuple[str, bool]:
-        return check_ast_for_defer_usage(data) if isinstance(data, ast.AST) else check_source_for_defer_usage(data)
+        if isinstance(data, ast.AST):
+            return check_ast_for_defer_usage(data)
+        else:
+            return check_source_for_defer_usage(data)
 
     def source_to_code(  # pyright: ignore [reportIncompatibleMethodOverride]
         self,
@@ -458,18 +461,20 @@ class DeferredImportProxy:
 
         return f"<proxy for {imp_stmt!r}>"
 
-    def __getattr__(self, name: str, /):
-        sub_proxy = type(self)(*self.defer_proxy_import_args)
-
+    def __getattr__(self, name: str, /) -> _tp.Self:
         if name in self.defer_proxy_fromlist:
-            sub_proxy.defer_proxy_fromlist = (name,)
-        elif name == self.defer_proxy_name.rpartition(".")[2]:
-            sub_proxy.defer_proxy_sub = name
-        else:
-            msg = f"module {self.defer_proxy_name!r} has no attribute {name!r}"
-            raise AttributeError(msg)
+            from_proxy = type(self)(*self.defer_proxy_import_args)
+            from_proxy.defer_proxy_fromlist = (name,)
+            return from_proxy
 
-        return sub_proxy
+        elif name == self.defer_proxy_name.rpartition(".")[2]:
+            submodule_proxy = type(self)(*self.defer_proxy_import_args)
+            submodule_proxy.defer_proxy_sub = name
+            return submodule_proxy
+
+        else:
+            msg = f"proxy for module {self.defer_proxy_name!r} has no attribute {name!r}"
+            raise AttributeError(msg)
 
 
 class DeferredImportKey(str):
@@ -535,12 +540,12 @@ class DeferredImportKey(str):
 
         # Replace the proxy with the resolved module or module attribute in the relevant namespace.
 
-        # 1. Let the regular string key and the relevant namespace.
+        # 1. Get the regular string key and the relevant namespace.
         key = self.defer_key_str
         namespace = proxy.defer_proxy_local_ns
 
         # 2. Replace the deferred version of the key to avoid it sticking around.
-        #    This is_deferred usage is necessary to prevent recursive resolution, since __eq__ will be triggered again.
+        #    This will trigger __eq__ again, so use is_deferred to prevent recursive resolution.
         _is_def_tok = is_deferred.set(True)
         try:
             namespace[key] = namespace.pop(key)
