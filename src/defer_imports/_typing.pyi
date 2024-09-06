@@ -5,7 +5,6 @@
 import os
 
 __all__ = (
-    "T",
     "Any",
     "CodeType",
     "Final",
@@ -18,6 +17,7 @@ __all__ = (
     "Self",
     "Sequence",
     "StrPath",
+    "T",
     "TypeAlias",
     "Union",
     "final",

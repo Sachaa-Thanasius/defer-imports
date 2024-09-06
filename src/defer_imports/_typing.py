@@ -12,7 +12,6 @@ import sys
 
 
 __all__ = (
-    "T",
     "Any",
     "CodeType",
     "Final",
@@ -25,6 +24,7 @@ __all__ = (
     "Self",
     "Sequence",
     "StrPath",
+    "T",
     "TypeAlias",
     "Union",
     "final",
@@ -50,6 +50,7 @@ def final(f: object) -> object:
 def __getattr__(name: str) -> object:  # pragma: no cover  # noqa: PLR0911, PLR0912
     # Let's cache the return values in the global namespace to avoid subsequent calls to __getattr__ if possible.
 
+    # ---- Pure imports
     if name in {"Generator", "Iterable", "MutableMapping", "Sequence"}:
         import collections.abc
 
@@ -68,6 +69,7 @@ def __getattr__(name: str) -> object:  # pragma: no cover  # noqa: PLR0911, PLR0
         globals()[name] = res = getattr(types, name)
         return res
 
+    # ---- Imports with fallbacks
     if name == "ReadableBuffer":
         if sys.version_info >= (3, 12):
             from collections.abc import Buffer as ReadableBuffer
@@ -101,6 +103,7 @@ def __getattr__(name: str) -> object:  # pragma: no cover  # noqa: PLR0911, PLR0
         globals()[name] = TypeAlias
         return TypeAlias
 
+    # ---- Composed types/values with imports involved
     if name == "StrPath":
         import os
         from typing import Union

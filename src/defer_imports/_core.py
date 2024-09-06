@@ -8,14 +8,15 @@ from __future__ import annotations
 
 import ast
 import builtins
-import collections
 import contextvars
 import io
-import itertools
 import sys
 import tokenize
 import warnings
+from collections import deque
 from importlib.machinery import BYTECODE_SUFFIXES, SOURCE_SUFFIXES, FileFinder, ModuleSpec, PathFinder, SourceFileLoader
+from itertools import islice
+from threading import RLock
 
 from . import _typing as _tp
 
@@ -281,7 +282,7 @@ def sliding_window(iterable: _tp.Iterable[_tp.T], n: int) -> _tp.Iterable[tuple[
     """
 
     iterator = iter(iterable)
-    window = collections.deque(itertools.islice(iterator, n - 1), maxlen=n)
+    window = deque(islice(iterator, n - 1), maxlen=n)
     for x in iterator:
         window.append(x)
         yield tuple(window)
@@ -485,7 +486,7 @@ class DeferredImportKey(str):
 
     __slots__ = ("defer_key_str", "defer_key_proxy", "is_resolving", "lock")
 
-    def __new__(cls, key: str, proxy: DeferredImportProxy, /):
+    def __new__(cls, key: str, proxy: DeferredImportProxy, /) -> _tp.Self:
         return super().__new__(cls, key)
 
     def __init__(self, key: str, proxy: DeferredImportProxy, /) -> None:
@@ -493,7 +494,7 @@ class DeferredImportKey(str):
         self.defer_key_proxy = proxy
 
         self.is_resolving = False
-        self.lock = original_import.get()("threading").RLock()
+        self.lock = RLock()
 
     def __repr__(self) -> str:
         return f"<key for {self.defer_key_str!r} import>"
