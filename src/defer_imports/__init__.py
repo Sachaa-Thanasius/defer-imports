@@ -9,9 +9,4 @@ manager.
 from ._core import __version__, install_defer_import_hook, uninstall_defer_import_hook, until_use
 
 
-__all__ = (
-    "__version__",
-    "install_defer_import_hook",
-    "uninstall_defer_import_hook",
-    "until_use",
-)
+__all__ = ("__version__", "install_defer_import_hook", "uninstall_defer_import_hook", "until_use")

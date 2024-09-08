@@ -49,16 +49,6 @@ class DeferredInstrumenter(ast.NodeTransformer):
         self.encoding = encoding
         self.scope_depth = 0
 
-    def instrument(self, mode: str = "exec") -> _tp.Any:
-        """Transform the tree created from the given data and filepath."""
-
-        if isinstance(self.data, ast.AST):
-            to_visit = self.data
-        else:
-            to_visit = ast.parse(self.data, self.filepath, mode)
-
-        return ast.fix_missing_locations(self.visit(to_visit))
-
     def _visit_scope(self, node: ast.AST) -> ast.AST:
         """Track Python scope changes. Used to determine if defer_imports.until_use usage is global."""
 
@@ -332,6 +322,8 @@ class DeferredFileLoader(SourceFileLoader):
 
     @staticmethod
     def check_for_defer_usage(data: SourceData) -> tuple[str, bool]:
+        """Check if the given data uses "with defer_imports.until_use"."""
+
         if isinstance(data, ast.AST):
             return check_ast_for_defer_usage(data)
         else:
@@ -355,8 +347,16 @@ class DeferredFileLoader(SourceFileLoader):
         if not uses_defer:
             return super().source_to_code(data, path, _optimize=_optimize)  # pyright: ignore # See note above.
 
-        tree = DeferredInstrumenter(data, path, encoding).instrument()
-        return super().source_to_code(tree, path, _optimize=_optimize)  # pyright: ignore # See note above.
+        # Get the AST of the given data, instrument it, and fix missing line and column numbers.
+        transformer = DeferredInstrumenter(data, path, encoding)
+
+        if isinstance(data, ast.AST):
+            orig_ast = data
+        else:
+            orig_ast = ast.parse(data, path, "exec")
+
+        new_ast = ast.fix_missing_locations(transformer.visit(orig_ast))
+        return super().source_to_code(new_ast, path, _optimize=_optimize)  # pyright: ignore # See note above.
 
     def get_data(self, path: str) -> bytes:
         """Return the data from path as raw bytes.

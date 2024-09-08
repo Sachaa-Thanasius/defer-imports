@@ -20,7 +20,7 @@ __all__ = ("DeferredInteractiveConsole", "interact", "instrument_ipython")
 
 
 class _DeferredCompile(codeop.Compile):
-    """A subclass of codeop.Compile that alters the compilation process with defer_imports's AST transformer."""
+    """A subclass of codeop.Compile that alters the compilation process via defer_imports's AST transformer."""
 
     def __call__(self, source: str, filename: str, symbol: str, **kwargs: object) -> _tp.CodeType:
         flags = self.flags
@@ -43,7 +43,7 @@ class _DeferredCompile(codeop.Compile):
 class DeferredInteractiveConsole(code.InteractiveConsole):
     """An emulator of the interactive Python interpreter, but with defer_import's compile-time AST transformer baked in.
 
-    This ensures that defer_imports.until_use works as intended when used directly in this console.
+    This ensures that defer_imports.until_use works as intended when used directly in an instance of this console.
     """
 
     def __init__(self) -> None:
@@ -67,12 +67,14 @@ def interact() -> None:
 
 
 class _DeferredIPythonInstrumenter(ast.NodeTransformer):
-    """An AST transformer that wraps defer_import's AST transformation to fit an IPython AST hook interface."""
+    """An AST transformer that wraps defer_import's AST instrumentation to fit IPython's AST hook interface."""
 
     def __init__(self):
+        # The wrapped transformer's initial data is an empty string because we only get the actual data within visit().
         self.actual_transformer = DeferredInstrumenter("", "<unknown>", "utf-8")
 
     def visit(self, node: ast.AST) -> _tp.Any:
+        # Reset part of the wrapped transformer before use.
         self.actual_transformer.data = node
         self.actual_transformer.scope_depth = 0
         return ast.fix_missing_locations(self.actual_transformer.visit(node))

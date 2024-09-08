@@ -33,7 +33,7 @@ path = "src/defer_imports/_core.py"
 
 [project.optional-dependencies]
 benchmark = ["slothy"]
-test = ["pytest"]
+test = ["pytest", "pytest-rerunfailures"]
 cov = ["defer-imports[test]", "coverage", "covdefaults"]
 dev = ["defer-imports[benchmark,cov]", "pre-commit"]
 
