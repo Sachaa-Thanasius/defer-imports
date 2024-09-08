@@ -46,8 +46,6 @@ class DeferredInteractiveConsole(code.InteractiveConsole):
     This ensures that defer_imports.until_use works as intended when used directly in this console.
     """
 
-    compile: codeop.CommandCompiler
-
     def __init__(self) -> None:
         local_ns = {
             "__name__": "__console__",
@@ -69,7 +67,7 @@ def interact() -> None:
 
 
 class _DeferredIPythonInstrumenter(ast.NodeTransformer):
-    """An AST transformer that wraps defer_import's AST transformation to fit the interface IPython's hook expects."""
+    """An AST transformer that wraps defer_import's AST transformation to fit an IPython AST hook interface."""
 
     def __init__(self):
         self.actual_transformer = DeferredInstrumenter("", "<unknown>", "utf-8")
