@@ -2,6 +2,8 @@
 #
 # SPDX-License-Identifier: MIT
 
+"""Helpers for using defer_imports in various consoles, such as the built-in CPython REPL and IPython."""
+
 import __future__
 
 import ast
@@ -67,6 +69,8 @@ def interact() -> None:
 
 
 class _DeferredIPythonInstrumenter(ast.NodeTransformer):
+    """An AST transformer that wraps defer_import's AST transformation to fit the interface IPython's hook expects."""
+
     def __init__(self):
         self.actual_transformer = DeferredInstrumenter("", "<unknown>", "utf-8")
 
