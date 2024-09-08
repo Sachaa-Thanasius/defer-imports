@@ -38,11 +38,13 @@ Setup
 
 ``defer-imports`` hooks into the Python import system with a path hook. That path hook needs to be registered before code using the import-delaying context manager, ``defer_imports.until_use``, is parsed. To do that, include the following somewhere such that it will be executed before your code:
 
-.. code:: python
+.. code-block:: python
 
     import defer_imports
 
     defer_imports.install_defer_import_hook()
+
+    import your_code
 
 
 Example
@@ -50,7 +52,7 @@ Example
 
 Assuming the path hook has been registered, you can use the ``defer_imports.until_use`` context manager to decide which imports should be deferred. For instance:
 
-.. code:: python
+.. code-block:: python
 
     import defer_imports
 
@@ -70,6 +72,77 @@ Use Cases
 
 -   If expensive imports are only necessary for certain code paths that won't always be taken, e.g. in subcommands in CLI tools.
 
+
+Extra: Console Usage
+--------------------
+
+``defer-imports`` works while within a regular Python REPL, as long as that work is being done in a package being imported and not with direct usage of the ``defer_imports.until_use`` context manager. To directly use the context manager, use the included interactive console:
+
+-   From the command line::
+
+        > python -m defer_imports
+        Python 3.11.9 (tags/v3.11.9:de54cf5, Apr  2 2024, 10:12:12) [MSC v.1938 64 bit (AMD64)] on win32
+        Type "help", "copyright", "credits" or "license" for more information.
+        (DeferredInteractiveConsole)
+        >>> import defer_imports
+        >>> with defer_imports.until_use:
+        ...     import typing
+        ... 
+        >>> import sys           
+        >>> "typing" in sys.modules
+        False
+        >>> typing
+        <module 'typing' from 'C:\\Users\\Tusha\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\typing.py'>
+        >>> "typing" in sys.modules
+        True
+
+-   From within a standard Python interpreter:
+
+    .. code-block:: pycon
+
+        >>> from defer_imports import console
+        >>> console.interact()
+        Python 3.11.9 (tags/v3.11.9:de54cf5, Apr  2 2024, 10:12:12) [MSC v.1938 64 bit (AMD64)] on win32
+        Type "help", "copyright", "credits" or "license" for more information.
+        (DeferredInteractiveConsole)
+        >>> import defer_imports
+        >>> with defer_imports.until_use:
+        ...     import typing
+        ... 
+        >>> import sys           
+        >>> "typing" in sys.modules
+        False
+        >>> typing
+        <module 'typing' from 'C:\\Users\\Tusha\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\typing.py'>
+        >>> "typing" in sys.modules
+        True
+
+
+Additionally, if you're using IPython in a terminal or in a Jupyter environment, there is a function you can call to ensure the context manager works there as well:
+
+.. code-block:: ipython
+
+    In [1]: from defer_imports import console
+
+    In [2]: console.instrument_ipython()
+
+    In [3]: import defer_imports
+
+    In [4]: with defer_imports.until_use:
+    ...:     import numpy
+    ...:
+
+    In [5]: import sys
+
+    In [6]: "numpy" in sys.modules
+
+    In [7]: print("numpy" in sys.modules)
+    False
+
+    In [8]: numpy
+
+    In [9]: print("numpy" in sys.modules)
+    True
 
 Features
 ========

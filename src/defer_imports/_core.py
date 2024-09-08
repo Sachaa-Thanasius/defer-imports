@@ -38,7 +38,12 @@ class DeferredInstrumenter(ast.NodeTransformer):
     results are assigned to custom keys in the global namespace.
     """
 
-    def __init__(self, data: SourceData, filepath: _tp.Union[_tp.StrPath, _tp.ReadableBuffer], encoding: str) -> None:
+    def __init__(
+        self,
+        data: _tp.Union[_tp.ReadableBuffer, str, ast.AST],
+        filepath: _tp.Union[_tp.StrPath, _tp.ReadableBuffer],
+        encoding: str,
+    ) -> None:
         self.data = data
         self.filepath = filepath
         self.encoding = encoding
