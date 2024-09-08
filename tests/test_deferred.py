@@ -63,7 +63,7 @@ def temp_cache_module(name: str, module: ModuleType):
 from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
 del @DeferredImportKey, @DeferredImportProxy
 ''',
-            id="Inserts statements after module docstring",
+            id="inserts statements after module docstring",
         ),
         pytest.param(
             """from __future__ import annotations""",
@@ -91,7 +91,7 @@ with defer_imports.until_use, nullcontext():
     import inspect
 del @DeferredImportKey, @DeferredImportProxy
 """,
-            id="does nothing if used at same time as another context manager",
+            id="does nothing if used with another context manager",
         ),
         pytest.param(
             """\
@@ -140,7 +140,7 @@ with defer_imports.until_use:
     del @temp_proxy, @local_ns
 del @DeferredImportKey, @DeferredImportProxy
 """,
-            id="mixed import 1",
+            id="mixed import",
         ),
         pytest.param(
             """\
@@ -162,7 +162,7 @@ with defer_imports.until_use:
     del @temp_proxy, @local_ns
 del @DeferredImportKey, @DeferredImportProxy
 """,
-            id="relative import 1",
+            id="relative import",
         ),
     ],
 )

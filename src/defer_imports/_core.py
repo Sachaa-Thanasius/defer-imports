@@ -55,7 +55,7 @@ class DeferredInstrumenter(ast.NodeTransformer):
         return ast.fix_missing_locations(self.visit(to_visit))
 
     def _visit_scope(self, node: ast.AST) -> ast.AST:
-        """Track Python scope changes. Used to determine if defer_imports.until_use usage is valid."""
+        """Track Python scope changes. Used to determine if defer_imports.until_use usage is global."""
 
         self.scope_depth += 1
         try:
@@ -199,8 +199,9 @@ class DeferredInstrumenter(ast.NodeTransformer):
 
     @staticmethod
     def check_With_for_defer_usage(node: ast.With) -> bool:
+        """Only accept "with defer_imports.until_use"."""
+
         return len(node.items) == 1 and (
-            # Allow "with defer_imports.until_use".
             isinstance(node.items[0].context_expr, ast.Attribute)
             and isinstance(node.items[0].context_expr.value, ast.Name)
             and node.items[0].context_expr.value.id == "defer_imports"
