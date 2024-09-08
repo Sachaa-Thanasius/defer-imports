@@ -44,6 +44,8 @@ class DeferredInteractiveConsole(code.InteractiveConsole):
     This ensures that defer_imports.until_use works as intended when used directly in this console.
     """
 
+    compile: codeop.CommandCompiler
+
     def __init__(self) -> None:
         local_ns = {
             "__name__": "__console__",
