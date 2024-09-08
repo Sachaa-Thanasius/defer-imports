@@ -17,7 +17,7 @@ _features = [getattr(__future__, feat_name) for feat_name in __future__.all_feat
 __all__ = ("DeferredInteractiveConsole", "interact", "instrument_ipython")
 
 
-class DeferredCompile(codeop.Compile):
+class _DeferredCompile(codeop.Compile):
     """A subclass of codeop.Compile that alters the compilation process with defer_imports's AST transformer."""
 
     def __call__(self, source: str, filename: str, symbol: str, **kwargs: object) -> _tp.CodeType:
@@ -27,11 +27,11 @@ class DeferredCompile(codeop.Compile):
             flags &= ~codeop.PyCF_ALLOW_INCOMPLETE_INPUT  # pyright: ignore
         assert isinstance(flags, int)
 
-        og_ast_node = compile(source, filename, symbol, flags | ast.PyCF_ONLY_AST, True)
+        orig_ast = compile(source, filename, symbol, flags | ast.PyCF_ONLY_AST, True)
         transformer = DeferredInstrumenter(source, filename, "utf-8")
-        new_ast_node = ast.fix_missing_locations(transformer.visit(og_ast_node))
+        new_ast = ast.fix_missing_locations(transformer.visit(orig_ast))
 
-        codeob = compile(new_ast_node, filename, symbol, flags, True)
+        codeob = compile(new_ast, filename, symbol, flags, True)
         for feature in _features:
             if codeob.co_flags & feature.compiler_flag:
                 self.flags |= feature.compiler_flag
@@ -54,8 +54,7 @@ class DeferredInteractiveConsole(code.InteractiveConsole):
             "@DeferredImportProxy": DeferredImportProxy,
         }
         super().__init__(local_ns)
-        self.compile = codeop.CommandCompiler()
-        self.compile.compiler = DeferredCompile()
+        self.compile.compiler = _DeferredCompile()
 
 
 def interact() -> None:
@@ -65,6 +64,16 @@ def interact() -> None:
     """
 
     DeferredInteractiveConsole().interact()
+
+
+class _DeferredIPythonInstrumenter(ast.NodeTransformer):
+    def __init__(self):
+        self.actual_transformer = DeferredInstrumenter("", "<unknown>", "utf-8")
+
+    def visit(self, node: ast.AST) -> _tp.Any:
+        self.actual_transformer.data = node
+        self.actual_transformer.scope_depth = 0
+        return ast.fix_missing_locations(self.actual_transformer.visit(node))
 
 
 def instrument_ipython() -> None:
@@ -79,13 +88,4 @@ def instrument_ipython() -> None:
         msg = "Not currently in an IPython/Jupyter environment."
         raise RuntimeError(msg) from None
 
-    class DeferredIPythonInstrumenter(ast.NodeTransformer):
-        def __init__(self):
-            self.actual_transformer = DeferredInstrumenter("", "<unknown>", "utf-8")
-
-        def visit(self, node: ast.AST) -> _tp.Any:
-            self.actual_transformer.data = node
-            self.actual_transformer.scope_depth = 0
-            return ast.fix_missing_locations(self.actual_transformer.visit(node))
-
-    ipython_shell.ast_transformers.append(DeferredIPythonInstrumenter())
+    ipython_shell.ast_transformers.append(_DeferredIPythonInstrumenter())

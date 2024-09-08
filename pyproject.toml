@@ -80,9 +80,9 @@ defer_imports = ["src"]
 [tool.coverage.run]
 plugins = ["covdefaults"]
 source = ["defer_imports", "tests"]
+omit = ["src/defer_imports/_typing.py", "src/defer_imports/console.py"]
 
 [tool.coverage.report]
-# It's a work in progress.
 fail_under = 90
 
 

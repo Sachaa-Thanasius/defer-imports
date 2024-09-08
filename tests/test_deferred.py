@@ -838,7 +838,7 @@ with defer_imports.until_use:
 
 
 @pytest.mark.skip(reason="Leaking patch problem is currently out of scope.")
-def test_leaking_patch(tmp_path: Path):
+def test_leaking_patch(tmp_path: Path):  # pragma: no cover
     """Test a synthetic package that demonstrates the "leaking patch" problem.
 
     Source: https://github.com/bswck/slothy/tree/bd0828a8dd9af63ca5c85340a70a14a76a6b714f/tests/leaking_patch
