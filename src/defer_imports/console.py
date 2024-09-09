@@ -74,7 +74,7 @@ class _DeferredIPythonInstrumenter(ast.NodeTransformer):
         self.actual_transformer = DeferredInstrumenter("", "<unknown>", "utf-8")
 
     def visit(self, node: ast.AST) -> _tp.Any:
-        # Reset part of the wrapped transformer before use.
+        # Reset part of the wrapped transformer before (re)use.
         self.actual_transformer.data = node
         self.actual_transformer.scope_depth = 0
         return ast.fix_missing_locations(self.actual_transformer.visit(node))
@@ -84,12 +84,17 @@ def instrument_ipython() -> None:
     """Add defer_import's compile-time AST transformer to a currently running IPython environment.
 
     This will ensure that defer_imports.until_use works as intended when used directly in a IPython console.
+
+    Raises
+    ------
+    RuntimeError
+        If called in a non-IPython environment.
     """
 
     try:
         ipython_shell: _tp.Any = get_ipython()  # pyright: ignore
     except NameError:
-        msg = "Not currently in an IPython/Jupyter environment."
+        msg = "Not currently in an IPython environment."
         raise RuntimeError(msg) from None
 
     ipython_shell.ast_transformers.append(_DeferredIPythonInstrumenter())

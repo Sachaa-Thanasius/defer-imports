@@ -320,15 +320,6 @@ def check_ast_for_defer_usage(data: ast.AST) -> tuple[str, bool]:
 class DeferredFileLoader(SourceFileLoader):
     """A file loader that instruments .py files which use "with defer_imports.until_use: ..."."""
 
-    @staticmethod
-    def check_for_defer_usage(data: SourceData) -> tuple[str, bool]:
-        """Check if the given data uses "with defer_imports.until_use"."""
-
-        if isinstance(data, ast.AST):
-            return check_ast_for_defer_usage(data)
-        else:
-            return check_source_for_defer_usage(data)
-
     def source_to_code(  # pyright: ignore [reportIncompatibleMethodOverride]
         self,
         data: SourceData,
@@ -342,12 +333,16 @@ class DeferredFileLoader(SourceFileLoader):
         if not data:
             return super().source_to_code(data, path, _optimize=_optimize)  # pyright: ignore # See note above.
 
-        encoding, uses_defer = self.check_for_defer_usage(data)
+        # Check if the given data uses "with defer_imports.until_use".
+        if isinstance(data, ast.AST):
+            encoding, uses_defer = check_ast_for_defer_usage(data)
+        else:
+            encoding, uses_defer = check_source_for_defer_usage(data)
 
         if not uses_defer:
             return super().source_to_code(data, path, _optimize=_optimize)  # pyright: ignore # See note above.
 
-        # Get the AST of the given data, instrument it, and fix missing line and column numbers.
+        # Instrument the AST of the given data.
         transformer = DeferredInstrumenter(data, path, encoding)
 
         if isinstance(data, ast.AST):
