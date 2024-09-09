@@ -48,29 +48,34 @@ def final(f: object) -> object:
 
 
 def __getattr__(name: str) -> object:  # noqa: PLR0911, PLR0912
-    # Let's cache the return values in the global namespace to avoid subsequent calls to __getattr__ if possible.
+    # Let's cache the return values in the global namespace to avoid repeat calls.
 
     # ---- Pure imports
     if name in {"Generator", "Iterable", "MutableMapping", "Sequence"}:
-        import collections.abc
+        global Generator, Iterable, MutableMapping, Sequence
 
-        globals()[name] = res = getattr(collections.abc, name)
-        return res
+        from collections.abc import Generator, Iterable, MutableMapping, Sequence
+
+        return globals()[name]
 
     if name in {"Any", "Final", "Optional", "Union"}:
-        import typing
+        global Any, Final, Optional, Union
 
-        globals()[name] = res = getattr(typing, name)
-        return res
+        from typing import Any, Final, Optional, Union
+
+        return globals()[name]
 
     if name in {"CodeType", "ModuleType"}:
-        import types
+        global CodeType, ModuleType
 
-        globals()[name] = res = getattr(types, name)
-        return res
+        from types import CodeType, ModuleType
+
+        return globals()[name]
 
     # ---- Imports with fallbacks
     if name == "ReadableBuffer":
+        global ReadableBuffer
+
         if sys.version_info >= (3, 12):
             from collections.abc import Buffer as ReadableBuffer
         else:
@@ -78,10 +83,11 @@ def __getattr__(name: str) -> object:  # noqa: PLR0911, PLR0912
 
             ReadableBuffer = Union[bytes, bytearray, memoryview]
 
-        globals()[name] = ReadableBuffer
-        return ReadableBuffer
+        return globals()[name]
 
     if name == "Self":
+        global Self
+
         if sys.version_info >= (3, 11):
             from typing import Self
         else:
@@ -89,10 +95,11 @@ def __getattr__(name: str) -> object:  # noqa: PLR0911, PLR0912
             class Self:
                 """Placeholder for typing.Self."""
 
-        globals()[name] = Self
-        return Self
+        return globals()[name]
 
     if name == "TypeAlias":
+        global TypeAlias
+
         if sys.version_info >= (3, 10):
             from typing import TypeAlias
         else:
@@ -100,22 +107,25 @@ def __getattr__(name: str) -> object:  # noqa: PLR0911, PLR0912
             class TypeAlias:
                 """Placeholder for typing.TypeAlias."""
 
-        globals()[name] = TypeAlias
-        return TypeAlias
+        return globals()[name]
 
     # ---- Composed types/values with imports involved
     if name == "StrPath":
+        global StrPath
+
         import os
         from typing import Union
 
-        globals()[name] = StrPath = Union[str, os.PathLike[str]]
-        return StrPath
+        StrPath = Union[str, os.PathLike[str]]
+        return globals()[name]
 
     if name == "T":
+        global T
+
         from typing import TypeVar
 
-        globals()[name] = T = TypeVar("T")  # pyright: ignore [reportGeneralTypeIssues]
-        return T
+        T = TypeVar("T")
+        return globals()[name]
 
     msg = f"module {__name__!r} has no attribute {name!r}"
     raise AttributeError(msg)

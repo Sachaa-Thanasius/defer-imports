@@ -178,7 +178,8 @@ keep-runtime-typing = true
     "A002", # Allow some shadowing of builtins by parameter names.
 ]
 "src/defer_imports/_typing.py" = [
-    "F822", # __all__ has names that are only provided by module-level __getattr__.
+    "F822",    # __all__ has names that are only provided by module-level __getattr__.
+    "PLW0603", # "global" is used to update variables at global scope.
 ]
 
 # ---- Test code
