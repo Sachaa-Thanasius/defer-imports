@@ -209,7 +209,7 @@ This library tries to hide its implementation details to avoid changing the deve
 
         print(locals())  # Output: {..., 'typing': <proxy for 'import typing'>}
 
-- **WARNING:** The library makes no guarantees if you go out of your way to save a deferred import's special key or proxy from the local namespace through atypical means, such as filtering ``dir()``, ``locals().keys()``, ``locals().values()``, etc.
+-   **WARNING:** The library makes no guarantees if you go out of your way to save a deferred import's special key or proxy from the local namespace through atypical means, such as filtering ``dir()``, ``locals().keys()``, ``locals().values()``, etc.
 
     .. code-block:: python
 
