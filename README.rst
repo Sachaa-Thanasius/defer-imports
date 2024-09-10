@@ -14,11 +14,13 @@ defer-imports
     :target: https://pypi.org/project/defer-imports
     :alt: PyPI supported Python versions
 
+
 A library that implements `PEP 690 <https://peps.python.org/pep-0690/>`_–esque lazy imports in pure Python, but at a user's behest within a context manager.
 
 .. contents::
     :local:
     :depth: 2
+
 
 Installation
 ============
@@ -30,6 +32,7 @@ This can be installed via pip::
     python -m pip install defer-imports
 
 It can also easily be vendored, as it has zero dependencies and has around 1,000 lines of code.
+
 
 Usage
 =====
@@ -47,6 +50,7 @@ Setup
 
     import your_code
 
+
 Example
 -------
 
@@ -62,6 +66,7 @@ Assuming the path hook has been registered, you can use the ``defer_imports.unti
 
     # inspect and Final won't be imported until referenced.
 
+
 Use Cases
 ---------
 
@@ -70,6 +75,7 @@ Use Cases
     -   The current workaround for this is to perform the problematic imports within ``if typing.TYPE_CHECKING: ...`` blocks and then stringify the fake-imported, nonexistent symbols to prevent NameErrors at runtime; however, the resulting annotations raise errors on introspection. Using ``with defer_imports.until_use: ...`` instead would ensure that the symbols will be imported and saved in the local namespace, but only upon introspection, making the imports non-circular and almost free in most circumstances.
 
 -   If expensive imports are only necessary for certain code paths that won't always be taken, e.g. in subcommands in CLI tools.
+
 
 Extra: Console
 --------------
@@ -132,12 +138,14 @@ Additionally, if you're using IPython in a terminal or Jupyter environment, ther
     In [8]: print("numpy" in sys.modules)
     True
 
+
 Features
 ========
 
 -   Supports multiple Python runtimes/implementations.
 -   Supports all syntactically valid Python import statements.
 -   Doesn't break type-checkers like pyright and mypy.
+
 
 Caveats
 =======
@@ -146,6 +154,7 @@ Caveats
 -   Doesn't support wildcard imports.
 -   Doesn't have an API for giving users a choice to automatically defer all imports on a module, library, or application scale.
 -   Has a relatively hefty one-time setup cost.
+
 
 Why?
 ====
@@ -161,6 +170,7 @@ Lazy imports, in theory, alleviate several pain points that Python has currently
 
 Then along came `slothy <https://github.com/bswck/slothy>`_, a library that seems to do it better, having been constructed with feedback from multiple CPython core developers as well as one of the minds behind PEP 690. It was the main inspiration for this project. However, the library (currently) limits itself to specific Python implementations by relying on the existence of frames that represent the call stack. For many use cases, that's perfectly fine; PEP 690's implementation was for CPython specifically, and to my knowledge, some of the most popular Python runtimes outside of CPython provide call stack access in some form. Still, I thought that there might be a way to do something similar while avoiding such implementation-specific APIs. After feedback and discussion, that thought crystalized into this library.
 
+
 How?
 ====
 
@@ -173,6 +183,7 @@ Those proxies don't use those stored ``__import__`` arguments themselves, though
 The missing intermediate step is making sure these special proxies are stored with these special keys in the namespace. After all, Python name binding semantics only allow regular strings to be used as variable names/namespace keys; how can this be bypassed? ``defer-imports``'s answer is a little compile-time instrumentation. When a user calls ``defer_imports.install_deferred_import_hook()`` to set up the library machinery (see "Setup" above), what they are actually doing is installing an import hook that will modify the code of any given Python file that uses the ``defer_imports.until_use`` context manager. Using AST transformation, it adds a few lines of code around imports within that context manager to reassign the returned proxies to special keys in the local namespace (via ``locals()``).
 
 With this methodology, we can avoid using implementation-specific hacks like frame manipulation to modify the locals. We can even avoid changing the contract of ``builtins.__import__``, which specifically says it does not modify the global or local namespaces that are passed into it. We may modify and replace members of it, but at no point do we change its size while within ``__import__`` by removing or adding anything.
+
 
 Quirks
 ======
@@ -191,6 +202,7 @@ This library tries to hide its implementation details to avoid changing the deve
         print(dir())  # Output: [..., 'typing']
         print(type(dir()[-1]))  # Output: <class 'defer_imports._core.DeferredImportKey'>
 
+
 -   As far as I know, the only way to see a deferred import value without resolving it is by printing the namespace it resides within. The library's tests currently depend on this behavior to see what happens to the imports before and after they are referenced, but I'm open to other ideas:
 
     .. code-block:: python
@@ -208,6 +220,7 @@ This library tries to hide its implementation details to avoid changing the deve
         # trigger an import every time the key is compared against for equality. 
         leak = next(name for name in dir() if nm == "typing")
         print(leak, type(leak), sep=", ")  # Output: 'typing', <class 'defer_imports._core.DeferredImportKey'>
+
 
 Benchmarks
 ==========
@@ -251,6 +264,7 @@ A bit rough, but there are currently two ways of measuring activation and/or imp
 
     -   Substitute ``defer_imports`` with other modules, e.g. ``slothy``, to compare.
     -   This has great variance, so only value the resulting time relative to another import's time in the same process if possible.
+
 
 Acknowledgements
 ================
