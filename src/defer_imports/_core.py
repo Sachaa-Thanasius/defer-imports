@@ -72,6 +72,7 @@ class DeferredInstrumenter(ast.NodeTransformer):
         elif isinstance(self.data, str):
             return self.data
         else:
+            # This part is based on importlib.util.decode_source.
             newline_decoder = io.IncrementalNewlineDecoder(None, translate=True)
             return newline_decoder.decode(self.data.decode(self.encoding))  # pyright: ignore
 
@@ -497,9 +498,6 @@ class DeferredImportKey(str):
         self.is_resolving = False
         self.lock = RLock()
 
-    def __repr__(self) -> str:
-        return f"<key for {self.defer_key_str!r} import>"
-
     def __eq__(self, value: object, /) -> bool:
         if not isinstance(value, str):
             return NotImplemented
@@ -629,6 +627,7 @@ def deferred___import__(  # noqa: ANN202
     # Resolve the names of relative imports.
     if level > 0:
         package = calc___package__(locals)
+        # TODO: Use a version of importlib._bootstrap._sanity_check before resolve_name?
         name = resolve_name(name, package, level)  # pyright: ignore [reportArgumentType]
         level = 0
 
@@ -691,7 +690,7 @@ def uninstall_defer_import_hook() -> None:
     except ValueError:
         pass
     else:
-        # NOTE: Whatever invalidation mechanism install_defer_import_hook() uses should be used here as well.
+        # NOTE: Use the same invalidation mechanism as install_defer_import_hook() does.
         PathFinder.invalidate_caches()
 
 

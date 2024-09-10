@@ -53,6 +53,16 @@ def temp_cache_module(name: str, module: ModuleType):
         sys.modules.pop(name, None)
 
 
+@pytest.fixture(autouse=True)
+def no_requests(monkeypatch: pytest.MonkeyPatch):
+    """Replace defer_imports._core.DeferredImportKey.__repr__ with a more verbose version for all tests."""
+
+    def _verbose_repr(self) -> str:  # pyright: ignore  # noqa: ANN001
+        return f"<key for {self.defer_key_str!r} import>"  # pyright: ignore [reportUnknownMemberType]
+
+    monkeypatch.setattr("defer_imports._core.DeferredImportKey.__repr__", _verbose_repr)  # pyright: ignore [reportUnknownArgumentType]
+
+
 @pytest.mark.parametrize(
     ("before", "after"),
     [

@@ -136,6 +136,7 @@ extend-ignore = [
     "ANN401",  # Any is needed for some parameters.
     "UP038",   # isinstance performs better with tuples than unions.
     "PT001",   # pytest recommends against empty parentheses on pytest.fixture.
+    "PT004",   # Prepending a leading underscore for fixtures that return nothing isn't common practice.
     "PD011",   # Erroneous issue that triggers for any .values attribute access at all.
     "PLR2004", # I'll determine what counts as a magic number.
     "RUF002",  # I'll determine what counts as an ambiguous character.
