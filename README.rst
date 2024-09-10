@@ -190,7 +190,7 @@ Quirks
 
 This library tries to hide its implementation details to avoid changing the developer/user experience. That may make debugging harder in certain situations. To that end, here are a few existing rough edges or leaking implementation details:
 
--   When an deferred import is executed, a key for the result is still put in the local namespace, as with regular imports; however, that key is a ``str`` subclass with modified behavior so that referencing it (via name or via direct access in ``locals``) causes the import to resolve and the key to replace itself with a regular ``str``. As a result, while looking at namespaces with, for instance, ``dir()`` or ``vars()``, the names for deferred imports will look like normal strings while actually being instances of a subclass. Through ``dir()``, it's even possible to save such a key before it replace itself; however, the library makes no guarantees if you do that.
+-   When an deferred import is executed, a key for the result is still put in the local namespace, as with regular imports; however, that key is a ``str`` subclass with modified behavior so that referencing it (via name or via direct access in ``locals``) causes the import to resolve and the key to replace itself with a regular ``str``. As a result, while looking at namespaces with, for instance, ``dir()`` or ``vars()``, the names for deferred imports will look like normal strings while actually being instances of a subclass.
 
     .. code-block:: python
 
@@ -202,25 +202,24 @@ This library tries to hide its implementation details to avoid changing the deve
         print(dir())  # Output: [..., 'typing']
         print(type(dir()[-1]))  # Output: <class 'defer_imports._core.DeferredImportKey'>
 
-        # We can technically resolve typing in the local namespace to 
-        # a normal "typing" string as the name and the actual module as the value,
-        # *while* still saving the special key.
-        #
-        # The library guarantees nothing if you do this. Don't, please.
-        leak = next(name for name in dir() if nm == "typing")
-        print(leak, type(leak), sep=", ")  # Output: 'typing', <class 'defer_imports._core.DeferredImportKey'>
-
 
 -   As far as I know, the only way to see a deferred import value without resolving it is by printing the namespace it resides within. The library's tests currently depend on this behavior to see what happens to the imports before and after they are referenced, but I'm open to other ideas:
 
     .. code-block:: python
 
-        import defer_imports
-
-        with defer_imports.until_use:
-            import typing
-
         print(locals())  # Output: {..., 'typing': <proxy for 'import typing'>}
+
+- **WARNING:** The library makes no guarantees if you go out of your way to save a deferred import's special key or proxy from the local namespace through atypical means, such as filtering ``dir()``, ``locals().keys()``, ``locals().values()``, etc.
+
+    .. code-block:: python
+
+        # We can technically resolve typing in the local namespace to 
+        # a normal "typing" string as the name and the actual module as the value,
+        # *while* still saving the special key. This is a terrible idea for many reasons,
+        # including that it will keep the special key and proxy alive longer than necessary and will
+        # trigger an import every time the key is compared against for equality. 
+        leak = next(name for name in dir() if nm == "typing")
+        print(leak, type(leak), sep=", ")  # Output: 'typing', <class 'defer_imports._core.DeferredImportKey'>
 
 
 Benchmarks
