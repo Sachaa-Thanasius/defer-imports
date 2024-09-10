@@ -311,10 +311,10 @@ def check_source_for_defer_usage(data: _tp.Union[_tp.ReadableBuffer, str]) -> tu
 def check_ast_for_defer_usage(data: ast.AST) -> tuple[str, bool]:
     """Check if the given AST uses "with defer_imports.until_use". Also assume "utf-8" is the the encoding."""
 
+    encoding = "utf-8"
     uses_defer = any(
         isinstance(node, ast.With) and DeferredInstrumenter.check_With_for_defer_usage(node) for node in ast.walk(data)
     )
-    encoding = "utf-8"
     return encoding, uses_defer
 
 
@@ -561,6 +561,34 @@ class DeferredImportKey(str):
             namespace[key] = module
 
 
+# TODO: Keep sanity_check, calc___package__, and resolve_name in sync with the corresponding CPython code in supported
+#       CPython versions.
+
+
+def sanity_check(name: str, package: _tp.Optional[str], level: int) -> None:
+    """Verify arguments are "sane".
+
+    Slightly modified version of importlib._bootstrap._sanity_check.
+    """
+
+    if not isinstance(name, str):  # pyright: ignore [reportUnnecessaryIsInstance]
+        msg = f"module name must be str, not {type(name)}"
+        raise TypeError(msg)
+    if level < 0:
+        msg = "level must be >= 0"
+        raise ValueError(msg)
+    if level > 0:
+        if not isinstance(package, str):
+            msg = "__package__ not set to a string"
+            raise TypeError(msg)
+        if not package:
+            msg = "attempted relative import with no known parent package"
+            raise ImportError(msg)
+    if not name and level == 0:
+        msg = "Empty module name"
+        raise ValueError(msg)
+
+
 def calc___package__(globals: _tp.MutableMapping[str, _tp.Any]) -> _tp.Optional[str]:
     """Calculate what __package__ should be.
 
@@ -573,7 +601,6 @@ def calc___package__(globals: _tp.MutableMapping[str, _tp.Any]) -> _tp.Optional[
     package: str | None = globals.get("__package__")
     spec: ModuleSpec | None = globals.get("__spec__")
 
-    # TODO: Keep the warnings in sync with supported CPython versions.
     if package is not None:
         if spec is not None and package != spec.parent:
             category = DeprecationWarning if sys.version_info >= (3, 12) else ImportWarning
@@ -624,10 +651,10 @@ def deferred___import__(  # noqa: ANN202
 
     fromlist = fromlist or ()
 
+    package = calc___package__(locals)
+    sanity_check(name, package, level)
     # Resolve the names of relative imports.
     if level > 0:
-        package = calc___package__(locals)
-        # TODO: Use a version of importlib._bootstrap._sanity_check before resolve_name?
         name = resolve_name(name, package, level)  # pyright: ignore [reportArgumentType]
         level = 0
 
@@ -642,8 +669,6 @@ def deferred___import__(  # noqa: ANN202
             pass
         else:
             # Nest submodule proxies as needed.
-            # TODO: Is there a better way to do this or maybe a better place for it? Modifying a member of the
-            #       passed-in locals isn't ideal.
             for limit, attr_name in enumerate(name_parts[1:], start=2):
                 if attr_name not in vars(parent):
                     nested_proxy = DeferredImportProxy(".".join(name_parts[:limit]), globals, locals, (), level)
