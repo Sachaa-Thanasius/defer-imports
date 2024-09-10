@@ -20,10 +20,10 @@ __all__ = (
     "ModuleType",
     "MutableMapping",
     "Optional",
+    "PathLike",
     "ReadableBuffer",
     "Self",
     "Sequence",
-    "StrPath",
     "T",
     "TypeAlias",
     "Union",
@@ -72,6 +72,13 @@ def __getattr__(name: str) -> object:  # noqa: PLR0911, PLR0912
 
         return globals()[name]
 
+    if name == "PathLike":
+        global PathLike
+
+        from os import PathLike
+
+        return globals()[name]
+
     # ---- Imports with fallbacks
     if name == "ReadableBuffer":
         global ReadableBuffer
@@ -110,15 +117,6 @@ def __getattr__(name: str) -> object:  # noqa: PLR0911, PLR0912
         return globals()[name]
 
     # ---- Composed types/values with imports involved
-    if name == "StrPath":
-        global StrPath
-
-        import os
-        from typing import Union
-
-        StrPath = Union[str, os.PathLike[str]]
-        return globals()[name]
-
     if name == "T":
         global T
 

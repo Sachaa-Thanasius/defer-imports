@@ -2,8 +2,6 @@
 #
 # SPDX-License-Identifier: MIT
 
-import os
-
 __all__ = (
     "Any",
     "CodeType",
@@ -13,10 +11,10 @@ __all__ = (
     "ModuleType",
     "MutableMapping",
     "Optional",
+    "PathLike",
     "ReadableBuffer",
     "Self",
     "Sequence",
-    "StrPath",
     "T",
     "TypeAlias",
     "Union",
@@ -24,11 +22,10 @@ __all__ = (
 )
 
 from collections.abc import Generator, Iterable, MutableMapping, Sequence
+from os import PathLike
 from types import CodeType, ModuleType
 from typing import Any, Final, Optional, TypeVar, Union, final
 
 from typing_extensions import Buffer as ReadableBuffer, Self, TypeAlias
 
 T = TypeVar("T")  # noqa: PYI001
-
-StrPath: TypeAlias = str | os.PathLike[str]

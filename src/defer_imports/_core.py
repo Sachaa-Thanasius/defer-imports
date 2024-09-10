@@ -27,6 +27,7 @@ __version__ = "0.0.2"
 # region -------- Compile-time hook
 
 
+StrPath: _tp.TypeAlias = "_tp.Union[str, _tp.PathLike[str]]"
 SourceData: _tp.TypeAlias = "_tp.Union[_tp.ReadableBuffer, str, ast.Module, ast.Expression, ast.Interactive]"
 
 BYTECODE_HEADER = f"defer_imports{__version__}".encode()
@@ -41,7 +42,7 @@ class DeferredInstrumenter(ast.NodeTransformer):
     def __init__(
         self,
         data: _tp.Union[_tp.ReadableBuffer, str, ast.AST],
-        filepath: _tp.Union[_tp.StrPath, _tp.ReadableBuffer],
+        filepath: _tp.Union[StrPath, _tp.ReadableBuffer],
         encoding: str,
     ) -> None:
         self.data = data
@@ -324,7 +325,7 @@ class DeferredFileLoader(SourceFileLoader):
     def source_to_code(  # pyright: ignore [reportIncompatibleMethodOverride]
         self,
         data: SourceData,
-        path: _tp.Union[_tp.StrPath, _tp.ReadableBuffer],
+        path: _tp.Union[StrPath, _tp.ReadableBuffer],
         *,
         _optimize: int = -1,
     ) -> _tp.CodeType:
@@ -344,14 +345,14 @@ class DeferredFileLoader(SourceFileLoader):
             return super().source_to_code(data, path, _optimize=_optimize)  # pyright: ignore # See note above.
 
         # Instrument the AST of the given data.
-        transformer = DeferredInstrumenter(data, path, encoding)
-
         if isinstance(data, ast.AST):
             orig_ast = data
         else:
             orig_ast = ast.parse(data, path, "exec")
 
-        new_ast = ast.fix_missing_locations(transformer.visit(orig_ast))
+        new_ast = DeferredInstrumenter(data, path, encoding).visit(orig_ast)
+        ast.fix_missing_locations(new_ast)
+
         return super().source_to_code(new_ast, path, _optimize=_optimize)  # pyright: ignore # See note above.
 
     def get_data(self, path: str) -> bytes:
