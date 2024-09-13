@@ -20,8 +20,8 @@ from defer_imports._core import (
     DEFERRED_PATH_HOOK,
     DeferredFileLoader,
     DeferredInstrumenter,
-    install_defer_import_hook,
-    uninstall_defer_import_hook,
+    install_import_hook,
+    should_apply_globally,
 )
 
 
@@ -61,6 +61,17 @@ def better_key_repr(monkeypatch: pytest.MonkeyPatch):
         return f"<key for {self.defer_key_str!r} import>"  # pyright: ignore [reportUnknownMemberType]
 
     monkeypatch.setattr("defer_imports._core.DeferredImportKey.__repr__", _verbose_repr)  # pyright: ignore [reportUnknownArgumentType]
+
+
+@pytest.fixture
+def global_instrumentation_on():
+    """Turn on the global instrumentation aspect of defer_imports temporarily."""
+
+    _tok = should_apply_globally.set(True)
+    try:
+        yield
+    finally:
+        should_apply_globally.reset(_tok)
 
 
 @pytest.mark.parametrize(
@@ -150,7 +161,7 @@ with defer_imports.until_use:
     del @temp_proxy, @local_ns
 del @DeferredImportKey, @DeferredImportProxy
 """,
-            id="mixed import",
+            id="mixed imports",
         ),
         pytest.param(
             """\
@@ -192,6 +203,208 @@ def test_instrumentation(before: str, after: str):
     assert f"{ast.unparse(transformed_tree)}\n" == after
 
 
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        pytest.param(
+            """\
+import hello
+""",
+            """\
+import defer_imports
+from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+with defer_imports.until_use:
+    @local_ns = locals()
+    @temp_proxy = None
+    import hello
+    if type(hello) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('hello')
+        @local_ns[@DeferredImportKey('hello', @temp_proxy)] = @temp_proxy
+    del @temp_proxy, @local_ns
+del @DeferredImportKey, @DeferredImportProxy
+""",
+            id="regular import",
+        ),
+        pytest.param(
+            """\
+import hello
+import world
+import foo
+""",
+            """\
+import defer_imports
+from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+with defer_imports.until_use:
+    @local_ns = locals()
+    @temp_proxy = None
+    import hello
+    if type(hello) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('hello')
+        @local_ns[@DeferredImportKey('hello', @temp_proxy)] = @temp_proxy
+    import world
+    if type(world) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('world')
+        @local_ns[@DeferredImportKey('world', @temp_proxy)] = @temp_proxy
+    import foo
+    if type(foo) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('foo')
+        @local_ns[@DeferredImportKey('foo', @temp_proxy)] = @temp_proxy
+    del @temp_proxy, @local_ns
+del @DeferredImportKey, @DeferredImportProxy
+""",
+            id="multiple imports consecutively",
+        ),
+        pytest.param(
+            """\
+import hello
+import world
+
+print("hello")
+
+import foo
+""",
+            """\
+import defer_imports
+from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+with defer_imports.until_use:
+    @local_ns = locals()
+    @temp_proxy = None
+    import hello
+    if type(hello) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('hello')
+        @local_ns[@DeferredImportKey('hello', @temp_proxy)] = @temp_proxy
+    import world
+    if type(world) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('world')
+        @local_ns[@DeferredImportKey('world', @temp_proxy)] = @temp_proxy
+    del @temp_proxy, @local_ns
+print('hello')
+with defer_imports.until_use:
+    @local_ns = locals()
+    @temp_proxy = None
+    import foo
+    if type(foo) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('foo')
+        @local_ns[@DeferredImportKey('foo', @temp_proxy)] = @temp_proxy
+    del @temp_proxy, @local_ns
+del @DeferredImportKey, @DeferredImportProxy
+""",
+            id="multiple imports separated by statement 1",
+        ),
+        pytest.param(
+            """\
+import hello
+import world
+
+def do_the_thing(a: int) -> int:
+    return a
+
+import foo
+""",
+            """\
+import defer_imports
+from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+with defer_imports.until_use:
+    @local_ns = locals()
+    @temp_proxy = None
+    import hello
+    if type(hello) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('hello')
+        @local_ns[@DeferredImportKey('hello', @temp_proxy)] = @temp_proxy
+    import world
+    if type(world) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('world')
+        @local_ns[@DeferredImportKey('world', @temp_proxy)] = @temp_proxy
+    del @temp_proxy, @local_ns
+
+def do_the_thing(a: int) -> int:
+    return a
+with defer_imports.until_use:
+    @local_ns = locals()
+    @temp_proxy = None
+    import foo
+    if type(foo) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('foo')
+        @local_ns[@DeferredImportKey('foo', @temp_proxy)] = @temp_proxy
+    del @temp_proxy, @local_ns
+del @DeferredImportKey, @DeferredImportProxy
+""",
+            id="multiple imports separated by statement 2",
+        ),
+        pytest.param(
+            """\
+import hello
+
+def do_the_thing(a: int) -> int:
+    import world
+    return a
+""",
+            """\
+import defer_imports
+from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+with defer_imports.until_use:
+    @local_ns = locals()
+    @temp_proxy = None
+    import hello
+    if type(hello) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('hello')
+        @local_ns[@DeferredImportKey('hello', @temp_proxy)] = @temp_proxy
+    del @temp_proxy, @local_ns
+
+def do_the_thing(a: int) -> int:
+    import world
+    return a
+del @DeferredImportKey, @DeferredImportProxy
+""",
+            id="nothing done for imports within function",
+        ),
+        pytest.param(
+            """\
+import hello
+from world import *
+import foo
+""",
+            """\
+import defer_imports
+from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+with defer_imports.until_use:
+    @local_ns = locals()
+    @temp_proxy = None
+    import hello
+    if type(hello) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('hello')
+        @local_ns[@DeferredImportKey('hello', @temp_proxy)] = @temp_proxy
+    del @temp_proxy, @local_ns
+from world import *
+with defer_imports.until_use:
+    @local_ns = locals()
+    @temp_proxy = None
+    import foo
+    if type(foo) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('foo')
+        @local_ns[@DeferredImportKey('foo', @temp_proxy)] = @temp_proxy
+    del @temp_proxy, @local_ns
+del @DeferredImportKey, @DeferredImportProxy
+""",
+            id="avoids doing anything with wildcard imports",
+        ),
+    ],
+)
+@pytest.mark.usefixtures("global_instrumentation_on")
+def test_global_instrumentation(before: str, after: str):
+    import ast
+    import io
+    import tokenize
+
+    filename = "<unknown>"
+    before_bytes = before.encode()
+    encoding, _ = tokenize.detect_encoding(io.BytesIO(before_bytes).readline)
+    tree = ast.parse(before_bytes, filename, "exec")
+    transformed_tree = ast.fix_missing_locations(DeferredInstrumenter(before_bytes, filename, encoding).visit(tree))
+
+    assert f"{ast.unparse(transformed_tree)}\n" == after
+
+
 def test_path_hook_installation():
     """Test the API for putting/removing the defer_imports path hook from sys.path_hooks."""
 
@@ -200,22 +413,22 @@ def test_path_hook_installation():
     before_length = len(sys.path_hooks)
 
     # It should be present after calling install.
-    install_defer_import_hook()
+    install_import_hook()
     assert DEFERRED_PATH_HOOK in sys.path_hooks
     assert len(sys.path_hooks) == before_length + 1
 
     # Calling install shouldn't do anything if it's already on sys.path_hooks.
-    install_defer_import_hook()
+    hook_ctx = install_import_hook()
     assert DEFERRED_PATH_HOOK in sys.path_hooks
     assert len(sys.path_hooks) == before_length + 1
 
     # Calling uninstall should remove it.
-    uninstall_defer_import_hook()
+    hook_ctx.uninstall()
     assert DEFERRED_PATH_HOOK not in sys.path_hooks
     assert len(sys.path_hooks) == before_length
 
     # Calling uninstall if it's not present should do nothing to sys.path_hooks.
-    uninstall_defer_import_hook()
+    hook_ctx.uninstall()
     assert DEFERRED_PATH_HOOK not in sys.path_hooks
     assert len(sys.path_hooks) == before_length
 

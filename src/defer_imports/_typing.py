@@ -12,21 +12,30 @@ import sys
 
 
 __all__ = (
-    "Any",
-    "CodeType",
-    "Final",
+    # collections.abc
+    "Callable",
     "Generator",
     "Iterable",
-    "ModuleType",
     "MutableMapping",
+    "Sequence",
+    # typing
+    "Any",
+    "Final",
     "Optional",
+    "Union",
+    # types
+    "CodeType",
+    "ModuleType",
+    # os
     "PathLike",
+    # imported with fallbacks
     "ReadableBuffer",
     "Self",
-    "Sequence",
-    "T",
     "TypeAlias",
-    "Union",
+    "TypeGuard",
+    # # import and then defined
+    "T",
+    # actually defined
     "final",
 )
 
@@ -34,7 +43,7 @@ __all__ = (
 def final(f: object) -> object:
     """Decorator to indicate final methods and final classes.
 
-    Slightly modified version of typing.final.
+    Slightly modified version of typing.final to avoid importing from typing at runtime.
     """
 
     try:
@@ -51,10 +60,10 @@ def __getattr__(name: str) -> object:  # noqa: PLR0911, PLR0912
     # Let's cache the return values in the global namespace to avoid repeat calls.
 
     # ---- Pure imports
-    if name in {"Generator", "Iterable", "MutableMapping", "Sequence"}:
-        global Generator, Iterable, MutableMapping, Sequence
+    if name in {"Callable", "Generator", "Iterable", "MutableMapping", "Sequence"}:
+        global Callable, Generator, Iterable, MutableMapping, Sequence
 
-        from collections.abc import Generator, Iterable, MutableMapping, Sequence
+        from collections.abc import Callable, Generator, Iterable, MutableMapping, Sequence
 
         return globals()[name]
 
@@ -104,15 +113,18 @@ def __getattr__(name: str) -> object:  # noqa: PLR0911, PLR0912
 
         return globals()[name]
 
-    if name == "TypeAlias":
-        global TypeAlias
+    if name in {"TypeAlias", "TypeGuard"}:
+        global TypeAlias, TypeGuard
 
         if sys.version_info >= (3, 10):
-            from typing import TypeAlias
+            from typing import TypeAlias, TypeGuard
         else:
 
             class TypeAlias:
                 """Placeholder for typing.TypeAlias."""
+
+            class TypeGuard:
+                """Placeholder for typing.TypeGuard."""
 
         return globals()[name]
 

@@ -15,7 +15,7 @@ import tokenize
 import warnings
 from collections import deque
 from importlib.machinery import BYTECODE_SUFFIXES, SOURCE_SUFFIXES, FileFinder, ModuleSpec, PathFinder, SourceFileLoader
-from itertools import islice
+from itertools import islice, takewhile
 from threading import RLock
 
 from . import _typing as _tp
@@ -24,11 +24,132 @@ from . import _typing as _tp
 __version__ = "0.0.2"
 
 
+# ============================================================================
+# region -------- Vendored helpers
+#
+# The helper functions should reflect the behavior of the corresponding functions in all supported CPython versions.
+# ============================================================================
+
+
+def sliding_window(iterable: _tp.Iterable[_tp.T], n: int) -> _tp.Generator[tuple[_tp.T, ...]]:
+    """Collect data into overlapping fixed-length chunks or blocks.
+
+    Notes
+    -----
+    Slightly modified version of a recipe in the Python 3.12 itertools docs.
+
+    Examples
+    --------
+    >>> ["".join(window) for window in sliding_window('ABCDEFG', 4)]
+    ['ABCD', 'BCDE', 'CDEF', 'DEFG']
+    """
+
+    iterator = iter(iterable)
+    window = deque(islice(iterator, n - 1), maxlen=n)
+    for x in iterator:
+        window.append(x)
+        yield tuple(window)
+
+
+def sanity_check(name: str, package: _tp.Optional[str], level: int) -> None:
+    """Verify arguments are "sane".
+
+    Notes
+    -----
+    Slightly modified version of importlib._bootstrap._sanity_check to avoid depending on an an implementation detail
+    module at runtime.
+    """
+
+    if not isinstance(name, str):  # pyright: ignore [reportUnnecessaryIsInstance]
+        msg = f"module name must be str, not {type(name)}"
+        raise TypeError(msg)
+    if level < 0:
+        msg = "level must be >= 0"
+        raise ValueError(msg)
+    if level > 0:
+        if not isinstance(package, str):
+            msg = "__package__ not set to a string"
+            raise TypeError(msg)
+        if not package:
+            msg = "attempted relative import with no known parent package"
+            raise ImportError(msg)
+    if not name and level == 0:
+        msg = "Empty module name"
+        raise ValueError(msg)
+
+
+def calc___package__(globals: _tp.MutableMapping[str, _tp.Any]) -> _tp.Optional[str]:
+    """Calculate what __package__ should be.
+
+    __package__ is not guaranteed to be defined or could be set to None
+    to represent that its proper value is unknown.
+
+    Notes
+    -----
+    Slightly modified version of importlib._bootstrap._calc___package__ to avoid depending on an implementation detail
+    module at runtime.
+    """
+
+    package: str | None = globals.get("__package__")
+    spec: ModuleSpec | None = globals.get("__spec__")
+
+    if package is not None:
+        if spec is not None and package != spec.parent:
+            category = DeprecationWarning if sys.version_info >= (3, 12) else ImportWarning
+            warnings.warn(
+                f"__package__ != __spec__.parent ({package!r} != {spec.parent!r})",
+                category,
+                stacklevel=3,
+            )
+        return package
+
+    if spec is not None:
+        return spec.parent
+
+    warnings.warn(
+        "can't resolve package from __spec__ or __package__, falling back on __name__ and __path__",
+        ImportWarning,
+        stacklevel=3,
+    )
+    package = globals["__name__"]
+    if "__path__" not in globals:
+        package = package.rpartition(".")[0]  # pyright: ignore [reportOptionalMemberAccess]
+
+    return package
+
+
+def resolve_name(name: str, package: str, level: int) -> str:
+    """Resolve a relative module name to an absolute one.
+
+    Notes
+    -----
+    Slightly modified version of importlib._bootstrap._resolve_name to avoid depending on an implementation detail
+    module at runtime.
+    """
+
+    bits = package.rsplit(".", level - 1)
+    if len(bits) < level:
+        msg = "attempted relative import beyond top-level package"
+        raise ImportError(msg)
+    base = bits[0]
+    return f"{base}.{name}" if name else base
+
+
+# endregion
+
+
+# ============================================================================
 # region -------- Compile-time hook
+# ============================================================================
 
 
 StrPath: _tp.TypeAlias = "_tp.Union[str, _tp.PathLike[str]]"
 SourceData: _tp.TypeAlias = "_tp.Union[_tp.ReadableBuffer, str, ast.Module, ast.Expression, ast.Interactive]"
+
+
+should_apply_globally = contextvars.ContextVar("should_instrument_globally", default=False)
+"""Whether the instrumentation should apply globally."""
+
 
 BYTECODE_HEADER = f"defer_imports{__version__}".encode()
 """Custom header for defer_imports-instrumented bytecode files. Should be updated with every version release."""
@@ -48,7 +169,9 @@ class DeferredInstrumenter(ast.NodeTransformer):
         self.data = data
         self.filepath = filepath
         self.encoding = encoding
+
         self.scope_depth = 0
+        self.escape_hatch_depth = 0
 
     def _visit_scope(self, node: ast.AST) -> ast.AST:
         """Track Python scope changes. Used to determine if defer_imports.until_use usage is global."""
@@ -64,6 +187,20 @@ class DeferredInstrumenter(ast.NodeTransformer):
     visit_Lambda = _visit_scope
     visit_ClassDef = _visit_scope
 
+    def _visit_eager_import_block(self, node: ast.AST) -> ast.AST:
+        """Track if the visitor is within a try-except block or a non-defer with statement."""
+
+        self.escape_hatch_depth += 1
+        try:
+            return self.generic_visit(node)
+        finally:
+            self.escape_hatch_depth -= 1
+
+    visit_Try = _visit_eager_import_block
+
+    if sys.version_info >= (3, 11):
+        visit_TryStar = _visit_eager_import_block
+
     def _decode_source(self) -> str:
         """Get the source code corresponding to the given data."""
 
@@ -73,7 +210,7 @@ class DeferredInstrumenter(ast.NodeTransformer):
         elif isinstance(self.data, str):
             return self.data
         else:
-            # This part is based on importlib.util.decode_source.
+            # Based on importlib.util.decode_source.
             newline_decoder = io.IncrementalNewlineDecoder(None, translate=True)
             return newline_decoder.decode(self.data.decode(self.encoding))  # pyright: ignore
 
@@ -218,7 +355,11 @@ class DeferredInstrumenter(ast.NodeTransformer):
         """
 
         if not self.check_With_for_defer_usage(node):
-            return self.generic_visit(node)
+            self.escape_hatch_depth += 1
+            try:
+                return self.generic_visit(node)
+            finally:
+                self.escape_hatch_depth -= 1
 
         if self.scope_depth != 0:
             msg = "with defer_imports.until_use only allowed at module level"
@@ -254,9 +395,14 @@ class DeferredInstrumenter(ast.NodeTransformer):
 
             position += 1
 
+        # Import defer classes.
+        if should_apply_globally.get():
+            top_level_import = ast.Import(names=[ast.alias(name="defer_imports")])
+            node.body.insert(position, top_level_import)
+            position += 1
+
         defer_class_names = ("DeferredImportKey", "DeferredImportProxy")
 
-        # Import key and proxy classes.
         defer_aliases = [ast.alias(name=name, asname=f"@{name}") for name in defer_class_names]
         key_and_proxy_import = ast.ImportFrom(module="defer_imports._core", names=defer_aliases, level=0)
         node.body.insert(position, key_and_proxy_import)
@@ -267,23 +413,74 @@ class DeferredInstrumenter(ast.NodeTransformer):
 
         return self.generic_visit(node)
 
+    @staticmethod
+    def _identify_regular_import(obj: object) -> _tp.TypeGuard[_tp.Union[ast.Import, ast.ImportFrom]]:
+        """Check if a given object is an import AST without wildcards."""
 
-def sliding_window(iterable: _tp.Iterable[_tp.T], n: int) -> _tp.Iterable[tuple[_tp.T, ...]]:
-    """Collect data into overlapping fixed-length chunks or blocks.
+        return isinstance(obj, (ast.Import, ast.ImportFrom)) and obj.names[0].name != "*"
 
-    Copied from 3.12 itertools docs.
+    @staticmethod
+    def _is_defer_imports_import(node: _tp.Union[ast.Import, ast.ImportFrom]) -> bool:
+        if isinstance(node, ast.Import):
+            return any(alias.name.partition(".")[0] == "defer_imports" for alias in node.names)
+        else:
+            return node.module is not None and node.module.partition(".")[0] == "defer_imports"
 
-    Examples
-    --------
-    >>> ["".join(window) for window in sliding_window('ABCDEFG', 4)]
-    ['ABCD', 'BCDE', 'CDEF', 'DEFG']
-    """
+    def _wrap_import_stmts(self, nodes: list[ast.stmt], start: int) -> ast.With:
+        import_range = tuple(takewhile(lambda i: self._identify_regular_import(nodes[i]), range(start, len(nodes))))
+        import_slice = slice(import_range[0], import_range[-1] + 1)
+        import_nodes = nodes[import_slice]
 
-    iterator = iter(iterable)
-    window = deque(islice(iterator, n - 1), maxlen=n)
-    for x in iterator:
-        window.append(x)
-        yield tuple(window)
+        instrumented_nodes = self._substitute_import_keys(import_nodes)
+        wrapper_node = ast.With(
+            items=[
+                ast.withitem(
+                    context_expr=ast.Attribute(
+                        value=ast.Name("defer_imports", ctx=ast.Load()),
+                        attr="until_use",
+                        ctx=ast.Load(),
+                    )
+                )
+            ],
+            body=instrumented_nodes,
+        )
+
+        nodes[import_slice] = [wrapper_node]
+        return wrapper_node
+
+    def generic_visit(self, node: ast.AST) -> ast.AST:
+        for field, old_value in ast.iter_fields(node):
+            if isinstance(old_value, list):
+                new_values: list[_tp.Any] = []
+                for i, value in enumerate(old_value):  # pyright: ignore
+                    # This if block is the only difference from NodeTransformer.generic_visit.
+                    if (
+                        should_apply_globally.get()
+                        # Only instrument import nodes, specifically ones we are prepared to handle.
+                        and self._identify_regular_import(value)  # pyright: ignore [reportUnknownArgumentType]
+                        # Only instrument imports in global scopes.
+                        and self.scope_depth == 0
+                        # Only instrument imports outside of defer "with" blocks.
+                        and self.escape_hatch_depth == 0
+                        and not self._is_defer_imports_import(value)
+                    ):
+                        value = self._wrap_import_stmts(old_value, i)  # noqa: PLW2901 # pyright: ignore [reportUnknownArgumentType]
+                    elif isinstance(value, ast.AST):
+                        value = self.visit(value)  # noqa: PLW2901
+                        if value is None:
+                            continue
+                        if not isinstance(value, ast.AST):
+                            new_values.extend(value)
+                            continue
+                    new_values.append(value)
+                old_value[:] = new_values
+            elif isinstance(old_value, ast.AST):
+                new_node = self.visit(old_value)
+                if new_node is None:
+                    delattr(node, field)
+                else:
+                    setattr(node, field, new_node)
+        return node
 
 
 def check_source_for_defer_usage(data: _tp.Union[_tp.ReadableBuffer, str]) -> tuple[str, bool]:
@@ -346,12 +543,15 @@ class DeferredFileLoader(SourceFileLoader):
 
         # Instrument the AST of the given data.
         if isinstance(data, ast.AST):
+            # TODO: This isn't safe when a syntax error occurs since we modify the tree but raise before fixing node
+            #       locations. This also makes it difficult to point at the actual source code location. Find a way to
+            #       deepcopy the tree first.
             orig_ast = data
         else:
             orig_ast = ast.parse(data, path, "exec")
 
-        new_ast = DeferredInstrumenter(data, path, encoding).visit(orig_ast)
-        ast.fix_missing_locations(new_ast)
+        transformer = DeferredInstrumenter(data, path, encoding)
+        new_ast = ast.fix_missing_locations(transformer.visit(orig_ast))
 
         return super().source_to_code(new_ast, path, _optimize=_optimize)  # pyright: ignore # See note above.
 
@@ -413,7 +613,9 @@ DEFERRED_PATH_HOOK = FileFinder.path_hook((DeferredFileLoader, SOURCE_SUFFIXES))
 # endregion
 
 
+# ============================================================================
 # region -------- Runtime hook
+# ============================================================================
 
 
 original_import = contextvars.ContextVar("original_import", default=builtins.__import__)
@@ -562,85 +764,6 @@ class DeferredImportKey(str):
             namespace[key] = module
 
 
-# TODO: Keep sanity_check, calc___package__, and resolve_name in sync with the corresponding CPython code in supported
-#       CPython versions.
-
-
-def sanity_check(name: str, package: _tp.Optional[str], level: int) -> None:
-    """Verify arguments are "sane".
-
-    Slightly modified version of importlib._bootstrap._sanity_check.
-    """
-
-    if not isinstance(name, str):  # pyright: ignore [reportUnnecessaryIsInstance]
-        msg = f"module name must be str, not {type(name)}"
-        raise TypeError(msg)
-    if level < 0:
-        msg = "level must be >= 0"
-        raise ValueError(msg)
-    if level > 0:
-        if not isinstance(package, str):
-            msg = "__package__ not set to a string"
-            raise TypeError(msg)
-        if not package:
-            msg = "attempted relative import with no known parent package"
-            raise ImportError(msg)
-    if not name and level == 0:
-        msg = "Empty module name"
-        raise ValueError(msg)
-
-
-def calc___package__(globals: _tp.MutableMapping[str, _tp.Any]) -> _tp.Optional[str]:
-    """Calculate what __package__ should be.
-
-    __package__ is not guaranteed to be defined or could be set to None
-    to represent that its proper value is unknown.
-
-    Slightly modified version of importlib._bootstrap._calc___package__.
-    """
-
-    package: str | None = globals.get("__package__")
-    spec: ModuleSpec | None = globals.get("__spec__")
-
-    if package is not None:
-        if spec is not None and package != spec.parent:
-            category = DeprecationWarning if sys.version_info >= (3, 12) else ImportWarning
-            warnings.warn(
-                f"__package__ != __spec__.parent ({package!r} != {spec.parent!r})",
-                category,
-                stacklevel=3,
-            )
-        return package
-
-    if spec is not None:
-        return spec.parent
-
-    warnings.warn(
-        "can't resolve package from __spec__ or __package__, falling back on __name__ and __path__",
-        ImportWarning,
-        stacklevel=3,
-    )
-    package = globals["__name__"]
-    if "__path__" not in globals:
-        package = package.rpartition(".")[0]  # pyright: ignore [reportOptionalMemberAccess]
-
-    return package
-
-
-def resolve_name(name: str, package: str, level: int) -> str:
-    """Resolve a relative module name to an absolute one.
-
-    Slightly modified version of importlib._bootstrap._resolve_name.
-    """
-
-    bits = package.rsplit(".", level - 1)
-    if len(bits) < level:
-        msg = "attempted relative import beyond top-level package"
-        raise ImportError(msg)
-    base = bits[0]
-    return f"{base}.{name}" if name else base
-
-
 def deferred___import__(  # noqa: ANN202
     name: str,
     globals: _tp.MutableMapping[str, object],
@@ -654,6 +777,7 @@ def deferred___import__(  # noqa: ANN202
 
     package = calc___package__(locals)
     sanity_check(name, package, level)
+
     # Resolve the names of relative imports.
     if level > 0:
         name = resolve_name(name, package, level)  # pyright: ignore [reportArgumentType]
@@ -687,37 +811,55 @@ def deferred___import__(  # noqa: ANN202
 # endregion
 
 
+# ============================================================================
 # region -------- Public API
+# ============================================================================
 
 
-def install_defer_import_hook() -> None:
+def install_import_hook(*, is_global: bool = False) -> ImportHookContext:
     """Insert defer_imports's path hook right before the default FileFinder one in sys.path_hooks.
 
-    This can be called in a few places, e.g. __init__.py of a package, a .pth file in site packages, etc.
+    This should be run before the rest of your code. One place to put it is in __init__.py of your package.
     """
 
-    if DEFERRED_PATH_HOOK in sys.path_hooks:
-        return
+    global_apply_tok = should_apply_globally.set(is_global)
 
-    # NOTE: PathFinder.invalidate_caches() is expensive because it imports importlib.metadata, but we have to just bear
-    #       that for now, unfortunately. Price of being a good citizen, I suppose.
-    for i, hook in enumerate(sys.path_hooks):
-        if hook.__qualname__.startswith("FileFinder.path_hook"):
-            sys.path_hooks.insert(i, DEFERRED_PATH_HOOK)
+    if DEFERRED_PATH_HOOK not in sys.path_hooks:
+        # NOTE: PathFinder.invalidate_caches() is expensive because it imports importlib.metadata, but we have to just bear
+        #       that for now, unfortunately. Price of being a good citizen, I suppose.
+        for i, hook in enumerate(sys.path_hooks):
+            if hook.__qualname__.startswith("FileFinder.path_hook"):
+                sys.path_hooks.insert(i, DEFERRED_PATH_HOOK)
+                PathFinder.invalidate_caches()
+                break
+
+    return ImportHookContext(global_apply_tok)
+
+
+class ImportHookContext:
+    def __init__(self, tok: contextvars.Token[bool]):
+        self._tok = tok
+
+    def __enter__(self) -> _tp.Self:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.uninstall()
+
+    def uninstall(self) -> None:
+        """Remove defer_imports's path hook if it's in sys.path_hooks."""
+
+        if hasattr(self, "_tok"):
+            should_apply_globally.reset(self._tok)
+            del self._tok
+
+        try:
+            sys.path_hooks.remove(DEFERRED_PATH_HOOK)
+        except ValueError:
+            pass
+        else:
+            # NOTE: Use the same invalidation mechanism as install_defer_import_hook() does.
             PathFinder.invalidate_caches()
-            return
-
-
-def uninstall_defer_import_hook() -> None:
-    """Remove defer_imports's path hook if it's in sys.path_hooks."""
-
-    try:
-        sys.path_hooks.remove(DEFERRED_PATH_HOOK)
-    except ValueError:
-        pass
-    else:
-        # NOTE: Use the same invalidation mechanism as install_defer_import_hook() does.
-        PathFinder.invalidate_caches()
 
 
 @_tp.final

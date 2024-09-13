@@ -27,13 +27,14 @@ class _DeferredCompile(codeop.Compile):
         if kwargs.get("incomplete_input", True) is False:
             flags &= ~codeop.PyCF_DONT_IMPLY_DEDENT  # pyright: ignore
             flags &= ~codeop.PyCF_ALLOW_INCOMPLETE_INPUT  # pyright: ignore
-        assert isinstance(flags, int)
 
+        # These five lines are the only difference from codeop.Compile.__call__.
+        assert isinstance(flags, int)
         orig_ast = compile(source, filename, symbol, flags | ast.PyCF_ONLY_AST, True)
         transformer = DeferredInstrumenter(source, filename, "utf-8")
         new_ast = ast.fix_missing_locations(transformer.visit(orig_ast))
-
         codeob = compile(new_ast, filename, symbol, flags, True)
+
         for feature in _features:
             if codeob.co_flags & feature.compiler_flag:
                 self.flags |= feature.compiler_flag

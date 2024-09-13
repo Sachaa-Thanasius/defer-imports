@@ -3,29 +3,38 @@
 # SPDX-License-Identifier: MIT
 
 __all__ = (
-    "Any",
-    "CodeType",
-    "Final",
+    # collections.abc
+    "Callable",
     "Generator",
     "Iterable",
-    "ModuleType",
     "MutableMapping",
+    "Sequence",
+    # typing
+    "Any",
+    "Final",
     "Optional",
+    "Union",
+    # types
+    "CodeType",
+    "ModuleType",
+    # os
     "PathLike",
+    # import with fallbacks
     "ReadableBuffer",
     "Self",
-    "Sequence",
-    "T",
     "TypeAlias",
-    "Union",
+    "TypeGuard",
+    # import and then defined
+    "T",
+    # actually defined
     "final",
 )
 
-from collections.abc import Generator, Iterable, MutableMapping, Sequence
+from collections.abc import Callable, Generator, Iterable, MutableMapping, Sequence
 from os import PathLike
 from types import CodeType, ModuleType
 from typing import Any, Final, Optional, TypeVar, Union, final
 
-from typing_extensions import Buffer as ReadableBuffer, Self, TypeAlias
+from typing_extensions import Buffer as ReadableBuffer, Self, TypeAlias, TypeGuard
 
 T = TypeVar("T")  # noqa: PYI001

@@ -1,0 +1,1696 @@
+import defer_imports
+from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+import defer_imports
+with defer_imports.until_use:
+    @local_ns = locals()
+    @temp_proxy = None
+    import __future__
+    if type(__future__) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('__future__')
+        @local_ns[@DeferredImportKey('__future__', @temp_proxy)] = @temp_proxy
+    import _collections_abc
+    if type(_collections_abc) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('_collections_abc')
+        @local_ns[@DeferredImportKey('_collections_abc', @temp_proxy)] = @temp_proxy
+    import _compat_pickle
+    if type(_compat_pickle) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('_compat_pickle')
+        @local_ns[@DeferredImportKey('_compat_pickle', @temp_proxy)] = @temp_proxy
+    import _compression
+    if type(_compression) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('_compression')
+        @local_ns[@DeferredImportKey('_compression', @temp_proxy)] = @temp_proxy
+    import _markupbase
+    if type(_markupbase) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('_markupbase')
+        @local_ns[@DeferredImportKey('_markupbase', @temp_proxy)] = @temp_proxy
+    import _osx_support
+    if type(_osx_support) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('_osx_support')
+        @local_ns[@DeferredImportKey('_osx_support', @temp_proxy)] = @temp_proxy
+    import _py_abc
+    if type(_py_abc) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('_py_abc')
+        @local_ns[@DeferredImportKey('_py_abc', @temp_proxy)] = @temp_proxy
+    import _pydecimal
+    if type(_pydecimal) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('_pydecimal')
+        @local_ns[@DeferredImportKey('_pydecimal', @temp_proxy)] = @temp_proxy
+    import _pyio
+    if type(_pyio) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('_pyio')
+        @local_ns[@DeferredImportKey('_pyio', @temp_proxy)] = @temp_proxy
+    import _sitebuiltins
+    if type(_sitebuiltins) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('_sitebuiltins')
+        @local_ns[@DeferredImportKey('_sitebuiltins', @temp_proxy)] = @temp_proxy
+    import _strptime
+    if type(_strptime) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('_strptime')
+        @local_ns[@DeferredImportKey('_strptime', @temp_proxy)] = @temp_proxy
+    import _threading_local
+    if type(_threading_local) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('_threading_local')
+        @local_ns[@DeferredImportKey('_threading_local', @temp_proxy)] = @temp_proxy
+    import _weakrefset
+    if type(_weakrefset) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('_weakrefset')
+        @local_ns[@DeferredImportKey('_weakrefset', @temp_proxy)] = @temp_proxy
+    import abc
+    if type(abc) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('abc')
+        @local_ns[@DeferredImportKey('abc', @temp_proxy)] = @temp_proxy
+    import argparse
+    if type(argparse) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('argparse')
+        @local_ns[@DeferredImportKey('argparse', @temp_proxy)] = @temp_proxy
+    import ast
+    if type(ast) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('ast')
+        @local_ns[@DeferredImportKey('ast', @temp_proxy)] = @temp_proxy
+    import asyncio
+    if type(asyncio) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('asyncio')
+        @local_ns[@DeferredImportKey('asyncio', @temp_proxy)] = @temp_proxy
+    import asyncio.base_events
+    if type(asyncio) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('asyncio')
+        @local_ns[@DeferredImportKey('asyncio', @temp_proxy)] = @temp_proxy
+    import asyncio.base_futures
+    if type(asyncio) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('asyncio')
+        @local_ns[@DeferredImportKey('asyncio', @temp_proxy)] = @temp_proxy
+    import asyncio.base_subprocess
+    if type(asyncio) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('asyncio')
+        @local_ns[@DeferredImportKey('asyncio', @temp_proxy)] = @temp_proxy
+    import asyncio.base_tasks
+    if type(asyncio) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('asyncio')
+        @local_ns[@DeferredImportKey('asyncio', @temp_proxy)] = @temp_proxy
+    import asyncio.constants
+    if type(asyncio) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('asyncio')
+        @local_ns[@DeferredImportKey('asyncio', @temp_proxy)] = @temp_proxy
+    import asyncio.coroutines
+    if type(asyncio) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('asyncio')
+        @local_ns[@DeferredImportKey('asyncio', @temp_proxy)] = @temp_proxy
+    import asyncio.events
+    if type(asyncio) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('asyncio')
+        @local_ns[@DeferredImportKey('asyncio', @temp_proxy)] = @temp_proxy
+    import asyncio.format_helpers
+    if type(asyncio) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('asyncio')
+        @local_ns[@DeferredImportKey('asyncio', @temp_proxy)] = @temp_proxy
+    import asyncio.futures
+    if type(asyncio) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('asyncio')
+        @local_ns[@DeferredImportKey('asyncio', @temp_proxy)] = @temp_proxy
+    import asyncio.locks
+    if type(asyncio) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('asyncio')
+        @local_ns[@DeferredImportKey('asyncio', @temp_proxy)] = @temp_proxy
+    import asyncio.log
+    if type(asyncio) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('asyncio')
+        @local_ns[@DeferredImportKey('asyncio', @temp_proxy)] = @temp_proxy
+    import asyncio.proactor_events
+    if type(asyncio) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('asyncio')
+        @local_ns[@DeferredImportKey('asyncio', @temp_proxy)] = @temp_proxy
+    import asyncio.protocols
+    if type(asyncio) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('asyncio')
+        @local_ns[@DeferredImportKey('asyncio', @temp_proxy)] = @temp_proxy
+    import asyncio.queues
+    if type(asyncio) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('asyncio')
+        @local_ns[@DeferredImportKey('asyncio', @temp_proxy)] = @temp_proxy
+    import asyncio.runners
+    if type(asyncio) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('asyncio')
+        @local_ns[@DeferredImportKey('asyncio', @temp_proxy)] = @temp_proxy
+    import asyncio.selector_events
+    if type(asyncio) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('asyncio')
+        @local_ns[@DeferredImportKey('asyncio', @temp_proxy)] = @temp_proxy
+    import asyncio.sslproto
+    if type(asyncio) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('asyncio')
+        @local_ns[@DeferredImportKey('asyncio', @temp_proxy)] = @temp_proxy
+    import asyncio.streams
+    if type(asyncio) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('asyncio')
+        @local_ns[@DeferredImportKey('asyncio', @temp_proxy)] = @temp_proxy
+    import asyncio.subprocess
+    if type(asyncio) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('asyncio')
+        @local_ns[@DeferredImportKey('asyncio', @temp_proxy)] = @temp_proxy
+    import asyncio.tasks
+    if type(asyncio) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('asyncio')
+        @local_ns[@DeferredImportKey('asyncio', @temp_proxy)] = @temp_proxy
+    import asyncio.transports
+    if type(asyncio) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('asyncio')
+        @local_ns[@DeferredImportKey('asyncio', @temp_proxy)] = @temp_proxy
+    import base64
+    if type(base64) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('base64')
+        @local_ns[@DeferredImportKey('base64', @temp_proxy)] = @temp_proxy
+    import bdb
+    if type(bdb) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('bdb')
+        @local_ns[@DeferredImportKey('bdb', @temp_proxy)] = @temp_proxy
+    import bisect
+    if type(bisect) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('bisect')
+        @local_ns[@DeferredImportKey('bisect', @temp_proxy)] = @temp_proxy
+    import bz2
+    if type(bz2) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('bz2')
+        @local_ns[@DeferredImportKey('bz2', @temp_proxy)] = @temp_proxy
+    import calendar
+    if type(calendar) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('calendar')
+        @local_ns[@DeferredImportKey('calendar', @temp_proxy)] = @temp_proxy
+    import cmd
+    if type(cmd) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('cmd')
+        @local_ns[@DeferredImportKey('cmd', @temp_proxy)] = @temp_proxy
+    import code
+    if type(code) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('code')
+        @local_ns[@DeferredImportKey('code', @temp_proxy)] = @temp_proxy
+    import codecs
+    if type(codecs) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('codecs')
+        @local_ns[@DeferredImportKey('codecs', @temp_proxy)] = @temp_proxy
+    import codeop
+    if type(codeop) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('codeop')
+        @local_ns[@DeferredImportKey('codeop', @temp_proxy)] = @temp_proxy
+    import collections
+    if type(collections) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('collections')
+        @local_ns[@DeferredImportKey('collections', @temp_proxy)] = @temp_proxy
+    import collections.abc
+    if type(collections) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('collections')
+        @local_ns[@DeferredImportKey('collections', @temp_proxy)] = @temp_proxy
+    import colorsys
+    if type(colorsys) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('colorsys')
+        @local_ns[@DeferredImportKey('colorsys', @temp_proxy)] = @temp_proxy
+    import compileall
+    if type(compileall) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('compileall')
+        @local_ns[@DeferredImportKey('compileall', @temp_proxy)] = @temp_proxy
+    import concurrent
+    if type(concurrent) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('concurrent')
+        @local_ns[@DeferredImportKey('concurrent', @temp_proxy)] = @temp_proxy
+    import concurrent.futures
+    if type(concurrent) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('concurrent')
+        @local_ns[@DeferredImportKey('concurrent', @temp_proxy)] = @temp_proxy
+    import concurrent.futures._base
+    if type(concurrent) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('concurrent')
+        @local_ns[@DeferredImportKey('concurrent', @temp_proxy)] = @temp_proxy
+    import concurrent.futures.process
+    if type(concurrent) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('concurrent')
+        @local_ns[@DeferredImportKey('concurrent', @temp_proxy)] = @temp_proxy
+    import concurrent.futures.thread
+    if type(concurrent) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('concurrent')
+        @local_ns[@DeferredImportKey('concurrent', @temp_proxy)] = @temp_proxy
+    import configparser
+    if type(configparser) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('configparser')
+        @local_ns[@DeferredImportKey('configparser', @temp_proxy)] = @temp_proxy
+    import contextlib
+    if type(contextlib) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('contextlib')
+        @local_ns[@DeferredImportKey('contextlib', @temp_proxy)] = @temp_proxy
+    import contextvars
+    if type(contextvars) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('contextvars')
+        @local_ns[@DeferredImportKey('contextvars', @temp_proxy)] = @temp_proxy
+    import copy
+    if type(copy) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('copy')
+        @local_ns[@DeferredImportKey('copy', @temp_proxy)] = @temp_proxy
+    import copyreg
+    if type(copyreg) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('copyreg')
+        @local_ns[@DeferredImportKey('copyreg', @temp_proxy)] = @temp_proxy
+    import cProfile
+    if type(cProfile) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('cProfile')
+        @local_ns[@DeferredImportKey('cProfile', @temp_proxy)] = @temp_proxy
+    import csv
+    if type(csv) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('csv')
+        @local_ns[@DeferredImportKey('csv', @temp_proxy)] = @temp_proxy
+    import ctypes
+    if type(ctypes) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('ctypes')
+        @local_ns[@DeferredImportKey('ctypes', @temp_proxy)] = @temp_proxy
+    import ctypes._aix
+    if type(ctypes) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('ctypes')
+        @local_ns[@DeferredImportKey('ctypes', @temp_proxy)] = @temp_proxy
+    import ctypes._endian
+    if type(ctypes) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('ctypes')
+        @local_ns[@DeferredImportKey('ctypes', @temp_proxy)] = @temp_proxy
+    import ctypes.macholib
+    if type(ctypes) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('ctypes')
+        @local_ns[@DeferredImportKey('ctypes', @temp_proxy)] = @temp_proxy
+    import ctypes.macholib.dyld
+    if type(ctypes) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('ctypes')
+        @local_ns[@DeferredImportKey('ctypes', @temp_proxy)] = @temp_proxy
+    import ctypes.macholib.dylib
+    if type(ctypes) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('ctypes')
+        @local_ns[@DeferredImportKey('ctypes', @temp_proxy)] = @temp_proxy
+    import ctypes.util
+    if type(ctypes) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('ctypes')
+        @local_ns[@DeferredImportKey('ctypes', @temp_proxy)] = @temp_proxy
+    import dataclasses
+    if type(dataclasses) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('dataclasses')
+        @local_ns[@DeferredImportKey('dataclasses', @temp_proxy)] = @temp_proxy
+    import datetime
+    if type(datetime) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('datetime')
+        @local_ns[@DeferredImportKey('datetime', @temp_proxy)] = @temp_proxy
+    import dbm
+    if type(dbm) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('dbm')
+        @local_ns[@DeferredImportKey('dbm', @temp_proxy)] = @temp_proxy
+    import dbm.dumb
+    if type(dbm) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('dbm')
+        @local_ns[@DeferredImportKey('dbm', @temp_proxy)] = @temp_proxy
+    import decimal
+    if type(decimal) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('decimal')
+        @local_ns[@DeferredImportKey('decimal', @temp_proxy)] = @temp_proxy
+    import difflib
+    if type(difflib) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('difflib')
+        @local_ns[@DeferredImportKey('difflib', @temp_proxy)] = @temp_proxy
+    import dis
+    if type(dis) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('dis')
+        @local_ns[@DeferredImportKey('dis', @temp_proxy)] = @temp_proxy
+    import doctest
+    if type(doctest) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('doctest')
+        @local_ns[@DeferredImportKey('doctest', @temp_proxy)] = @temp_proxy
+    import email
+    if type(email) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('email')
+        @local_ns[@DeferredImportKey('email', @temp_proxy)] = @temp_proxy
+    import email._encoded_words
+    if type(email) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('email')
+        @local_ns[@DeferredImportKey('email', @temp_proxy)] = @temp_proxy
+    import email._header_value_parser
+    if type(email) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('email')
+        @local_ns[@DeferredImportKey('email', @temp_proxy)] = @temp_proxy
+    import email._parseaddr
+    if type(email) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('email')
+        @local_ns[@DeferredImportKey('email', @temp_proxy)] = @temp_proxy
+    import email._policybase
+    if type(email) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('email')
+        @local_ns[@DeferredImportKey('email', @temp_proxy)] = @temp_proxy
+    import email.base64mime
+    if type(email) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('email')
+        @local_ns[@DeferredImportKey('email', @temp_proxy)] = @temp_proxy
+    import email.charset
+    if type(email) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('email')
+        @local_ns[@DeferredImportKey('email', @temp_proxy)] = @temp_proxy
+    import email.contentmanager
+    if type(email) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('email')
+        @local_ns[@DeferredImportKey('email', @temp_proxy)] = @temp_proxy
+    import email.encoders
+    if type(email) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('email')
+        @local_ns[@DeferredImportKey('email', @temp_proxy)] = @temp_proxy
+    import email.errors
+    if type(email) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('email')
+        @local_ns[@DeferredImportKey('email', @temp_proxy)] = @temp_proxy
+    import email.feedparser
+    if type(email) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('email')
+        @local_ns[@DeferredImportKey('email', @temp_proxy)] = @temp_proxy
+    import email.generator
+    if type(email) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('email')
+        @local_ns[@DeferredImportKey('email', @temp_proxy)] = @temp_proxy
+    import email.header
+    if type(email) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('email')
+        @local_ns[@DeferredImportKey('email', @temp_proxy)] = @temp_proxy
+    import email.headerregistry
+    if type(email) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('email')
+        @local_ns[@DeferredImportKey('email', @temp_proxy)] = @temp_proxy
+    import email.iterators
+    if type(email) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('email')
+        @local_ns[@DeferredImportKey('email', @temp_proxy)] = @temp_proxy
+    import email.message
+    if type(email) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('email')
+        @local_ns[@DeferredImportKey('email', @temp_proxy)] = @temp_proxy
+    import email.mime
+    if type(email) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('email')
+        @local_ns[@DeferredImportKey('email', @temp_proxy)] = @temp_proxy
+    import email.mime.application
+    if type(email) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('email')
+        @local_ns[@DeferredImportKey('email', @temp_proxy)] = @temp_proxy
+    import email.mime.audio
+    if type(email) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('email')
+        @local_ns[@DeferredImportKey('email', @temp_proxy)] = @temp_proxy
+    import email.mime.base
+    if type(email) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('email')
+        @local_ns[@DeferredImportKey('email', @temp_proxy)] = @temp_proxy
+    import email.mime.image
+    if type(email) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('email')
+        @local_ns[@DeferredImportKey('email', @temp_proxy)] = @temp_proxy
+    import email.mime.message
+    if type(email) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('email')
+        @local_ns[@DeferredImportKey('email', @temp_proxy)] = @temp_proxy
+    import email.mime.multipart
+    if type(email) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('email')
+        @local_ns[@DeferredImportKey('email', @temp_proxy)] = @temp_proxy
+    import email.mime.nonmultipart
+    if type(email) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('email')
+        @local_ns[@DeferredImportKey('email', @temp_proxy)] = @temp_proxy
+    import email.mime.text
+    if type(email) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('email')
+        @local_ns[@DeferredImportKey('email', @temp_proxy)] = @temp_proxy
+    import email.parser
+    if type(email) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('email')
+        @local_ns[@DeferredImportKey('email', @temp_proxy)] = @temp_proxy
+    import email.policy
+    if type(email) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('email')
+        @local_ns[@DeferredImportKey('email', @temp_proxy)] = @temp_proxy
+    import email.quoprimime
+    if type(email) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('email')
+        @local_ns[@DeferredImportKey('email', @temp_proxy)] = @temp_proxy
+    import email.utils
+    if type(email) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('email')
+        @local_ns[@DeferredImportKey('email', @temp_proxy)] = @temp_proxy
+    import encodings
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.aliases
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.ascii
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.base64_codec
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.big5
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.big5hkscs
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.bz2_codec
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.charmap
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp037
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp273
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp424
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp437
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp500
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp720
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp737
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp775
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp850
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp852
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp855
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp856
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp857
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp858
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp860
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp861
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp862
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp863
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp864
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp865
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp866
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp869
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp874
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp875
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp932
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp949
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp950
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp1006
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp1026
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp1125
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp1140
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp1250
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp1251
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp1252
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp1253
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp1254
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp1255
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp1256
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp1257
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.cp1258
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.euc_jis_2004
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.euc_jisx0213
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.euc_jp
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.euc_kr
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.gb2312
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.gb18030
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.gbk
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.hex_codec
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.hp_roman8
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.hz
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.idna
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.iso2022_jp
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.iso2022_jp_1
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.iso2022_jp_2
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.iso2022_jp_3
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.iso2022_jp_2004
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.iso2022_jp_ext
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.iso2022_kr
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.iso8859_1
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.iso8859_2
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.iso8859_3
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.iso8859_4
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.iso8859_5
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.iso8859_6
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.iso8859_7
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.iso8859_8
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.iso8859_9
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.iso8859_10
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.iso8859_11
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.iso8859_13
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.iso8859_14
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.iso8859_15
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.iso8859_16
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.johab
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.koi8_r
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.koi8_t
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.koi8_u
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.kz1048
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.latin_1
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.mac_arabic
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.mac_croatian
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.mac_cyrillic
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.mac_farsi
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.mac_greek
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.mac_iceland
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.mac_latin2
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.mac_roman
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.mac_romanian
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.mac_turkish
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.palmos
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.ptcp154
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.punycode
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.quopri_codec
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.raw_unicode_escape
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.rot_13
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.shift_jis
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.shift_jis_2004
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.shift_jisx0213
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.tis_620
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.undefined
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.unicode_escape
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.utf_7
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.utf_8
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.utf_8_sig
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.utf_16
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.utf_16_be
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.utf_16_le
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.utf_32
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.utf_32_be
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.utf_32_le
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.uu_codec
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import encodings.zlib_codec
+    if type(encodings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('encodings')
+        @local_ns[@DeferredImportKey('encodings', @temp_proxy)] = @temp_proxy
+    import ensurepip
+    if type(ensurepip) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('ensurepip')
+        @local_ns[@DeferredImportKey('ensurepip', @temp_proxy)] = @temp_proxy
+    import ensurepip.__main__
+    if type(ensurepip) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('ensurepip')
+        @local_ns[@DeferredImportKey('ensurepip', @temp_proxy)] = @temp_proxy
+    import ensurepip._uninstall
+    if type(ensurepip) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('ensurepip')
+        @local_ns[@DeferredImportKey('ensurepip', @temp_proxy)] = @temp_proxy
+    import enum
+    if type(enum) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('enum')
+        @local_ns[@DeferredImportKey('enum', @temp_proxy)] = @temp_proxy
+    import filecmp
+    if type(filecmp) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('filecmp')
+        @local_ns[@DeferredImportKey('filecmp', @temp_proxy)] = @temp_proxy
+    import fileinput
+    if type(fileinput) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('fileinput')
+        @local_ns[@DeferredImportKey('fileinput', @temp_proxy)] = @temp_proxy
+    import fnmatch
+    if type(fnmatch) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('fnmatch')
+        @local_ns[@DeferredImportKey('fnmatch', @temp_proxy)] = @temp_proxy
+    import fractions
+    if type(fractions) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('fractions')
+        @local_ns[@DeferredImportKey('fractions', @temp_proxy)] = @temp_proxy
+    import ftplib
+    if type(ftplib) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('ftplib')
+        @local_ns[@DeferredImportKey('ftplib', @temp_proxy)] = @temp_proxy
+    import functools
+    if type(functools) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('functools')
+        @local_ns[@DeferredImportKey('functools', @temp_proxy)] = @temp_proxy
+    import genericpath
+    if type(genericpath) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('genericpath')
+        @local_ns[@DeferredImportKey('genericpath', @temp_proxy)] = @temp_proxy
+    import getopt
+    if type(getopt) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('getopt')
+        @local_ns[@DeferredImportKey('getopt', @temp_proxy)] = @temp_proxy
+    import getpass
+    if type(getpass) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('getpass')
+        @local_ns[@DeferredImportKey('getpass', @temp_proxy)] = @temp_proxy
+    import gettext
+    if type(gettext) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('gettext')
+        @local_ns[@DeferredImportKey('gettext', @temp_proxy)] = @temp_proxy
+    import glob
+    if type(glob) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('glob')
+        @local_ns[@DeferredImportKey('glob', @temp_proxy)] = @temp_proxy
+    import gzip
+    if type(gzip) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('gzip')
+        @local_ns[@DeferredImportKey('gzip', @temp_proxy)] = @temp_proxy
+    import hashlib
+    if type(hashlib) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('hashlib')
+        @local_ns[@DeferredImportKey('hashlib', @temp_proxy)] = @temp_proxy
+    import heapq
+    if type(heapq) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('heapq')
+        @local_ns[@DeferredImportKey('heapq', @temp_proxy)] = @temp_proxy
+    import hmac
+    if type(hmac) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('hmac')
+        @local_ns[@DeferredImportKey('hmac', @temp_proxy)] = @temp_proxy
+    import html
+    if type(html) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('html')
+        @local_ns[@DeferredImportKey('html', @temp_proxy)] = @temp_proxy
+    import html.entities
+    if type(html) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('html')
+        @local_ns[@DeferredImportKey('html', @temp_proxy)] = @temp_proxy
+    import html.parser
+    if type(html) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('html')
+        @local_ns[@DeferredImportKey('html', @temp_proxy)] = @temp_proxy
+    import http
+    if type(http) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('http')
+        @local_ns[@DeferredImportKey('http', @temp_proxy)] = @temp_proxy
+    import http.client
+    if type(http) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('http')
+        @local_ns[@DeferredImportKey('http', @temp_proxy)] = @temp_proxy
+    import http.cookiejar
+    if type(http) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('http')
+        @local_ns[@DeferredImportKey('http', @temp_proxy)] = @temp_proxy
+    import http.cookies
+    if type(http) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('http')
+        @local_ns[@DeferredImportKey('http', @temp_proxy)] = @temp_proxy
+    import http.server
+    if type(http) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('http')
+        @local_ns[@DeferredImportKey('http', @temp_proxy)] = @temp_proxy
+    import imaplib
+    if type(imaplib) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('imaplib')
+        @local_ns[@DeferredImportKey('imaplib', @temp_proxy)] = @temp_proxy
+    import importlib
+    if type(importlib) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('importlib')
+        @local_ns[@DeferredImportKey('importlib', @temp_proxy)] = @temp_proxy
+    import importlib._bootstrap
+    if type(importlib) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('importlib')
+        @local_ns[@DeferredImportKey('importlib', @temp_proxy)] = @temp_proxy
+    import importlib._bootstrap_external
+    if type(importlib) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('importlib')
+        @local_ns[@DeferredImportKey('importlib', @temp_proxy)] = @temp_proxy
+    import importlib.abc
+    if type(importlib) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('importlib')
+        @local_ns[@DeferredImportKey('importlib', @temp_proxy)] = @temp_proxy
+    import importlib.machinery
+    if type(importlib) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('importlib')
+        @local_ns[@DeferredImportKey('importlib', @temp_proxy)] = @temp_proxy
+    import importlib.resources
+    if type(importlib) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('importlib')
+        @local_ns[@DeferredImportKey('importlib', @temp_proxy)] = @temp_proxy
+    import importlib.util
+    if type(importlib) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('importlib')
+        @local_ns[@DeferredImportKey('importlib', @temp_proxy)] = @temp_proxy
+    import inspect
+    if type(inspect) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('inspect')
+        @local_ns[@DeferredImportKey('inspect', @temp_proxy)] = @temp_proxy
+    import io
+    if type(io) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('io')
+        @local_ns[@DeferredImportKey('io', @temp_proxy)] = @temp_proxy
+    import ipaddress
+    if type(ipaddress) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('ipaddress')
+        @local_ns[@DeferredImportKey('ipaddress', @temp_proxy)] = @temp_proxy
+    import json
+    if type(json) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('json')
+        @local_ns[@DeferredImportKey('json', @temp_proxy)] = @temp_proxy
+    import json.decoder
+    if type(json) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('json')
+        @local_ns[@DeferredImportKey('json', @temp_proxy)] = @temp_proxy
+    import json.encoder
+    if type(json) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('json')
+        @local_ns[@DeferredImportKey('json', @temp_proxy)] = @temp_proxy
+    import json.scanner
+    if type(json) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('json')
+        @local_ns[@DeferredImportKey('json', @temp_proxy)] = @temp_proxy
+    import json.tool
+    if type(json) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('json')
+        @local_ns[@DeferredImportKey('json', @temp_proxy)] = @temp_proxy
+    import keyword
+    if type(keyword) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('keyword')
+        @local_ns[@DeferredImportKey('keyword', @temp_proxy)] = @temp_proxy
+    import linecache
+    if type(linecache) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('linecache')
+        @local_ns[@DeferredImportKey('linecache', @temp_proxy)] = @temp_proxy
+    import locale
+    if type(locale) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('locale')
+        @local_ns[@DeferredImportKey('locale', @temp_proxy)] = @temp_proxy
+    import logging
+    if type(logging) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('logging')
+        @local_ns[@DeferredImportKey('logging', @temp_proxy)] = @temp_proxy
+    import logging.config
+    if type(logging) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('logging')
+        @local_ns[@DeferredImportKey('logging', @temp_proxy)] = @temp_proxy
+    import logging.handlers
+    if type(logging) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('logging')
+        @local_ns[@DeferredImportKey('logging', @temp_proxy)] = @temp_proxy
+    import lzma
+    if type(lzma) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('lzma')
+        @local_ns[@DeferredImportKey('lzma', @temp_proxy)] = @temp_proxy
+    import mailbox
+    if type(mailbox) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('mailbox')
+        @local_ns[@DeferredImportKey('mailbox', @temp_proxy)] = @temp_proxy
+    import mimetypes
+    if type(mimetypes) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('mimetypes')
+        @local_ns[@DeferredImportKey('mimetypes', @temp_proxy)] = @temp_proxy
+    import modulefinder
+    if type(modulefinder) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('modulefinder')
+        @local_ns[@DeferredImportKey('modulefinder', @temp_proxy)] = @temp_proxy
+    import multiprocessing
+    if type(multiprocessing) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('multiprocessing')
+        @local_ns[@DeferredImportKey('multiprocessing', @temp_proxy)] = @temp_proxy
+    import multiprocessing.connection
+    if type(multiprocessing) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('multiprocessing')
+        @local_ns[@DeferredImportKey('multiprocessing', @temp_proxy)] = @temp_proxy
+    import multiprocessing.context
+    if type(multiprocessing) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('multiprocessing')
+        @local_ns[@DeferredImportKey('multiprocessing', @temp_proxy)] = @temp_proxy
+    import multiprocessing.dummy
+    if type(multiprocessing) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('multiprocessing')
+        @local_ns[@DeferredImportKey('multiprocessing', @temp_proxy)] = @temp_proxy
+    import multiprocessing.dummy.connection
+    if type(multiprocessing) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('multiprocessing')
+        @local_ns[@DeferredImportKey('multiprocessing', @temp_proxy)] = @temp_proxy
+    import multiprocessing.forkserver
+    if type(multiprocessing) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('multiprocessing')
+        @local_ns[@DeferredImportKey('multiprocessing', @temp_proxy)] = @temp_proxy
+    import multiprocessing.heap
+    if type(multiprocessing) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('multiprocessing')
+        @local_ns[@DeferredImportKey('multiprocessing', @temp_proxy)] = @temp_proxy
+    import multiprocessing.managers
+    if type(multiprocessing) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('multiprocessing')
+        @local_ns[@DeferredImportKey('multiprocessing', @temp_proxy)] = @temp_proxy
+    import multiprocessing.pool
+    if type(multiprocessing) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('multiprocessing')
+        @local_ns[@DeferredImportKey('multiprocessing', @temp_proxy)] = @temp_proxy
+    import multiprocessing.process
+    if type(multiprocessing) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('multiprocessing')
+        @local_ns[@DeferredImportKey('multiprocessing', @temp_proxy)] = @temp_proxy
+    import multiprocessing.queues
+    if type(multiprocessing) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('multiprocessing')
+        @local_ns[@DeferredImportKey('multiprocessing', @temp_proxy)] = @temp_proxy
+    import multiprocessing.reduction
+    if type(multiprocessing) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('multiprocessing')
+        @local_ns[@DeferredImportKey('multiprocessing', @temp_proxy)] = @temp_proxy
+    import multiprocessing.resource_sharer
+    if type(multiprocessing) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('multiprocessing')
+        @local_ns[@DeferredImportKey('multiprocessing', @temp_proxy)] = @temp_proxy
+    import multiprocessing.sharedctypes
+    if type(multiprocessing) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('multiprocessing')
+        @local_ns[@DeferredImportKey('multiprocessing', @temp_proxy)] = @temp_proxy
+    import multiprocessing.spawn
+    if type(multiprocessing) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('multiprocessing')
+        @local_ns[@DeferredImportKey('multiprocessing', @temp_proxy)] = @temp_proxy
+    import multiprocessing.synchronize
+    if type(multiprocessing) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('multiprocessing')
+        @local_ns[@DeferredImportKey('multiprocessing', @temp_proxy)] = @temp_proxy
+    import multiprocessing.util
+    if type(multiprocessing) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('multiprocessing')
+        @local_ns[@DeferredImportKey('multiprocessing', @temp_proxy)] = @temp_proxy
+    import netrc
+    if type(netrc) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('netrc')
+        @local_ns[@DeferredImportKey('netrc', @temp_proxy)] = @temp_proxy
+    import ntpath
+    if type(ntpath) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('ntpath')
+        @local_ns[@DeferredImportKey('ntpath', @temp_proxy)] = @temp_proxy
+    import nturl2path
+    if type(nturl2path) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('nturl2path')
+        @local_ns[@DeferredImportKey('nturl2path', @temp_proxy)] = @temp_proxy
+    import numbers
+    if type(numbers) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('numbers')
+        @local_ns[@DeferredImportKey('numbers', @temp_proxy)] = @temp_proxy
+    import opcode
+    if type(opcode) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('opcode')
+        @local_ns[@DeferredImportKey('opcode', @temp_proxy)] = @temp_proxy
+    import operator
+    if type(operator) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('operator')
+        @local_ns[@DeferredImportKey('operator', @temp_proxy)] = @temp_proxy
+    import optparse
+    if type(optparse) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('optparse')
+        @local_ns[@DeferredImportKey('optparse', @temp_proxy)] = @temp_proxy
+    import os
+    if type(os) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('os')
+        @local_ns[@DeferredImportKey('os', @temp_proxy)] = @temp_proxy
+    import pathlib
+    if type(pathlib) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('pathlib')
+        @local_ns[@DeferredImportKey('pathlib', @temp_proxy)] = @temp_proxy
+    import pdb
+    if type(pdb) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('pdb')
+        @local_ns[@DeferredImportKey('pdb', @temp_proxy)] = @temp_proxy
+    import pickle
+    if type(pickle) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('pickle')
+        @local_ns[@DeferredImportKey('pickle', @temp_proxy)] = @temp_proxy
+    import pickletools
+    if type(pickletools) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('pickletools')
+        @local_ns[@DeferredImportKey('pickletools', @temp_proxy)] = @temp_proxy
+    import pkgutil
+    if type(pkgutil) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('pkgutil')
+        @local_ns[@DeferredImportKey('pkgutil', @temp_proxy)] = @temp_proxy
+    import platform
+    if type(platform) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('platform')
+        @local_ns[@DeferredImportKey('platform', @temp_proxy)] = @temp_proxy
+    import plistlib
+    if type(plistlib) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('plistlib')
+        @local_ns[@DeferredImportKey('plistlib', @temp_proxy)] = @temp_proxy
+    import poplib
+    if type(poplib) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('poplib')
+        @local_ns[@DeferredImportKey('poplib', @temp_proxy)] = @temp_proxy
+    import posixpath
+    if type(posixpath) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('posixpath')
+        @local_ns[@DeferredImportKey('posixpath', @temp_proxy)] = @temp_proxy
+    import pprint
+    if type(pprint) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('pprint')
+        @local_ns[@DeferredImportKey('pprint', @temp_proxy)] = @temp_proxy
+    import profile
+    if type(profile) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('profile')
+        @local_ns[@DeferredImportKey('profile', @temp_proxy)] = @temp_proxy
+    import pstats
+    if type(pstats) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('pstats')
+        @local_ns[@DeferredImportKey('pstats', @temp_proxy)] = @temp_proxy
+    import py_compile
+    if type(py_compile) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('py_compile')
+        @local_ns[@DeferredImportKey('py_compile', @temp_proxy)] = @temp_proxy
+    import pyclbr
+    if type(pyclbr) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('pyclbr')
+        @local_ns[@DeferredImportKey('pyclbr', @temp_proxy)] = @temp_proxy
+    import pydoc
+    if type(pydoc) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('pydoc')
+        @local_ns[@DeferredImportKey('pydoc', @temp_proxy)] = @temp_proxy
+    import pydoc_data
+    if type(pydoc_data) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('pydoc_data')
+        @local_ns[@DeferredImportKey('pydoc_data', @temp_proxy)] = @temp_proxy
+    import pydoc_data.topics
+    if type(pydoc_data) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('pydoc_data')
+        @local_ns[@DeferredImportKey('pydoc_data', @temp_proxy)] = @temp_proxy
+    import queue
+    if type(queue) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('queue')
+        @local_ns[@DeferredImportKey('queue', @temp_proxy)] = @temp_proxy
+    import quopri
+    if type(quopri) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('quopri')
+        @local_ns[@DeferredImportKey('quopri', @temp_proxy)] = @temp_proxy
+    import random
+    if type(random) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('random')
+        @local_ns[@DeferredImportKey('random', @temp_proxy)] = @temp_proxy
+    import re
+    if type(re) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('re')
+        @local_ns[@DeferredImportKey('re', @temp_proxy)] = @temp_proxy
+    import reprlib
+    if type(reprlib) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('reprlib')
+        @local_ns[@DeferredImportKey('reprlib', @temp_proxy)] = @temp_proxy
+    import rlcompleter
+    if type(rlcompleter) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('rlcompleter')
+        @local_ns[@DeferredImportKey('rlcompleter', @temp_proxy)] = @temp_proxy
+    import runpy
+    if type(runpy) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('runpy')
+        @local_ns[@DeferredImportKey('runpy', @temp_proxy)] = @temp_proxy
+    import sched
+    if type(sched) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('sched')
+        @local_ns[@DeferredImportKey('sched', @temp_proxy)] = @temp_proxy
+    import secrets
+    if type(secrets) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('secrets')
+        @local_ns[@DeferredImportKey('secrets', @temp_proxy)] = @temp_proxy
+    import selectors
+    if type(selectors) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('selectors')
+        @local_ns[@DeferredImportKey('selectors', @temp_proxy)] = @temp_proxy
+    import shelve
+    if type(shelve) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('shelve')
+        @local_ns[@DeferredImportKey('shelve', @temp_proxy)] = @temp_proxy
+    import shlex
+    if type(shlex) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('shlex')
+        @local_ns[@DeferredImportKey('shlex', @temp_proxy)] = @temp_proxy
+    import shutil
+    if type(shutil) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('shutil')
+        @local_ns[@DeferredImportKey('shutil', @temp_proxy)] = @temp_proxy
+    import signal
+    if type(signal) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('signal')
+        @local_ns[@DeferredImportKey('signal', @temp_proxy)] = @temp_proxy
+    import site
+    if type(site) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('site')
+        @local_ns[@DeferredImportKey('site', @temp_proxy)] = @temp_proxy
+    import smtplib
+    if type(smtplib) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('smtplib')
+        @local_ns[@DeferredImportKey('smtplib', @temp_proxy)] = @temp_proxy
+    import socket
+    if type(socket) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('socket')
+        @local_ns[@DeferredImportKey('socket', @temp_proxy)] = @temp_proxy
+    import socketserver
+    if type(socketserver) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('socketserver')
+        @local_ns[@DeferredImportKey('socketserver', @temp_proxy)] = @temp_proxy
+    import sqlite3
+    if type(sqlite3) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('sqlite3')
+        @local_ns[@DeferredImportKey('sqlite3', @temp_proxy)] = @temp_proxy
+    import sqlite3.dbapi2
+    if type(sqlite3) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('sqlite3')
+        @local_ns[@DeferredImportKey('sqlite3', @temp_proxy)] = @temp_proxy
+    import sqlite3.dump
+    if type(sqlite3) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('sqlite3')
+        @local_ns[@DeferredImportKey('sqlite3', @temp_proxy)] = @temp_proxy
+    import sre_compile
+    if type(sre_compile) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('sre_compile')
+        @local_ns[@DeferredImportKey('sre_compile', @temp_proxy)] = @temp_proxy
+    import sre_constants
+    if type(sre_constants) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('sre_constants')
+        @local_ns[@DeferredImportKey('sre_constants', @temp_proxy)] = @temp_proxy
+    import sre_parse
+    if type(sre_parse) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('sre_parse')
+        @local_ns[@DeferredImportKey('sre_parse', @temp_proxy)] = @temp_proxy
+    import ssl
+    if type(ssl) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('ssl')
+        @local_ns[@DeferredImportKey('ssl', @temp_proxy)] = @temp_proxy
+    import stat
+    if type(stat) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('stat')
+        @local_ns[@DeferredImportKey('stat', @temp_proxy)] = @temp_proxy
+    import statistics
+    if type(statistics) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('statistics')
+        @local_ns[@DeferredImportKey('statistics', @temp_proxy)] = @temp_proxy
+    import string
+    if type(string) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('string')
+        @local_ns[@DeferredImportKey('string', @temp_proxy)] = @temp_proxy
+    import stringprep
+    if type(stringprep) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('stringprep')
+        @local_ns[@DeferredImportKey('stringprep', @temp_proxy)] = @temp_proxy
+    import struct
+    if type(struct) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('struct')
+        @local_ns[@DeferredImportKey('struct', @temp_proxy)] = @temp_proxy
+    import subprocess
+    if type(subprocess) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('subprocess')
+        @local_ns[@DeferredImportKey('subprocess', @temp_proxy)] = @temp_proxy
+    import sysconfig
+    if type(sysconfig) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('sysconfig')
+        @local_ns[@DeferredImportKey('sysconfig', @temp_proxy)] = @temp_proxy
+    import tabnanny
+    if type(tabnanny) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('tabnanny')
+        @local_ns[@DeferredImportKey('tabnanny', @temp_proxy)] = @temp_proxy
+    import tarfile
+    if type(tarfile) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('tarfile')
+        @local_ns[@DeferredImportKey('tarfile', @temp_proxy)] = @temp_proxy
+    import tempfile
+    if type(tempfile) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('tempfile')
+        @local_ns[@DeferredImportKey('tempfile', @temp_proxy)] = @temp_proxy
+    import textwrap
+    if type(textwrap) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('textwrap')
+        @local_ns[@DeferredImportKey('textwrap', @temp_proxy)] = @temp_proxy
+    import threading
+    if type(threading) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('threading')
+        @local_ns[@DeferredImportKey('threading', @temp_proxy)] = @temp_proxy
+    import timeit
+    if type(timeit) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('timeit')
+        @local_ns[@DeferredImportKey('timeit', @temp_proxy)] = @temp_proxy
+    import token
+    if type(token) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('token')
+        @local_ns[@DeferredImportKey('token', @temp_proxy)] = @temp_proxy
+    import tokenize
+    if type(tokenize) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('tokenize')
+        @local_ns[@DeferredImportKey('tokenize', @temp_proxy)] = @temp_proxy
+    import trace
+    if type(trace) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('trace')
+        @local_ns[@DeferredImportKey('trace', @temp_proxy)] = @temp_proxy
+    import traceback
+    if type(traceback) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('traceback')
+        @local_ns[@DeferredImportKey('traceback', @temp_proxy)] = @temp_proxy
+    import types
+    if type(types) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('types')
+        @local_ns[@DeferredImportKey('types', @temp_proxy)] = @temp_proxy
+    import typing
+    if type(typing) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('typing')
+        @local_ns[@DeferredImportKey('typing', @temp_proxy)] = @temp_proxy
+    import unittest
+    if type(unittest) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('unittest')
+        @local_ns[@DeferredImportKey('unittest', @temp_proxy)] = @temp_proxy
+    import unittest.case
+    if type(unittest) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('unittest')
+        @local_ns[@DeferredImportKey('unittest', @temp_proxy)] = @temp_proxy
+    import unittest.loader
+    if type(unittest) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('unittest')
+        @local_ns[@DeferredImportKey('unittest', @temp_proxy)] = @temp_proxy
+    import unittest.main
+    if type(unittest) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('unittest')
+        @local_ns[@DeferredImportKey('unittest', @temp_proxy)] = @temp_proxy
+    import unittest.mock
+    if type(unittest) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('unittest')
+        @local_ns[@DeferredImportKey('unittest', @temp_proxy)] = @temp_proxy
+    import unittest.result
+    if type(unittest) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('unittest')
+        @local_ns[@DeferredImportKey('unittest', @temp_proxy)] = @temp_proxy
+    import unittest.runner
+    if type(unittest) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('unittest')
+        @local_ns[@DeferredImportKey('unittest', @temp_proxy)] = @temp_proxy
+    import unittest.signals
+    if type(unittest) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('unittest')
+        @local_ns[@DeferredImportKey('unittest', @temp_proxy)] = @temp_proxy
+    import unittest.suite
+    if type(unittest) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('unittest')
+        @local_ns[@DeferredImportKey('unittest', @temp_proxy)] = @temp_proxy
+    import unittest.util
+    if type(unittest) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('unittest')
+        @local_ns[@DeferredImportKey('unittest', @temp_proxy)] = @temp_proxy
+    import urllib
+    if type(urllib) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('urllib')
+        @local_ns[@DeferredImportKey('urllib', @temp_proxy)] = @temp_proxy
+    import urllib.error
+    if type(urllib) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('urllib')
+        @local_ns[@DeferredImportKey('urllib', @temp_proxy)] = @temp_proxy
+    import urllib.parse
+    if type(urllib) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('urllib')
+        @local_ns[@DeferredImportKey('urllib', @temp_proxy)] = @temp_proxy
+    import urllib.request
+    if type(urllib) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('urllib')
+        @local_ns[@DeferredImportKey('urllib', @temp_proxy)] = @temp_proxy
+    import urllib.response
+    if type(urllib) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('urllib')
+        @local_ns[@DeferredImportKey('urllib', @temp_proxy)] = @temp_proxy
+    import urllib.robotparser
+    if type(urllib) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('urllib')
+        @local_ns[@DeferredImportKey('urllib', @temp_proxy)] = @temp_proxy
+    import uuid
+    if type(uuid) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('uuid')
+        @local_ns[@DeferredImportKey('uuid', @temp_proxy)] = @temp_proxy
+    import venv
+    if type(venv) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('venv')
+        @local_ns[@DeferredImportKey('venv', @temp_proxy)] = @temp_proxy
+    import warnings
+    if type(warnings) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('warnings')
+        @local_ns[@DeferredImportKey('warnings', @temp_proxy)] = @temp_proxy
+    import wave
+    if type(wave) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('wave')
+        @local_ns[@DeferredImportKey('wave', @temp_proxy)] = @temp_proxy
+    import weakref
+    if type(weakref) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('weakref')
+        @local_ns[@DeferredImportKey('weakref', @temp_proxy)] = @temp_proxy
+    import webbrowser
+    if type(webbrowser) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('webbrowser')
+        @local_ns[@DeferredImportKey('webbrowser', @temp_proxy)] = @temp_proxy
+    import wsgiref
+    if type(wsgiref) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('wsgiref')
+        @local_ns[@DeferredImportKey('wsgiref', @temp_proxy)] = @temp_proxy
+    import wsgiref.handlers
+    if type(wsgiref) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('wsgiref')
+        @local_ns[@DeferredImportKey('wsgiref', @temp_proxy)] = @temp_proxy
+    import wsgiref.headers
+    if type(wsgiref) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('wsgiref')
+        @local_ns[@DeferredImportKey('wsgiref', @temp_proxy)] = @temp_proxy
+    import wsgiref.simple_server
+    if type(wsgiref) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('wsgiref')
+        @local_ns[@DeferredImportKey('wsgiref', @temp_proxy)] = @temp_proxy
+    import wsgiref.util
+    if type(wsgiref) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('wsgiref')
+        @local_ns[@DeferredImportKey('wsgiref', @temp_proxy)] = @temp_proxy
+    import wsgiref.validate
+    if type(wsgiref) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('wsgiref')
+        @local_ns[@DeferredImportKey('wsgiref', @temp_proxy)] = @temp_proxy
+    import xml
+    if type(xml) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('xml')
+        @local_ns[@DeferredImportKey('xml', @temp_proxy)] = @temp_proxy
+    import xml.dom
+    if type(xml) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('xml')
+        @local_ns[@DeferredImportKey('xml', @temp_proxy)] = @temp_proxy
+    import xml.dom.domreg
+    if type(xml) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('xml')
+        @local_ns[@DeferredImportKey('xml', @temp_proxy)] = @temp_proxy
+    import xml.dom.expatbuilder
+    if type(xml) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('xml')
+        @local_ns[@DeferredImportKey('xml', @temp_proxy)] = @temp_proxy
+    import xml.dom.minicompat
+    if type(xml) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('xml')
+        @local_ns[@DeferredImportKey('xml', @temp_proxy)] = @temp_proxy
+    import xml.dom.minidom
+    if type(xml) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('xml')
+        @local_ns[@DeferredImportKey('xml', @temp_proxy)] = @temp_proxy
+    import xml.dom.NodeFilter
+    if type(xml) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('xml')
+        @local_ns[@DeferredImportKey('xml', @temp_proxy)] = @temp_proxy
+    import xml.dom.pulldom
+    if type(xml) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('xml')
+        @local_ns[@DeferredImportKey('xml', @temp_proxy)] = @temp_proxy
+    import xml.dom.xmlbuilder
+    if type(xml) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('xml')
+        @local_ns[@DeferredImportKey('xml', @temp_proxy)] = @temp_proxy
+    import xml.etree
+    if type(xml) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('xml')
+        @local_ns[@DeferredImportKey('xml', @temp_proxy)] = @temp_proxy
+    import xml.etree.cElementTree
+    if type(xml) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('xml')
+        @local_ns[@DeferredImportKey('xml', @temp_proxy)] = @temp_proxy
+    import xml.etree.ElementInclude
+    if type(xml) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('xml')
+        @local_ns[@DeferredImportKey('xml', @temp_proxy)] = @temp_proxy
+    import xml.etree.ElementPath
+    if type(xml) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('xml')
+        @local_ns[@DeferredImportKey('xml', @temp_proxy)] = @temp_proxy
+    import xml.etree.ElementTree
+    if type(xml) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('xml')
+        @local_ns[@DeferredImportKey('xml', @temp_proxy)] = @temp_proxy
+    import xml.parsers
+    if type(xml) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('xml')
+        @local_ns[@DeferredImportKey('xml', @temp_proxy)] = @temp_proxy
+    import xml.parsers.expat
+    if type(xml) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('xml')
+        @local_ns[@DeferredImportKey('xml', @temp_proxy)] = @temp_proxy
+    import xml.sax
+    if type(xml) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('xml')
+        @local_ns[@DeferredImportKey('xml', @temp_proxy)] = @temp_proxy
+    import xml.sax._exceptions
+    if type(xml) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('xml')
+        @local_ns[@DeferredImportKey('xml', @temp_proxy)] = @temp_proxy
+    import xml.sax.expatreader
+    if type(xml) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('xml')
+        @local_ns[@DeferredImportKey('xml', @temp_proxy)] = @temp_proxy
+    import xml.sax.handler
+    if type(xml) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('xml')
+        @local_ns[@DeferredImportKey('xml', @temp_proxy)] = @temp_proxy
+    import xml.sax.saxutils
+    if type(xml) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('xml')
+        @local_ns[@DeferredImportKey('xml', @temp_proxy)] = @temp_proxy
+    import xml.sax.xmlreader
+    if type(xml) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('xml')
+        @local_ns[@DeferredImportKey('xml', @temp_proxy)] = @temp_proxy
+    import xmlrpc
+    if type(xmlrpc) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('xmlrpc')
+        @local_ns[@DeferredImportKey('xmlrpc', @temp_proxy)] = @temp_proxy
+    import xmlrpc.client
+    if type(xmlrpc) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('xmlrpc')
+        @local_ns[@DeferredImportKey('xmlrpc', @temp_proxy)] = @temp_proxy
+    import xmlrpc.server
+    if type(xmlrpc) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('xmlrpc')
+        @local_ns[@DeferredImportKey('xmlrpc', @temp_proxy)] = @temp_proxy
+    import zipapp
+    if type(zipapp) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('zipapp')
+        @local_ns[@DeferredImportKey('zipapp', @temp_proxy)] = @temp_proxy
+    import zipfile
+    if type(zipfile) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('zipfile')
+        @local_ns[@DeferredImportKey('zipfile', @temp_proxy)] = @temp_proxy
+    import test
+    if type(test) is @DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('test')
+        @local_ns[@DeferredImportKey('test', @temp_proxy)] = @temp_proxy
+    del @temp_proxy, @local_ns
+del @DeferredImportKey, @DeferredImportProxy

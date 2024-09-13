@@ -45,12 +45,12 @@ def bench_regular() -> float:
 
 
 def bench_defer_imports() -> float:
-    defer_imports.install_defer_import_hook()
-
-    with CatchTime() as ct:
-        import benchmark.sample_defer_imports
-
-    defer_imports.uninstall_defer_import_hook()
+    # with defer_imports.install_import_hook(), CatchTime() as ct:
+    #     import benchmark.sample_defer_imports
+    # print(len(dir(benchmark.sample_defer_imports)))
+    with defer_imports.install_import_hook(is_global=True), CatchTime() as ct:
+        import benchmark.sample_regular
+    print(len(dir(benchmark.sample_regular)))
     return ct.elapsed
 
 
