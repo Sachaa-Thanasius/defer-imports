@@ -49,8 +49,7 @@ def bench_defer_imports() -> float:
     #     import benchmark.sample_defer_imports
     # print(len(dir(benchmark.sample_defer_imports)))
     with defer_imports.install_import_hook(is_global=True), CatchTime() as ct:
-        import benchmark.sample_regular
-    print(len(dir(benchmark.sample_regular)))
+        import benchmark.sample_regular_defer
     return ct.elapsed
 
 
@@ -105,7 +104,7 @@ def main() -> None:
     benchmark_header = "Benchmark".ljust(benchmark_len)
     benchmark_divider = "=" * benchmark_len
 
-    time_len = 19
+    time_len = 23
     time_header = "Time".ljust(time_len)
     time_divider = "=" * time_len
 
@@ -126,7 +125,7 @@ def main() -> None:
 
     for bench_type, result in results.items():
         fmt_bench_type = bench_type.ljust(benchmark_len)
-        fmt_result = f"{result:.5f}s ({result / minimum:.2f}x)".ljust(time_len)
+        fmt_result = f"{result:.7f}s ({result / minimum:.2f}x)".ljust(time_len)
 
         print(impl, version, fmt_bench_type, fmt_result, sep="  ")
 
