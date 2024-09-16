@@ -21,7 +21,7 @@ from defer_imports._core import (
     DeferredFileLoader,
     DeferredInstrumenter,
     install_import_hook,
-    should_apply_globally,
+    should_instrument_globally,
 )
 
 
@@ -67,11 +67,11 @@ def better_key_repr(monkeypatch: pytest.MonkeyPatch):
 def global_instrumentation_on():
     """Turn on the global instrumentation aspect of defer_imports temporarily."""
 
-    _tok = should_apply_globally.set(True)
+    _tok = should_instrument_globally.set(True)
     try:
         yield
     finally:
-        should_apply_globally.reset(_tok)
+        should_instrument_globally.reset(_tok)
 
 
 @pytest.mark.parametrize(

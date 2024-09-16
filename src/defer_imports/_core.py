@@ -25,7 +25,7 @@ __version__ = "0.0.2"
 
 
 # ============================================================================
-# region -------- Vendored helpers
+# region -------- Vendored helpers --------
 #
 # The helper functions should reflect the behavior of the corresponding functions in all supported CPython versions.
 # ============================================================================
@@ -139,7 +139,7 @@ def resolve_name(name: str, package: str, level: int) -> str:
 
 
 # ============================================================================
-# region -------- Compile-time hook
+# region -------- Compile-time hook --------
 # ============================================================================
 
 
@@ -147,7 +147,7 @@ StrPath: _tp.TypeAlias = "_tp.Union[str, _tp.PathLike[str]]"
 SourceData: _tp.TypeAlias = "_tp.Union[_tp.ReadableBuffer, str, ast.Module, ast.Expression, ast.Interactive]"
 
 
-should_apply_globally = contextvars.ContextVar("should_instrument_globally", default=False)
+should_instrument_globally = contextvars.ContextVar("should_instrument_globally", default=False)
 """Whether the instrumentation should apply globally."""
 
 
@@ -158,6 +158,10 @@ BYTECODE_HEADER = f"defer_imports{__version__}".encode()
 class DeferredInstrumenter(ast.NodeTransformer):
     """AST transformer that instruments imports within "with defer_imports.until_use: ..." blocks so that their
     results are assigned to custom keys in the global namespace.
+
+    Notes
+    -----
+    This assumes the module is not empty and "with defer_imports.until_use" is used somewhere in it.
     """
 
     def __init__(
@@ -172,6 +176,8 @@ class DeferredInstrumenter(ast.NodeTransformer):
 
         self.scope_depth = 0
         self.escape_hatch_depth = 0
+
+    # region ---- Scope tracking ----
 
     def _visit_scope(self, node: ast.AST) -> ast.AST:
         """Track Python scope changes. Used to determine if defer_imports.until_use usage is global."""
@@ -200,6 +206,10 @@ class DeferredInstrumenter(ast.NodeTransformer):
 
     if sys.version_info >= (3, 11):
         visit_TryStar = _visit_eager_import_block
+
+    # endregion
+
+    # region ---- Until_use-wrapped imports instrumentation ----
 
     def _decode_source(self) -> str:
         """Get the source code corresponding to the given data."""
@@ -355,13 +365,9 @@ class DeferredInstrumenter(ast.NodeTransformer):
         """
 
         if not self.check_With_for_defer_usage(node):
-            self.escape_hatch_depth += 1
-            try:
-                return self.generic_visit(node)
-            finally:
-                self.escape_hatch_depth -= 1
+            self._visit_eager_import_block(node)
 
-        if self.scope_depth != 0:
+        if self.scope_depth > 0:
             msg = "with defer_imports.until_use only allowed at module level"
             raise SyntaxError(msg, self._get_node_context(node))
 
@@ -369,12 +375,9 @@ class DeferredInstrumenter(ast.NodeTransformer):
         return node
 
     def visit_Module(self, node: ast.Module) -> ast.AST:
-        """Insert imports necessary to make defer_imports.until_use work properly. The import is placed after the
-        module docstring and after __future__ imports.
+        """Insert imports necessary to make defer_imports.until_use work properly.
 
-        Notes
-        -----
-        This assumes the module is not empty and "with defer_imports.until_use" is used somewhere in it.
+        The imports are placed after the module docstring and after __future__ imports.
         """
 
         expect_docstring = True
@@ -396,7 +399,7 @@ class DeferredInstrumenter(ast.NodeTransformer):
             position += 1
 
         # Import defer classes.
-        if should_apply_globally.get():
+        if should_instrument_globally.get():
             top_level_import = ast.Import(names=[ast.alias(name="defer_imports")])
             node.body.insert(position, top_level_import)
             position += 1
@@ -413,6 +416,10 @@ class DeferredInstrumenter(ast.NodeTransformer):
 
         return self.generic_visit(node)
 
+    # endregion
+
+    # region ---- Global imports instrumentation ----
+
     @staticmethod
     def _identify_regular_import(obj: object) -> _tp.TypeGuard[_tp.Union[ast.Import, ast.ImportFrom]]:
         """Check if a given object is an import AST without wildcards."""
@@ -421,12 +428,20 @@ class DeferredInstrumenter(ast.NodeTransformer):
 
     @staticmethod
     def _is_defer_imports_import(node: _tp.Union[ast.Import, ast.ImportFrom]) -> bool:
+        """Check if the given import node imports from defer_imports."""
+
         if isinstance(node, ast.Import):
             return any(alias.name.partition(".")[0] == "defer_imports" for alias in node.names)
         else:
             return node.module is not None and node.module.partition(".")[0] == "defer_imports"
 
     def _wrap_import_stmts(self, nodes: list[ast.stmt], start: int) -> ast.With:
+        """Wrap a list of consecutive import nodes from a list of statements in a "defer_imports.until_use" block and
+        instrument them.
+
+        The first node must be guaranteed to be an import node.
+        """
+
         import_range = tuple(takewhile(lambda i: self._identify_regular_import(nodes[i]), range(start, len(nodes))))
         import_slice = slice(import_range[0], import_range[-1] + 1)
         import_nodes = nodes[import_slice]
@@ -449,14 +464,22 @@ class DeferredInstrumenter(ast.NodeTransformer):
         return wrapper_node
 
     def generic_visit(self, node: ast.AST) -> ast.AST:
+        """Called if no explicit visitor function exists for a node.
+
+        Summary
+        -------
+        Almost a copy of ast.NodeVisitor.generic_vist, but intercepts global sequences of import statements to wrap
+        them in a "with defer_imports.until_use" block and instrument them.
+        """
+
         for field, old_value in ast.iter_fields(node):
             if isinstance(old_value, list):
                 new_values: list[_tp.Any] = []
                 for i, value in enumerate(old_value):  # pyright: ignore
-                    # This if block is the only difference from NodeTransformer.generic_visit.
                     if (
-                        should_apply_globally.get()
-                        # Only instrument import nodes, specifically ones we are prepared to handle.
+                        # Only do this when the user has enabled global instrumentation.
+                        should_instrument_globally.get()
+                        # Only instrument import nodes that we are prepared to handle.
                         and self._identify_regular_import(value)  # pyright: ignore [reportUnknownArgumentType]
                         # Only instrument imports in global scopes.
                         and self.scope_depth == 0
@@ -481,6 +504,8 @@ class DeferredInstrumenter(ast.NodeTransformer):
                 else:
                     setattr(node, field, new_node)
         return node
+
+    # endregion
 
 
 def check_source_for_defer_usage(data: _tp.Union[_tp.ReadableBuffer, str]) -> tuple[str, bool]:
@@ -614,7 +639,7 @@ DEFERRED_PATH_HOOK = FileFinder.path_hook((DeferredFileLoader, SOURCE_SUFFIXES))
 
 
 # ============================================================================
-# region -------- Runtime hook
+# region -------- Runtime hook --------
 # ============================================================================
 
 
@@ -812,7 +837,7 @@ def deferred___import__(  # noqa: ANN202
 
 
 # ============================================================================
-# region -------- Public API
+# region -------- Public API --------
 # ============================================================================
 
 
@@ -820,9 +845,15 @@ def install_import_hook(*, is_global: bool = False) -> ImportHookContext:
     """Insert defer_imports's path hook right before the default FileFinder one in sys.path_hooks.
 
     This should be run before the rest of your code. One place to put it is in __init__.py of your package.
+
+    Returns
+    -------
+    ImportHookContext
+        A object that can be used to uninstall the import hook, either manually by calling its uninstall method or
+        automatically by using it as a context manager.
     """
 
-    global_apply_tok = should_apply_globally.set(is_global)
+    global_apply_tok = should_instrument_globally.set(is_global)
 
     if DEFERRED_PATH_HOOK not in sys.path_hooks:
         # NOTE: PathFinder.invalidate_caches() is expensive because it imports importlib.metadata, but we have to just bear
@@ -837,7 +868,7 @@ def install_import_hook(*, is_global: bool = False) -> ImportHookContext:
 
 
 class ImportHookContext:
-    def __init__(self, tok: contextvars.Token[bool]):
+    def __init__(self, tok: contextvars.Token[bool]) -> None:
         self._tok = tok
 
     def __enter__(self) -> _tp.Self:
@@ -849,16 +880,17 @@ class ImportHookContext:
     def uninstall(self) -> None:
         """Remove defer_imports's path hook if it's in sys.path_hooks."""
 
-        if hasattr(self, "_tok"):
-            should_apply_globally.reset(self._tok)
-            del self._tok
+        # Ensure the token is only used once.
+        if self._tok is not None:
+            should_instrument_globally.reset(self._tok)
+            self._tok = None
 
         try:
             sys.path_hooks.remove(DEFERRED_PATH_HOOK)
         except ValueError:
             pass
         else:
-            # NOTE: Use the same invalidation mechanism as install_defer_import_hook() does.
+            # NOTE: Use the same invalidation mechanism as install_import_hook() does.
             PathFinder.invalidate_caches()
 
 

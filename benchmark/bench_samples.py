@@ -44,25 +44,29 @@ def bench_regular() -> float:
     return ct.elapsed
 
 
-def bench_defer_imports() -> float:
-    # with defer_imports.install_import_hook(), CatchTime() as ct:
-    #     import benchmark.sample_defer_imports
-    # print(len(dir(benchmark.sample_defer_imports)))
-    with defer_imports.install_import_hook(is_global=True), CatchTime() as ct:
-        import benchmark.sample_regular_defer
-    return ct.elapsed
-
-
 def bench_slothy() -> float:
     with CatchTime() as ct:
         import benchmark.sample_slothy
     return ct.elapsed
 
 
+def bench_defer_imports_local() -> float:
+    with defer_imports.install_import_hook(), CatchTime() as ct:
+        import benchmark.sample_defer_local
+    return ct.elapsed
+
+
+def bench_defer_imports_global() -> float:
+    with defer_imports.install_import_hook(is_global=True), CatchTime() as ct:
+        import benchmark.sample_defer_global
+    return ct.elapsed
+
+
 BENCH_FUNCS = {
     "regular": bench_regular,
     "slothy": bench_slothy,
-    "defer_imports": bench_defer_imports,
+    "defer_imports (local)": bench_defer_imports_local,
+    "defer_imports (global)": bench_defer_imports_global,
 }
 
 
@@ -74,7 +78,7 @@ def main() -> None:
     parser.add_argument(
         "--exec-order",
         action="extend",
-        nargs=3,
+        nargs=4,
         choices=BENCH_FUNCS.keys(),
         type=str,
         help="The order in which the influenced (or not influenced) imports are run",
@@ -100,11 +104,11 @@ def main() -> None:
     version_len = len(version_header)
     version_divider = "=" * version_len
 
-    benchmark_len = 14
+    benchmark_len = 22
     benchmark_header = "Benchmark".ljust(benchmark_len)
     benchmark_divider = "=" * benchmark_len
 
-    time_len = 23
+    time_len = 19
     time_header = "Time".ljust(time_len)
     time_divider = "=" * time_len
 
@@ -125,7 +129,7 @@ def main() -> None:
 
     for bench_type, result in results.items():
         fmt_bench_type = bench_type.ljust(benchmark_len)
-        fmt_result = f"{result:.7f}s ({result / minimum:.2f}x)".ljust(time_len)
+        fmt_result = f"{result:.5f}s ({result / minimum:.2f}x)".ljust(time_len)
 
         print(impl, version, fmt_bench_type, fmt_result, sep="  ")
 

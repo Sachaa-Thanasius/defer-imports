@@ -141,7 +141,7 @@ def __getattr__(name: str) -> object:  # noqa: PLR0911, PLR0912
     raise AttributeError(msg)
 
 
-_original_global_names = list(globals())
+_original_global_names = tuple(globals())
 
 
 def __dir__() -> list[str]:

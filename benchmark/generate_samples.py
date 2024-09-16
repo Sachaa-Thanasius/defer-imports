@@ -1,5 +1,6 @@
 """Generate sample scripts with the same set of imports but influenced by different libraries, e.g. defer_imports."""
 
+import shutil
 from pathlib import Path
 
 
@@ -563,8 +564,11 @@ def main() -> None:
     regular_contents = "\n".join((PYRIGHT_IGNORE_DIRECTIVES, GENERATED_BY_COMMENT, STDLIB_IMPORTS))
     regular_path.write_text(regular_contents, encoding="utf-8")
 
-    # defer_imports-instrumented and defer_imports-hooked imports
-    defer_imports_path = bench_path / "sample_defer_imports.py"
+    # defer_imports-instrumented and defer_imports-hooked imports (global)
+    shutil.copy(regular_path, regular_path.with_name("sample_defer_global.py"))
+
+    # defer_imports-instrumented and defer_imports-hooked imports (local)
+    defer_imports_path = bench_path / "sample_defer_local.py"
     defer_imports_contents = (
         f"{PYRIGHT_IGNORE_DIRECTIVES}\n"
         f"{GENERATED_BY_COMMENT}\n"
@@ -576,9 +580,8 @@ def main() -> None:
     )
     defer_imports_path.write_text(defer_imports_contents, encoding="utf-8")
 
-    # Same defer_imports-influenced imports, but for a test in the tests directory
-    tests_path = Path().resolve() / "tests" / "stdlib_imports.py"
-    tests_path.write_text(defer_imports_contents, encoding="utf-8")
+    # defer_imports-influenced imports (local), but for a test in the tests directory
+    shutil.copy(defer_imports_path, bench_path.parent / "tests" / "stdlib_imports.py")
 
     # slothy-hooked imports
     slothy_path = bench_path / "sample_slothy.py"
