@@ -16,11 +16,9 @@ from threading import RLock
 from . import _typing as _tp
 
 
-original_import = contextvars.ContextVar("original_import", default=builtins.__import__)
-"""What builtins.__import__ currently points to."""
-
-is_deferred = contextvars.ContextVar("is_deferred", default=False)
-"""Whether imports should be deferred."""
+# ============================================================================
+# region -------- Helper functions --------
+# ============================================================================
 
 
 def sanity_check(name: str, package: _tp.Optional[str], level: int) -> None:
@@ -107,6 +105,21 @@ def resolve_name(name: str, package: str, level: int) -> str:
     return f"{base}.{name}" if name else base
 
 
+# endregion
+
+
+# ============================================================================
+# region -------- Main implementation --------
+# ============================================================================
+
+
+original_import = contextvars.ContextVar("original_import", default=builtins.__import__)
+"""What builtins.__import__ currently points to."""
+
+is_deferred = contextvars.ContextVar("is_deferred", default=False)
+"""Whether imports should be deferred."""
+
+
 class DeferredImportProxy:
     """Proxy for a deferred __import__ call."""
 
@@ -155,7 +168,7 @@ class DeferredImportProxy:
             from_proxy.defer_proxy_fromlist = (name,)
             return from_proxy
 
-        elif name == self.defer_proxy_name.rpartition(".")[2]:
+        elif ("." in self.defer_proxy_name) and (name == self.defer_proxy_name.rpartition(".")[2]):
             submodule_proxy = type(self)(*self.defer_proxy_import_args)
             submodule_proxy.defer_proxy_sub = name
             return submodule_proxy
@@ -171,22 +184,20 @@ class DeferredImportKey(str):
     When referenced, the key will replace itself in the namespace with the resolved import or the right name from it.
     """
 
-    __slots__ = ("defer_key_str", "defer_key_proxy", "is_resolving", "lock")
+    __slots__ = ("defer_key_proxy", "is_resolving", "lock")
 
     def __new__(cls, key: str, proxy: DeferredImportProxy, /) -> _tp.Self:
         return super().__new__(cls, key)
 
     def __init__(self, key: str, proxy: DeferredImportProxy, /) -> None:
-        self.defer_key_str = str(key)
         self.defer_key_proxy = proxy
-
         self.is_resolving = False
         self.lock = RLock()
 
     def __eq__(self, value: object, /) -> bool:
         if not isinstance(value, str):
             return NotImplemented
-        if self.defer_key_str != value:
+        if not super().__eq__(value):
             return False
 
         # Only the first thread to grab the lock should resolve the deferred import.
@@ -202,17 +213,17 @@ class DeferredImportKey(str):
         return True
 
     def __hash__(self) -> int:
-        return hash(self.defer_key_str)
+        return super().__hash__()
 
     def _resolve(self) -> None:
         """Perform an actual import for the given proxy and bind the result to the relevant namespace."""
 
         proxy = self.defer_key_proxy
 
-        # Perform the original __import__ and pray.
+        # 1. Perform the original __import__ and pray.
         module: _tp.ModuleType = original_import.get()(*proxy.defer_proxy_import_args)
 
-        # Transfer nested proxies over to the resolved module.
+        # 2. Transfer nested proxies over to the resolved module.
         module_vars = vars(module)
         for attr_key, attr_val in vars(proxy).items():
             if isinstance(attr_val, DeferredImportProxy) and not hasattr(module, attr_key):
@@ -223,21 +234,20 @@ class DeferredImportKey(str):
                 # Change the namespaces as well to make sure nested proxies are replaced in the right place.
                 attr_val.defer_proxy_global_ns = attr_val.defer_proxy_local_ns = module_vars
 
-        # Replace the proxy with the resolved module or module attribute in the relevant namespace.
-
-        # 1. Get the regular string key and the relevant namespace.
-        key = self.defer_key_str
+        # 3. Replace the proxy with the resolved module or module attribute in the relevant namespace.
+        # 3.1. Get the regular string key and the relevant namespace.
+        key = str(self)
         namespace = proxy.defer_proxy_local_ns
 
-        # 2. Replace the deferred version of the key to avoid it sticking around.
-        #    This will trigger __eq__ again, so use is_deferred to prevent recursive resolution.
+        # 3.2. Replace the deferred version of the key to avoid it sticking around.
+        # This will trigger __eq__ again, so we use is_deferred to prevent recursion.
         _is_def_tok = is_deferred.set(True)
         try:
             namespace[key] = namespace.pop(key)
         finally:
             is_deferred.reset(_is_def_tok)
 
-        # 3. Resolve any requested attribute access.
+        # 3.3. Resolve any requested attribute access.
         if proxy.defer_proxy_fromlist:
             namespace[key] = getattr(module, proxy.defer_proxy_fromlist[0])
         elif proxy.defer_proxy_sub:
@@ -290,6 +300,14 @@ def deferred___import__(  # noqa: ANN202
     return DeferredImportProxy(name, globals, locals, fromlist, level)
 
 
+# endregion
+
+
+# ============================================================================
+# region -------- Public API --------
+# ============================================================================
+
+
 @_tp.final
 class DeferredContext:
     """The type for defer_imports.until_use."""
@@ -310,7 +328,7 @@ class DeferredContext:
 until_use: _tp.Final[DeferredContext] = DeferredContext()
 """A context manager within which imports occur lazily. Not reentrant.
 
-This will not work correctly if install_defer_import_hook() was not called first elsewhere.
+This will not work correctly if install_import_hook() was not called first elsewhere.
 
 Raises
 ------
@@ -324,3 +342,6 @@ Notes
 -----
 As part of its implementation, this temporarily replaces builtins.__import__.
 """
+
+
+# endregion

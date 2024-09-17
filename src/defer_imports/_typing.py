@@ -163,9 +163,9 @@ def __getattr__(name: str) -> object:  # noqa: PLR0911, PLR0912
     raise AttributeError(msg)
 
 
-_original_global_names = tuple(globals())
+_initial_global_names = tuple(globals())
 
 
 def __dir__() -> list[str]:
     # This will hopefully make potential debugging easier.
-    return [*_original_global_names, *__all__]
+    return [*_initial_global_names, *__all__]
