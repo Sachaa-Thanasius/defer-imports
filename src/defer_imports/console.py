@@ -4,6 +4,7 @@
 
 """Helpers for using defer_imports in various consoles, such as the built-in CPython REPL and IPython."""
 
+from __future__ import annotations
 import __future__
 
 import ast
@@ -11,7 +12,8 @@ import code
 import codeop
 
 from . import _typing as _tp
-from ._core import DeferredImportKey, DeferredImportProxy, DeferredInstrumenter
+from ._comptime import DeferredInstrumenter
+from ._runtime import DeferredImportKey, DeferredImportProxy
 
 
 _features = [getattr(__future__, feat_name) for feat_name in __future__.all_feature_names]
@@ -75,7 +77,7 @@ class _DeferredIPythonInstrumenter(ast.NodeTransformer):
         self.actual_transformer = DeferredInstrumenter("", "<unknown>", "utf-8")
 
     def visit(self, node: ast.AST) -> _tp.Any:
-        # Reset part of the wrapped transformer before (re)use.
+        # Reset the wrapped transformer before (re)use.
         self.actual_transformer.data = node
         self.actual_transformer.scope_depth = 0
         return ast.fix_missing_locations(self.actual_transformer.visit(node))

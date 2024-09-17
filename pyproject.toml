@@ -29,7 +29,7 @@ classifiers = [
 dynamic = ["version"]
 
 [tool.hatch.version]
-path = "src/defer_imports/_core.py"
+path = "src/defer_imports/_compiletime.py"
 
 [project.optional-dependencies]
 benchmark = ["slothy"]
@@ -81,8 +81,8 @@ defer_imports = ["src"]
 plugins = ["covdefaults"]
 source = ["defer_imports", "tests"]
 omit = [
-    "src/defer_imports/_typing.py",   # Has a module-level __getattr__ that isn't invoked at runtime.
-    "src/defer_imports/console.py",   # Has a REPL that is manually tested currently.
+    "src/defer_imports/_typing.py", # Has a module-level __getattr__ that isn't invoked at runtime.
+    "src/defer_imports/console.py", # Has a REPL that is manually tested currently.
 ]
 
 [tool.coverage.report]
@@ -178,12 +178,13 @@ keep-runtime-typing = true
     "F403",
     "F405",
 ]
-"src/defer_imports/_core.py" = [
+"src/defer_imports/_runtime.py" = [
     "A002", # Allow some shadowing of builtins by parameter names.
 ]
-"src/defer_imports/_typing.py" = [
+"src/defer_imports/_typing.py*" = [
     "F822",    # __all__ has names that are only provided by module-level __getattr__.
     "PLW0603", # "global" is used to update variables at global scope.
+    "ERA001",  # Annoying false positive on comments.
 ]
 
 # ---- Test code

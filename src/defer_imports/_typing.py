@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import sys
+from importlib.machinery import ModuleSpec
 
 
 __all__ = (
@@ -28,6 +29,8 @@ __all__ = (
     "ModuleType",
     # os
     "PathLike",
+    # importlib.abc
+    "Loader",
     # imported with fallbacks
     "ReadableBuffer",
     "Self",
@@ -35,6 +38,7 @@ __all__ = (
     "TypeGuard",
     # # import and then defined
     "T",
+    "PathEntryFinderProtocol",
     # actually defined
     "final",
 )
@@ -88,6 +92,13 @@ def __getattr__(name: str) -> object:  # noqa: PLR0911, PLR0912
 
         return globals()[name]
 
+    if name == "Loader":
+        global Loader
+
+        from importlib.abc import Loader
+
+        return globals()[name]
+
     # ---- Imports with fallbacks
     if name == "ReadableBuffer":
         global ReadableBuffer
@@ -135,6 +146,17 @@ def __getattr__(name: str) -> object:  # noqa: PLR0911, PLR0912
         from typing import TypeVar
 
         T = TypeVar("T")
+        return globals()[name]
+
+    if name == "PathEntryFinderProtocol":
+        from typing import Protocol
+
+        global PathEntryFinderProtocol
+
+        # Copied from _typeshed.importlib.
+        class PathEntryFinderProtocol(Protocol):
+            def find_spec(self, fullname: str, target: ModuleType | None = ..., /) -> ModuleSpec | None: ...
+
         return globals()[name]
 
     msg = f"module {__name__!r} has no attribute {name!r}"

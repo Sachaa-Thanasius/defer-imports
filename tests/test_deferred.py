@@ -15,14 +15,12 @@ from typing import Any, cast
 
 import pytest
 
-from defer_imports._core import (
-    BYTECODE_HEADER,
-    DEFERRED_PATH_HOOK,
-    DeferredFileLoader,
-    DeferredInstrumenter,
-    install_import_hook,
-    should_instrument_globally,
-)
+from defer_imports import install_import_hook
+from defer_imports._comptime import BYTECODE_HEADER, DeferredFileLoader, DeferredInstrumenter
+
+
+def create_default_defer_loader_state():
+    return {"defer_globally": False, "defer_locally": True}
 
 
 def create_sample_module(path: Path, source: str, loader_type: type):
@@ -37,6 +35,7 @@ def create_sample_module(path: Path, source: str, loader_type: type):
     loader = loader_type(module_name, str(module_path))
     spec = importlib.util.spec_from_file_location(module_name, module_path, loader=loader)
     assert spec
+    spec.loader_state = create_default_defer_loader_state()
     module = importlib.util.module_from_spec(spec)
 
     return spec, module, module_path
@@ -55,23 +54,12 @@ def temp_cache_module(name: str, module: ModuleType):
 
 @pytest.fixture(autouse=True)
 def better_key_repr(monkeypatch: pytest.MonkeyPatch):
-    """Replace defer_imports._core.DeferredImportKey.__repr__ with a more verbose version for all tests."""
+    """Replace defer_imports._comptime.DeferredImportKey.__repr__ with a more verbose version for all tests."""
 
     def _verbose_repr(self) -> str:  # pyright: ignore  # noqa: ANN001
         return f"<key for {self.defer_key_str!r} import>"  # pyright: ignore [reportUnknownMemberType]
 
-    monkeypatch.setattr("defer_imports._core.DeferredImportKey.__repr__", _verbose_repr)  # pyright: ignore [reportUnknownArgumentType]
-
-
-@pytest.fixture
-def global_instrumentation_on():
-    """Turn on the global instrumentation aspect of defer_imports temporarily."""
-
-    _tok = should_instrument_globally.set(True)
-    try:
-        yield
-    finally:
-        should_instrument_globally.reset(_tok)
+    monkeypatch.setattr("defer_imports._runtime.DeferredImportKey.__repr__", _verbose_repr)  # pyright: ignore [reportUnknownArgumentType]
 
 
 @pytest.mark.parametrize(
@@ -81,7 +69,7 @@ def global_instrumentation_on():
             """'''Module docstring here'''""",
             '''\
 """Module docstring here"""
-from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+from defer_imports._runtime import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
 del @DeferredImportKey, @DeferredImportProxy
 ''',
             id="inserts statements after module docstring",
@@ -90,7 +78,7 @@ del @DeferredImportKey, @DeferredImportProxy
             """from __future__ import annotations""",
             """\
 from __future__ import annotations
-from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+from defer_imports._runtime import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
 del @DeferredImportKey, @DeferredImportProxy
 """,
             id="Inserts statements after __future__ import",
@@ -105,7 +93,7 @@ with defer_imports.until_use, nullcontext():
     import inspect
 """,
             """\
-from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+from defer_imports._runtime import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
 from contextlib import nullcontext
 import defer_imports
 with defer_imports.until_use, nullcontext():
@@ -122,7 +110,7 @@ with defer_imports.until_use:
     import inspect
 """,
             """\
-from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+from defer_imports._runtime import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
 import defer_imports
 with defer_imports.until_use:
     @local_ns = locals()
@@ -145,7 +133,7 @@ with defer_imports.until_use:
     import importlib.abc
 """,
             """\
-from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+from defer_imports._runtime import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
 import defer_imports
 with defer_imports.until_use:
     @local_ns = locals()
@@ -171,7 +159,7 @@ with defer_imports.until_use:
     from . import a
 """,
             """\
-from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+from defer_imports._runtime import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
 import defer_imports
 with defer_imports.until_use:
     @local_ns = locals()
@@ -212,7 +200,7 @@ import hello
 """,
             """\
 import defer_imports
-from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+from defer_imports._runtime import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
 with defer_imports.until_use:
     @local_ns = locals()
     @temp_proxy = None
@@ -233,7 +221,7 @@ import foo
 """,
             """\
 import defer_imports
-from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+from defer_imports._runtime import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
 with defer_imports.until_use:
     @local_ns = locals()
     @temp_proxy = None
@@ -265,7 +253,7 @@ import foo
 """,
             """\
 import defer_imports
-from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+from defer_imports._runtime import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
 with defer_imports.until_use:
     @local_ns = locals()
     @temp_proxy = None
@@ -303,7 +291,7 @@ import foo
 """,
             """\
 import defer_imports
-from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+from defer_imports._runtime import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
 with defer_imports.until_use:
     @local_ns = locals()
     @temp_proxy = None
@@ -341,7 +329,7 @@ def do_the_thing(a: int) -> int:
 """,
             """\
 import defer_imports
-from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+from defer_imports._runtime import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
 with defer_imports.until_use:
     @local_ns = locals()
     @temp_proxy = None
@@ -366,7 +354,7 @@ import foo
 """,
             """\
 import defer_imports
-from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+from defer_imports._runtime import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
 with defer_imports.until_use:
     @local_ns = locals()
     @temp_proxy = None
@@ -390,7 +378,6 @@ del @DeferredImportKey, @DeferredImportProxy
         ),
     ],
 )
-@pytest.mark.usefixtures("global_instrumentation_on")
 def test_global_instrumentation(before: str, after: str):
     import ast
     import io
@@ -400,7 +387,8 @@ def test_global_instrumentation(before: str, after: str):
     before_bytes = before.encode()
     encoding, _ = tokenize.detect_encoding(io.BytesIO(before_bytes).readline)
     tree = ast.parse(before_bytes, filename, "exec")
-    transformed_tree = ast.fix_missing_locations(DeferredInstrumenter(before_bytes, filename, encoding).visit(tree))
+    transformer = DeferredInstrumenter(before_bytes, filename, encoding, defer_state=True)
+    transformed_tree = ast.fix_missing_locations(transformer.visit(tree))
 
     assert f"{ast.unparse(transformed_tree)}\n" == after
 
@@ -408,28 +396,26 @@ def test_global_instrumentation(before: str, after: str):
 def test_path_hook_installation():
     """Test the API for putting/removing the defer_imports path hook from sys.path_hooks."""
 
+    def count_defer_path_hooks() -> int:
+        return sum(1 for hook in sys.path_hooks if ("DeferredFileFinder" in hook.__qualname__))
+
     # It shouldn't be on there by default.
-    assert DEFERRED_PATH_HOOK not in sys.path_hooks
+    assert count_defer_path_hooks() == 0
     before_length = len(sys.path_hooks)
 
     # It should be present after calling install.
-    install_import_hook()
-    assert DEFERRED_PATH_HOOK in sys.path_hooks
-    assert len(sys.path_hooks) == before_length + 1
-
-    # Calling install shouldn't do anything if it's already on sys.path_hooks.
     hook_ctx = install_import_hook()
-    assert DEFERRED_PATH_HOOK in sys.path_hooks
+    assert count_defer_path_hooks() == 1
     assert len(sys.path_hooks) == before_length + 1
 
     # Calling uninstall should remove it.
     hook_ctx.uninstall()
-    assert DEFERRED_PATH_HOOK not in sys.path_hooks
+    assert count_defer_path_hooks() == 0
     assert len(sys.path_hooks) == before_length
 
     # Calling uninstall if it's not present should do nothing to sys.path_hooks.
     hook_ctx.uninstall()
-    assert DEFERRED_PATH_HOOK not in sys.path_hooks
+    assert count_defer_path_hooks() == 0
     assert len(sys.path_hooks) == before_length
 
 
@@ -908,6 +894,8 @@ class B:
     assert spec
     assert spec.loader
 
+    spec.loader_state = create_default_defer_loader_state()
+
     module = importlib.util.module_from_spec(spec)
 
     with temp_cache_module(package_name, module):
@@ -989,6 +977,8 @@ def Y2():
     )
     assert spec
     assert spec.loader
+
+    spec.loader_state = create_default_defer_loader_state()
 
     module = importlib.util.module_from_spec(spec)
 
@@ -1124,6 +1114,8 @@ mock_B = patcher.start()
     )
     assert spec
     assert spec.loader
+
+    spec.loader_state = create_default_defer_loader_state()
 
     module = importlib.util.module_from_spec(spec)
 
