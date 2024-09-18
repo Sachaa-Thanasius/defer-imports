@@ -569,18 +569,15 @@ class DeferredFileFinder(FileFinder):
         self.defer_recursive = recursive
 
     def find_spec(self, fullname: str, target: _tp.Optional[_tp.ModuleType] = None) -> _tp.Optional[ModuleSpec]:
-        """Try to find a spec for "fullname" on sys.path or "path", with some modifications based on defer state."""
+        """Try to find a spec for "fullname" on sys.path or "path", with some modifications based on deferral state."""
 
         spec = super().find_spec(fullname, target)
         if spec is not None and isinstance(spec.loader, DeferredFileLoader):
-            defer_module_level = self.defer_globally or bool(
-                self.deferred_modules
+            defer_module_level = self.defer_globally or (
+                bool(self.deferred_modules)
                 and (
                     fullname in self.deferred_modules
-                    or (
-                        self.defer_recursive
-                        and any(module_name.startswith(f"{fullname}.") for module_name in self.deferred_modules)
-                    )
+                    or (self.defer_recursive and any(mod.startswith(f"{fullname}.") for mod in self.deferred_modules))
                 )
             )
 
@@ -594,7 +591,7 @@ class DeferredFileFinder(FileFinder):
     def path_hook(
         cls,
         *loader_details: tuple[type[_tp.Loader], list[str]],
-        defer_globally: bool = False,
+        defer_all: bool = False,
         deferred_modules: _tp.Sequence[str] = (),
         recursive: bool = False,
     ) -> _tp.Callable[[str], _tp.Self]:
@@ -608,12 +605,20 @@ class DeferredFileFinder(FileFinder):
             return cls(
                 path,
                 *loader_details,
-                defer_globally=defer_globally,
+                defer_globally=defer_all,
                 deferred_modules=deferred_modules,
                 recursive=recursive,
             )
 
         return path_hook_for_DeferredFileFinder
+
+
+def _invalidate_path_entry_caches() -> None:
+    """Invalidate import-related path entry caches in some way."""
+
+    # NOTE: PathFinder.invalidate_caches is expensive because it imports importlib.metadata, but we have to just bear
+    #       that for now, unfortunately. Price of being a good citizen, I suppose.
+    PathFinder.invalidate_caches()
 
 
 # endregion
@@ -658,13 +663,12 @@ class ImportHookContext:
         except ValueError:
             pass
         else:
-            # NOTE: Use the same invalidation mechanism as install_import_hook() does.
-            PathFinder.invalidate_caches()
+            _invalidate_path_entry_caches()
 
 
 def install_import_hook(
     *,
-    is_global: bool = False,
+    apply_all: bool = False,
     module_names: _tp.Sequence[str] = (),
     recursive: bool = False,
 ) -> ImportHookContext:
@@ -684,8 +688,8 @@ def install_import_hook(
         A set of modules to apply module-level import deferral to. Mutually exclusive with and has lower priority than
         is_global.
     recursive: bool, default=False
-        Whether module-level import deferral should apply to the given module_names and all of their submodules
-        recursively.
+        Whether module-level import deferral should apply recursively the submodules of the given module_names. If no
+        module names are given, this has no effect.
 
     Returns
     -------
@@ -696,7 +700,7 @@ def install_import_hook(
 
     path_hook = DeferredFileFinder.path_hook(
         LOADER_DETAILS,
-        defer_globally=is_global,
+        defer_all=apply_all,
         deferred_modules=module_names,
         recursive=recursive,
     )
@@ -706,9 +710,7 @@ def install_import_hook(
     except ValueError:
         hook_insert_index = 0
 
-    # NOTE: PathFinder.invalidate_caches() is expensive because it imports importlib.metadata, but we have to just bear
-    #       that for now, unfortunately. Price of being a good citizen, I suppose.
-    PathFinder.invalidate_caches()
+    _invalidate_path_entry_caches()
     sys.path_hooks.insert(hook_insert_index, path_hook)
 
     return ImportHookContext(path_hook)

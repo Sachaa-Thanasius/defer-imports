@@ -310,7 +310,22 @@ def deferred___import__(  # noqa: ANN202
 
 @_tp.final
 class DeferredContext:
-    """The type for defer_imports.until_use."""
+    """A context manager within which imports occur lazily. Not reentrant. Use via defer_imports.until_use.
+
+    This will not work correctly if install_import_hook is not called first elsewhere.
+
+    Raises
+    ------
+    SyntaxError
+        If defer_imports.until_use is used improperly, e.g.:
+            1. It is being used in a class or function scope.
+            2. It contains a statement that isn't an import.
+            3. It contains a wildcard import.
+
+    Notes
+    -----
+    As part of its implementation, this temporarily replaces builtins.__import__.
+    """
 
     __slots__ = ("_import_ctx_token", "_defer_ctx_token")
 
@@ -326,22 +341,6 @@ class DeferredContext:
 
 
 until_use: _tp.Final[DeferredContext] = DeferredContext()
-"""A context manager within which imports occur lazily. Not reentrant.
-
-This will not work correctly if install_import_hook() is not called first elsewhere.
-
-Raises
-------
-SyntaxError
-    If defer_imports.until_use is used improperly, e.g.:
-        1. It is being used in a class or function scope.
-        2. It contains a statement that isn't an import.
-        3. It contains a wildcard import.
-
-Notes
------
-As part of its implementation, this temporarily replaces builtins.__import__.
-"""
 
 
 # endregion
