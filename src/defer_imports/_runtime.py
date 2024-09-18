@@ -328,7 +328,7 @@ class DeferredContext:
 until_use: _tp.Final[DeferredContext] = DeferredContext()
 """A context manager within which imports occur lazily. Not reentrant.
 
-This will not work correctly if install_import_hook() was not called first elsewhere.
+This will not work correctly if install_import_hook() is not called first elsewhere.
 
 Raises
 ------
