@@ -561,26 +561,32 @@ class DeferredFileFinder(FileFinder):
         *loader_details: tuple[type[_tp.Loader], list[str]],
         defer_globally: bool = False,
         deferred_modules: _tp.Sequence[str] = (),
+        recursive: bool = False,
     ) -> None:
         super().__init__(path, *loader_details)
         self.defer_globally = defer_globally
         self.deferred_modules = deferred_modules
+        self.defer_recursive = recursive
 
     def find_spec(self, fullname: str, target: _tp.Optional[_tp.ModuleType] = None) -> _tp.Optional[ModuleSpec]:
         """Try to find a spec for "fullname" on sys.path or "path", with some modifications based on defer state."""
 
         spec = super().find_spec(fullname, target)
         if spec is not None and isinstance(spec.loader, DeferredFileLoader):
-            # It's under-documented, but spec.loader_state is meant for this kind of thing.
-            # Ref: https://docs.python.org/3/library/importlib.html#importlib.machinery.ModuleSpec.loader_state
-            # Ref: https://github.com/python/cpython/issues/89527
             defer_module_level = self.defer_globally or bool(
                 self.deferred_modules
                 and (
                     fullname in self.deferred_modules
-                    or any(module_name.startswith(f"{fullname}.") for module_name in self.deferred_modules)
+                    or (
+                        self.defer_recursive
+                        and any(module_name.startswith(f"{fullname}.") for module_name in self.deferred_modules)
+                    )
                 )
             )
+
+            # It's under-documented, but spec.loader_state is meant for this kind of thing.
+            # Ref: https://docs.python.org/3/library/importlib.html#importlib.machinery.ModuleSpec.loader_state
+            # Ref: https://github.com/python/cpython/issues/89527
             spec.loader_state = {"defer_module_level": defer_module_level}
         return spec
 
@@ -590,6 +596,7 @@ class DeferredFileFinder(FileFinder):
         *loader_details: tuple[type[_tp.Loader], list[str]],
         defer_globally: bool = False,
         deferred_modules: _tp.Sequence[str] = (),
+        recursive: bool = False,
     ) -> _tp.Callable[[str], _tp.Self]:
         def path_hook_for_DeferredFileFinder(path: str) -> _tp.Self:
             """Path hook for DeferredFileFinder."""
@@ -598,7 +605,13 @@ class DeferredFileFinder(FileFinder):
                 msg = "only directories are supported"
                 raise ImportError(msg, path=path)
 
-            return cls(path, *loader_details, defer_globally=defer_globally, deferred_modules=deferred_modules)
+            return cls(
+                path,
+                *loader_details,
+                defer_globally=defer_globally,
+                deferred_modules=deferred_modules,
+                recursive=recursive,
+            )
 
         return path_hook_for_DeferredFileFinder
 
@@ -649,7 +662,12 @@ class ImportHookContext:
             PathFinder.invalidate_caches()
 
 
-def install_import_hook(*, is_global: bool = False, module_names: _tp.Sequence[str] = ()) -> ImportHookContext:
+def install_import_hook(
+    *,
+    is_global: bool = False,
+    module_names: _tp.Sequence[str] = (),
+    recursive: bool = False,
+) -> ImportHookContext:
     """Insert a custom defer_imports path hook in sys.path_hooks. Must be called before using defer_imports.until_use.
 
     Also provides optional configuration for instrumenting ALL import statements, not only ones wrapped by the
@@ -663,8 +681,11 @@ def install_import_hook(*, is_global: bool = False, module_names: _tp.Sequence[s
         Whether to apply module-level import deferral, i.e. instrumentation of all imports, to all modules henceforth.
         Mutually exclusive with and has higher priority than module_names.
     module_names: Sequence[str], optional
-        Whether to apply module-level import deferral to a given set of modules and recursively to all of their
-        submodules. Mutually exclusive with and has lower priority than is_global.
+        A set of modules to apply module-level import deferral to. Mutually exclusive with and has lower priority than
+        is_global.
+    recursive: bool, default=False
+        Whether module-level import deferral should apply to the given module_names and all of their submodules
+        recursively.
 
     Returns
     -------
@@ -673,7 +694,12 @@ def install_import_hook(*, is_global: bool = False, module_names: _tp.Sequence[s
         automatically by using it as a context manager.
     """
 
-    path_hook = DeferredFileFinder.path_hook(LOADER_DETAILS, defer_globally=is_global, deferred_modules=module_names)
+    path_hook = DeferredFileFinder.path_hook(
+        LOADER_DETAILS,
+        defer_globally=is_global,
+        deferred_modules=module_names,
+        recursive=recursive,
+    )
 
     try:
         hook_insert_index = sys.path_hooks.index(zipimport.zipimporter) + 1  # pyright: ignore [reportArgumentType]
