@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-from .console import DeferredInteractiveConsole
+from . import interact
 
 
-raise SystemExit(DeferredInteractiveConsole().interact())
+raise SystemExit(interact())

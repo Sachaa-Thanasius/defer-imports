@@ -586,7 +586,7 @@ def main() -> None:
     defer_imports_path.write_text(defer_imports_contents, encoding="utf-8")
 
     # defer_imports-influenced imports (local), but for a test in the tests directory
-    shutil.copy(defer_imports_path, bench_path.parent / "tests" / "stdlib_imports.py")
+    shutil.copy(defer_imports_path, bench_path.parent / "tests" / "sample_stdlib_imports.py")
 
     # slothy-hooked imports
     slothy_contents = CONTEXT_MANAGER_TEMPLATE.format(

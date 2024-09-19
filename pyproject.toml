@@ -173,12 +173,10 @@ keep-runtime-typing = true
 
 [tool.ruff.lint.per-file-ignores]
 # ---- Package code
-"**/__init__.py" = [
+"src/defer_imports/__init__.py" = [
     # Ruff doesn't understand wildcard imports that export names from a package.
     "F403",
     "F405",
-]
-"src/defer_imports/_runtime.py" = [
     "A002", # Allow some shadowing of builtins by parameter names.
 ]
 "src/defer_imports/_typing.py*" = [
@@ -194,7 +192,7 @@ keep-runtime-typing = true
     "ANN201", # Don't need return annotations for tests.
     "S102",   # exec is used to test for NameError within a module's namespace.
 ]
-"tests/stdlib_imports.py" = [
+"tests/sample_stdlib_imports.py" = [
     "F401",   # Unused imports are fine; we're testing import success.
     "ERA001", # Plenty of imports are commented out with explanations next to them.
 ]
@@ -213,6 +211,7 @@ pythonVersion = "3.9"
 pythonPlatform = "All"
 typeCheckingMode = "strict"
 
+reportPrivateUsage = "none"
 reportUnnecessaryIsInstance = "information"
 reportCallInDefaultInitializer = "warning"
 reportImportCycles = "information"
