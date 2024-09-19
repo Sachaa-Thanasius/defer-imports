@@ -158,6 +158,7 @@ def _resolve_name(name: str, package: str, level: int) -> str:
 
 
 _StrPath: _tp.TypeAlias = "_tp.Union[str, os.PathLike[str]]"
+_ModulePath: _tp.TypeAlias = "_tp.Union[_StrPath, _tp.ReadableBuffer]"
 _SourceData: _tp.TypeAlias = "_tp.Union[_tp.ReadableBuffer, str, ast.Module, ast.Expression, ast.Interactive]"
 
 
@@ -179,7 +180,7 @@ class _DeferredInstrumenter(ast.NodeTransformer):
     def __init__(
         self,
         data: _tp.Union[_tp.ReadableBuffer, str, ast.AST],
-        filepath: _tp.Union[_StrPath, _tp.ReadableBuffer],
+        filepath: _ModulePath = "<unknown>",
         encoding: str = "utf-8",
         *,
         module_level: bool = False,
@@ -566,13 +567,7 @@ class _DeferredFileLoader(SourceFileLoader):
         self.defer_module_level = spec.loader_state["defer_module_level"] if (spec.loader_state is not None) else False
         return super().create_module(spec)
 
-    def source_to_code(  # pyright: ignore [reportIncompatibleMethodOverride]
-        self,
-        data: _SourceData,
-        path: _tp.Union[_StrPath, _tp.ReadableBuffer],
-        *,
-        _optimize: int = -1,
-    ) -> _tp.CodeType:
+    def source_to_code(self, data: _SourceData, path: _ModulePath, *, _optimize: int = -1) -> _tp.CodeType:  # pyright: ignore [reportIncompatibleMethodOverride]
         # NOTE: Signature of SourceFileLoader.source_to_code at runtime isn't consistent with the version in typeshed.
 
         if not data:
@@ -1071,7 +1066,7 @@ class _DeferredIPythonInstrumenter(ast.NodeTransformer):
 
     def __init__(self):
         # The wrapped transformer's initial data is an empty string because we only get the actual data within visit().
-        self.actual_transformer = _DeferredInstrumenter("", "<unknown>", "utf-8")
+        self.actual_transformer = _DeferredInstrumenter("")
 
     def visit(self, node: ast.AST) -> _tp.Any:
         # Reset the wrapped transformer before (re)use.

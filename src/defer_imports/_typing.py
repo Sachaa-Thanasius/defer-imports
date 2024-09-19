@@ -13,33 +13,31 @@ from importlib.machinery import ModuleSpec
 
 
 __all__ = (
-    # collections.abc
+    # -- collections.abc
     "Callable",
     "Generator",
     "Iterable",
     "MutableMapping",
     "Sequence",
-    # typing
+    # -- typing
     "Any",
     "Final",
     "Optional",
     "Union",
-    # types
+    # -- types
     "CodeType",
     "ModuleType",
-    # os
-    "PathLike",
-    # importlib.abc
+    # -- importlib.abc
     "Loader",
-    # imported with fallbacks
+    # -- imported with fallbacks
     "ReadableBuffer",
     "Self",
     "TypeAlias",
     "TypeGuard",
-    # # import and then defined
+    # -- imported and then defined
     "T",
     "PathEntryFinderProtocol",
-    # actually defined
+    # -- actually defined
     "final",
 )
 
@@ -82,13 +80,6 @@ def __getattr__(name: str) -> object:  # noqa: PLR0911, PLR0912
         global CodeType, ModuleType
 
         from types import CodeType, ModuleType
-
-        return globals()[name]
-
-    if name == "PathLike":
-        global PathLike
-
-        from os import PathLike
 
         return globals()[name]
 

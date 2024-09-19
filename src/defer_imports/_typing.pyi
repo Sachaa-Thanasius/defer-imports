@@ -3,40 +3,37 @@
 # SPDX-License-Identifier: MIT
 
 __all__ = (
-    # collections.abc
+    # -- collections.abc
     "Callable",
     "Generator",
     "Iterable",
     "MutableMapping",
     "Sequence",
-    # typing
+    # -- typing
     "Any",
     "Final",
     "Optional",
     "Union",
-    # types
+    # -- types
     "CodeType",
     "ModuleType",
-    # os
-    "PathLike",
-    # importlib.abc
+    # -- importlib.abc
     "Loader",
-    # import with fallbacks
+    # -- imported with fallbacks
     "ReadableBuffer",
     "Self",
     "TypeAlias",
     "TypeGuard",
-    # import and then defined
+    # -- imported and then defined
     "T",
     "PathEntryFinderProtocol",
-    # actually defined
+    # -- actually defined
     "final",
 )
 
 from collections.abc import Callable, Generator, Iterable, MutableMapping, Sequence
 from importlib.abc import Loader
 from importlib.machinery import ModuleSpec
-from os import PathLike
 from types import CodeType, ModuleType
 from typing import Any, Final, Optional, Protocol, TypeVar, Union, final
 
