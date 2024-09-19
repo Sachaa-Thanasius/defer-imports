@@ -29,7 +29,7 @@ classifiers = [
 dynamic = ["version"]
 
 [tool.hatch.version]
-path = "src/defer_imports/_comptime.py"
+path = "src/defer_imports/__init__.py"
 
 [project.optional-dependencies]
 benchmark = ["slothy"]
