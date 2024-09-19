@@ -82,7 +82,6 @@ plugins = ["covdefaults"]
 source = ["defer_imports", "tests"]
 omit = [
     "src/defer_imports/_typing.py", # Has a module-level __getattr__ that isn't invoked at runtime.
-    "src/defer_imports/console.py", # Has a REPL that is manually tested currently.
 ]
 
 [tool.coverage.report]

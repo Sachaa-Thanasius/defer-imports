@@ -702,7 +702,7 @@ class _DeferredFileFinder(FileFinder):
         def path_hook_for_DeferredFileFinder(path: str) -> _tp.Self:
             """Path hook for DeferredFileFinder."""
 
-            if not os.path.isdir(path):  # noqa: PTH112
+            if not os.path.isdir(path):  # noqa: PTH112 # os is loaded on startup.
                 msg = "only directories are supported"
                 raise ImportError(msg, path=path)
 
@@ -980,7 +980,7 @@ def _deferred___import__(  # noqa: ANN202
 
     fromlist = fromlist or ()
 
-    package = _calc___package__(locals)
+    package = _calc___package__(globals)
     _sanity_check(name, package, level)
 
     # Resolve the names of relative imports.
@@ -992,23 +992,24 @@ def _deferred___import__(  # noqa: ANN202
     if not fromlist and ("." in name):
         name_parts = name.split(".")
         try:
-            # TODO: Consider adding a condition that base_parent must be a ModuleType or a _DeferredImportProxy, to
-            #       avoid attaching proxies to a random thing that would've normally been clobbered by the import?
             base_parent = parent = locals[name_parts[0]]
         except KeyError:
             pass
         else:
-            # Nest submodule proxies as needed.
-            for limit, attr_name in enumerate(name_parts[1:], start=2):
-                if attr_name not in vars(parent):
-                    nested_proxy = _DeferredImportProxy(".".join(name_parts[:limit]), globals, locals, (), level)
-                    nested_proxy.defer_proxy_sub = attr_name
-                    setattr(parent, attr_name, nested_proxy)
-                    parent = nested_proxy
-                else:
-                    parent = getattr(parent, attr_name)
+            # NOTE: We assume that if base_parent is a ModuleType or _DeferredImportProxy, then it shouldn't be getting
+            #       clobbered. Not sure if this is right, but it feels like the safest move.
+            if isinstance(base_parent, (type(sys), _DeferredImportProxy)):
+                # Nest submodule proxies as needed.
+                for limit, attr_name in enumerate(name_parts[1:], start=2):
+                    if attr_name not in vars(parent):
+                        nested_proxy = _DeferredImportProxy(".".join(name_parts[:limit]), globals, locals, (), level)
+                        nested_proxy.defer_proxy_sub = attr_name
+                        setattr(parent, attr_name, nested_proxy)
+                        parent = nested_proxy
+                    else:
+                        parent = getattr(parent, attr_name)
 
-            return base_parent
+                return base_parent
 
     return _DeferredImportProxy(name, globals, locals, fromlist, level)
 
