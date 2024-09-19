@@ -15,28 +15,33 @@ from typing import Any, cast
 
 import pytest
 
-from defer_imports._core import (
-    BYTECODE_HEADER,
-    DEFERRED_PATH_HOOK,
-    DeferredFileLoader,
-    DeferredInstrumenter,
-    install_import_hook,
-    should_instrument_globally,
-)
+from defer_imports import _BYTECODE_HEADER, _DeferredFileLoader, _DeferredInstrumenter, install_import_hook
 
 
-def create_sample_module(path: Path, source: str, loader_type: type):
-    """Utility function for creating a sample module with the given path, source code, and loader."""
+# ============================================================================
+# region -------- Helpers --------
+# ============================================================================
 
-    tmp_file = path / "sample.py"
-    tmp_file.write_text(source, encoding="utf-8")
+
+def create_sample_module(
+    path: Path,
+    source: str,
+    loader_type: type = _DeferredFileLoader,
+    defer_module_level: bool = False,
+):
+    """Create a sample module based on the given attributes."""
 
     module_name = "sample"
-    module_path = tmp_file.resolve()
+
+    module_path = path / f"{module_name}.py"
+    module_path.write_text(source, encoding="utf-8")
 
     loader = loader_type(module_name, str(module_path))
+    loader.defer_module_level = defer_module_level
+
     spec = importlib.util.spec_from_file_location(module_name, module_path, loader=loader)
     assert spec
+
     module = importlib.util.module_from_spec(spec)
 
     return spec, module, module_path
@@ -55,23 +60,46 @@ def temp_cache_module(name: str, module: ModuleType):
 
 @pytest.fixture(autouse=True)
 def better_key_repr(monkeypatch: pytest.MonkeyPatch):
-    """Replace defer_imports._core.DeferredImportKey.__repr__ with a more verbose version for all tests."""
+    """Replace defer_imports._comptime._DeferredImportKey.__repr__ with a more verbose version for all tests."""
 
     def _verbose_repr(self) -> str:  # pyright: ignore  # noqa: ANN001
-        return f"<key for {self.defer_key_str!r} import>"  # pyright: ignore [reportUnknownMemberType]
+        return f"<key for {str.__repr__(self)} import>"  # pyright: ignore
 
-    monkeypatch.setattr("defer_imports._core.DeferredImportKey.__repr__", _verbose_repr)  # pyright: ignore [reportUnknownArgumentType]
+    monkeypatch.setattr("defer_imports._DeferredImportKey.__repr__", _verbose_repr)  # pyright: ignore [reportUnknownArgumentType]
 
 
-@pytest.fixture
-def global_instrumentation_on():
-    """Turn on the global instrumentation aspect of defer_imports temporarily."""
+# endregion
 
-    _tok = should_instrument_globally.set(True)
-    try:
-        yield
-    finally:
-        should_instrument_globally.reset(_tok)
+
+# ============================================================================
+# region -------- Unit tests --------
+# ============================================================================
+
+
+def test_path_hook_installation():
+    """Test the API for putting/removing the defer_imports path hook from sys.path_hooks."""
+
+    def count_defer_path_hooks() -> int:
+        return sum(1 for hook in sys.path_hooks if ("DeferredFileFinder" in hook.__qualname__))
+
+    # It shouldn't be on there by default.
+    assert count_defer_path_hooks() == 0
+    before_length = len(sys.path_hooks)
+
+    # It should be present after calling install.
+    hook_ctx = install_import_hook()
+    assert count_defer_path_hooks() == 1
+    assert len(sys.path_hooks) == before_length + 1
+
+    # Calling uninstall should remove it.
+    hook_ctx.uninstall()
+    assert count_defer_path_hooks() == 0
+    assert len(sys.path_hooks) == before_length
+
+    # Calling uninstall if it's not present should do nothing to sys.path_hooks.
+    hook_ctx.uninstall()
+    assert count_defer_path_hooks() == 0
+    assert len(sys.path_hooks) == before_length
 
 
 @pytest.mark.parametrize(
@@ -81,8 +109,8 @@ def global_instrumentation_on():
             """'''Module docstring here'''""",
             '''\
 """Module docstring here"""
-from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
-del @DeferredImportKey, @DeferredImportProxy
+from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
+del @_DeferredImportKey, @_DeferredImportProxy
 ''',
             id="inserts statements after module docstring",
         ),
@@ -90,8 +118,8 @@ del @DeferredImportKey, @DeferredImportProxy
             """from __future__ import annotations""",
             """\
 from __future__ import annotations
-from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
-del @DeferredImportKey, @DeferredImportProxy
+from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
+del @_DeferredImportKey, @_DeferredImportProxy
 """,
             id="Inserts statements after __future__ import",
         ),
@@ -105,12 +133,12 @@ with defer_imports.until_use, nullcontext():
     import inspect
 """,
             """\
-from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
 from contextlib import nullcontext
 import defer_imports
 with defer_imports.until_use, nullcontext():
     import inspect
-del @DeferredImportKey, @DeferredImportProxy
+del @_DeferredImportKey, @_DeferredImportProxy
 """,
             id="does nothing if used with another context manager",
         ),
@@ -122,17 +150,17 @@ with defer_imports.until_use:
     import inspect
 """,
             """\
-from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
 import defer_imports
 with defer_imports.until_use:
     @local_ns = locals()
     @temp_proxy = None
     import inspect
-    if type(inspect) is @DeferredImportProxy:
+    if type(inspect) is @_DeferredImportProxy:
         @temp_proxy = @local_ns.pop('inspect')
-        @local_ns[@DeferredImportKey('inspect', @temp_proxy)] = @temp_proxy
+        @local_ns[@_DeferredImportKey('inspect', @temp_proxy)] = @temp_proxy
     del @temp_proxy, @local_ns
-del @DeferredImportKey, @DeferredImportProxy
+del @_DeferredImportKey, @_DeferredImportProxy
 """,
             id="regular import",
         ),
@@ -145,21 +173,21 @@ with defer_imports.until_use:
     import importlib.abc
 """,
             """\
-from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
 import defer_imports
 with defer_imports.until_use:
     @local_ns = locals()
     @temp_proxy = None
     import importlib
-    if type(importlib) is @DeferredImportProxy:
+    if type(importlib) is @_DeferredImportProxy:
         @temp_proxy = @local_ns.pop('importlib')
-        @local_ns[@DeferredImportKey('importlib', @temp_proxy)] = @temp_proxy
+        @local_ns[@_DeferredImportKey('importlib', @temp_proxy)] = @temp_proxy
     import importlib.abc
-    if type(importlib) is @DeferredImportProxy:
+    if type(importlib) is @_DeferredImportProxy:
         @temp_proxy = @local_ns.pop('importlib')
-        @local_ns[@DeferredImportKey('importlib', @temp_proxy)] = @temp_proxy
+        @local_ns[@_DeferredImportKey('importlib', @temp_proxy)] = @temp_proxy
     del @temp_proxy, @local_ns
-del @DeferredImportKey, @DeferredImportProxy
+del @_DeferredImportKey, @_DeferredImportProxy
 """,
             id="mixed imports",
         ),
@@ -171,17 +199,17 @@ with defer_imports.until_use:
     from . import a
 """,
             """\
-from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
 import defer_imports
 with defer_imports.until_use:
     @local_ns = locals()
     @temp_proxy = None
     from . import a
-    if type(a) is @DeferredImportProxy:
+    if type(a) is @_DeferredImportProxy:
         @temp_proxy = @local_ns.pop('a')
-        @local_ns[@DeferredImportKey('a', @temp_proxy)] = @temp_proxy
+        @local_ns[@_DeferredImportKey('a', @temp_proxy)] = @temp_proxy
     del @temp_proxy, @local_ns
-del @DeferredImportKey, @DeferredImportProxy
+del @_DeferredImportKey, @_DeferredImportProxy
 """,
             id="relative import",
         ),
@@ -191,16 +219,13 @@ def test_instrumentation(before: str, after: str):
     """Test what code is generated by the instrumentation side of defer_imports."""
 
     import ast
-    import io
-    import tokenize
 
     filename = "<unknown>"
-    before_bytes = before.encode()
-    encoding, _ = tokenize.detect_encoding(io.BytesIO(before_bytes).readline)
-    tree = ast.parse(before_bytes, filename, "exec")
-    transformed_tree = ast.fix_missing_locations(DeferredInstrumenter(before_bytes, filename, encoding).visit(tree))
+    orig_tree = ast.parse(before, filename, "exec")
+    transformer = _DeferredInstrumenter(before, filename)
+    new_tree = ast.fix_missing_locations(transformer.visit(orig_tree))
 
-    assert f"{ast.unparse(transformed_tree)}\n" == after
+    assert f"{ast.unparse(new_tree)}\n" == after
 
 
 @pytest.mark.parametrize(
@@ -208,20 +233,20 @@ def test_instrumentation(before: str, after: str):
     [
         pytest.param(
             """\
-import hello
+import inspect
 """,
             """\
 import defer_imports
-from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
 with defer_imports.until_use:
     @local_ns = locals()
     @temp_proxy = None
-    import hello
-    if type(hello) is @DeferredImportProxy:
-        @temp_proxy = @local_ns.pop('hello')
-        @local_ns[@DeferredImportKey('hello', @temp_proxy)] = @temp_proxy
+    import inspect
+    if type(inspect) is @_DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('inspect')
+        @local_ns[@_DeferredImportKey('inspect', @temp_proxy)] = @temp_proxy
     del @temp_proxy, @local_ns
-del @DeferredImportKey, @DeferredImportProxy
+del @_DeferredImportKey, @_DeferredImportProxy
 """,
             id="regular import",
         ),
@@ -233,24 +258,24 @@ import foo
 """,
             """\
 import defer_imports
-from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
 with defer_imports.until_use:
     @local_ns = locals()
     @temp_proxy = None
     import hello
-    if type(hello) is @DeferredImportProxy:
+    if type(hello) is @_DeferredImportProxy:
         @temp_proxy = @local_ns.pop('hello')
-        @local_ns[@DeferredImportKey('hello', @temp_proxy)] = @temp_proxy
+        @local_ns[@_DeferredImportKey('hello', @temp_proxy)] = @temp_proxy
     import world
-    if type(world) is @DeferredImportProxy:
+    if type(world) is @_DeferredImportProxy:
         @temp_proxy = @local_ns.pop('world')
-        @local_ns[@DeferredImportKey('world', @temp_proxy)] = @temp_proxy
+        @local_ns[@_DeferredImportKey('world', @temp_proxy)] = @temp_proxy
     import foo
-    if type(foo) is @DeferredImportProxy:
+    if type(foo) is @_DeferredImportProxy:
         @temp_proxy = @local_ns.pop('foo')
-        @local_ns[@DeferredImportKey('foo', @temp_proxy)] = @temp_proxy
+        @local_ns[@_DeferredImportKey('foo', @temp_proxy)] = @temp_proxy
     del @temp_proxy, @local_ns
-del @DeferredImportKey, @DeferredImportProxy
+del @_DeferredImportKey, @_DeferredImportProxy
 """,
             id="multiple imports consecutively",
         ),
@@ -265,29 +290,29 @@ import foo
 """,
             """\
 import defer_imports
-from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
 with defer_imports.until_use:
     @local_ns = locals()
     @temp_proxy = None
     import hello
-    if type(hello) is @DeferredImportProxy:
+    if type(hello) is @_DeferredImportProxy:
         @temp_proxy = @local_ns.pop('hello')
-        @local_ns[@DeferredImportKey('hello', @temp_proxy)] = @temp_proxy
+        @local_ns[@_DeferredImportKey('hello', @temp_proxy)] = @temp_proxy
     import world
-    if type(world) is @DeferredImportProxy:
+    if type(world) is @_DeferredImportProxy:
         @temp_proxy = @local_ns.pop('world')
-        @local_ns[@DeferredImportKey('world', @temp_proxy)] = @temp_proxy
+        @local_ns[@_DeferredImportKey('world', @temp_proxy)] = @temp_proxy
     del @temp_proxy, @local_ns
 print('hello')
 with defer_imports.until_use:
     @local_ns = locals()
     @temp_proxy = None
     import foo
-    if type(foo) is @DeferredImportProxy:
+    if type(foo) is @_DeferredImportProxy:
         @temp_proxy = @local_ns.pop('foo')
-        @local_ns[@DeferredImportKey('foo', @temp_proxy)] = @temp_proxy
+        @local_ns[@_DeferredImportKey('foo', @temp_proxy)] = @temp_proxy
     del @temp_proxy, @local_ns
-del @DeferredImportKey, @DeferredImportProxy
+del @_DeferredImportKey, @_DeferredImportProxy
 """,
             id="multiple imports separated by statement 1",
         ),
@@ -303,18 +328,18 @@ import foo
 """,
             """\
 import defer_imports
-from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
 with defer_imports.until_use:
     @local_ns = locals()
     @temp_proxy = None
     import hello
-    if type(hello) is @DeferredImportProxy:
+    if type(hello) is @_DeferredImportProxy:
         @temp_proxy = @local_ns.pop('hello')
-        @local_ns[@DeferredImportKey('hello', @temp_proxy)] = @temp_proxy
+        @local_ns[@_DeferredImportKey('hello', @temp_proxy)] = @temp_proxy
     import world
-    if type(world) is @DeferredImportProxy:
+    if type(world) is @_DeferredImportProxy:
         @temp_proxy = @local_ns.pop('world')
-        @local_ns[@DeferredImportKey('world', @temp_proxy)] = @temp_proxy
+        @local_ns[@_DeferredImportKey('world', @temp_proxy)] = @temp_proxy
     del @temp_proxy, @local_ns
 
 def do_the_thing(a: int) -> int:
@@ -323,11 +348,11 @@ with defer_imports.until_use:
     @local_ns = locals()
     @temp_proxy = None
     import foo
-    if type(foo) is @DeferredImportProxy:
+    if type(foo) is @_DeferredImportProxy:
         @temp_proxy = @local_ns.pop('foo')
-        @local_ns[@DeferredImportKey('foo', @temp_proxy)] = @temp_proxy
+        @local_ns[@_DeferredImportKey('foo', @temp_proxy)] = @temp_proxy
     del @temp_proxy, @local_ns
-del @DeferredImportKey, @DeferredImportProxy
+del @_DeferredImportKey, @_DeferredImportProxy
 """,
             id="multiple imports separated by statement 2",
         ),
@@ -341,20 +366,20 @@ def do_the_thing(a: int) -> int:
 """,
             """\
 import defer_imports
-from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
 with defer_imports.until_use:
     @local_ns = locals()
     @temp_proxy = None
     import hello
-    if type(hello) is @DeferredImportProxy:
+    if type(hello) is @_DeferredImportProxy:
         @temp_proxy = @local_ns.pop('hello')
-        @local_ns[@DeferredImportKey('hello', @temp_proxy)] = @temp_proxy
+        @local_ns[@_DeferredImportKey('hello', @temp_proxy)] = @temp_proxy
     del @temp_proxy, @local_ns
 
 def do_the_thing(a: int) -> int:
     import world
     return a
-del @DeferredImportKey, @DeferredImportProxy
+del @_DeferredImportKey, @_DeferredImportProxy
 """,
             id="nothing done for imports within function",
         ),
@@ -366,87 +391,66 @@ import foo
 """,
             """\
 import defer_imports
-from defer_imports._core import DeferredImportKey as @DeferredImportKey, DeferredImportProxy as @DeferredImportProxy
+from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
 with defer_imports.until_use:
     @local_ns = locals()
     @temp_proxy = None
     import hello
-    if type(hello) is @DeferredImportProxy:
+    if type(hello) is @_DeferredImportProxy:
         @temp_proxy = @local_ns.pop('hello')
-        @local_ns[@DeferredImportKey('hello', @temp_proxy)] = @temp_proxy
+        @local_ns[@_DeferredImportKey('hello', @temp_proxy)] = @temp_proxy
     del @temp_proxy, @local_ns
 from world import *
 with defer_imports.until_use:
     @local_ns = locals()
     @temp_proxy = None
     import foo
-    if type(foo) is @DeferredImportProxy:
+    if type(foo) is @_DeferredImportProxy:
         @temp_proxy = @local_ns.pop('foo')
-        @local_ns[@DeferredImportKey('foo', @temp_proxy)] = @temp_proxy
+        @local_ns[@_DeferredImportKey('foo', @temp_proxy)] = @temp_proxy
     del @temp_proxy, @local_ns
-del @DeferredImportKey, @DeferredImportProxy
+del @_DeferredImportKey, @_DeferredImportProxy
 """,
             id="avoids doing anything with wildcard imports",
         ),
     ],
 )
-@pytest.mark.usefixtures("global_instrumentation_on")
-def test_global_instrumentation(before: str, after: str):
+def test_module_instrumentation(before: str, after: str):
+    """Test what code is generated by the instrumentation side of defer_imports if applied at a module level."""
+
     import ast
-    import io
-    import tokenize
 
     filename = "<unknown>"
-    before_bytes = before.encode()
-    encoding, _ = tokenize.detect_encoding(io.BytesIO(before_bytes).readline)
-    tree = ast.parse(before_bytes, filename, "exec")
-    transformed_tree = ast.fix_missing_locations(DeferredInstrumenter(before_bytes, filename, encoding).visit(tree))
+    orig_tree = ast.parse(before, filename, "exec")
+    transformer = _DeferredInstrumenter(before, filename, module_level=True)
+    new_tree = ast.fix_missing_locations(transformer.visit(orig_tree))
 
-    assert f"{ast.unparse(transformed_tree)}\n" == after
+    assert f"{ast.unparse(new_tree)}\n" == after
 
 
-def test_path_hook_installation():
-    """Test the API for putting/removing the defer_imports path hook from sys.path_hooks."""
+# endregion
 
-    # It shouldn't be on there by default.
-    assert DEFERRED_PATH_HOOK not in sys.path_hooks
-    before_length = len(sys.path_hooks)
 
-    # It should be present after calling install.
-    install_import_hook()
-    assert DEFERRED_PATH_HOOK in sys.path_hooks
-    assert len(sys.path_hooks) == before_length + 1
-
-    # Calling install shouldn't do anything if it's already on sys.path_hooks.
-    hook_ctx = install_import_hook()
-    assert DEFERRED_PATH_HOOK in sys.path_hooks
-    assert len(sys.path_hooks) == before_length + 1
-
-    # Calling uninstall should remove it.
-    hook_ctx.uninstall()
-    assert DEFERRED_PATH_HOOK not in sys.path_hooks
-    assert len(sys.path_hooks) == before_length
-
-    # Calling uninstall if it's not present should do nothing to sys.path_hooks.
-    hook_ctx.uninstall()
-    assert DEFERRED_PATH_HOOK not in sys.path_hooks
-    assert len(sys.path_hooks) == before_length
+# ============================================================================
+# region -------- Integration tests --------
+# ============================================================================
 
 
 def test_empty(tmp_path: Path):
     source = ""
 
-    spec, module, _ = create_sample_module(tmp_path, source, DeferredFileLoader)
+    spec, module, _ = create_sample_module(tmp_path, source)
     assert spec.loader
     spec.loader.exec_module(module)
 
 
-def test_not_deferred(tmp_path: Path):
+def test_without_until_use_local(tmp_path: Path):
     source = "import contextlib"
 
-    spec, module, _ = create_sample_module(tmp_path, source, DeferredFileLoader)
+    spec, module, _ = create_sample_module(tmp_path, source)
     assert spec.loader
     spec.loader.exec_module(module)
+
     assert module.contextlib is sys.modules["contextlib"]
 
 
@@ -458,9 +462,10 @@ with defer_imports.until_use:
     import inspect
 """
 
-    spec, module, _ = create_sample_module(tmp_path, source, DeferredFileLoader)
+    spec, module, _ = create_sample_module(tmp_path, source)
     assert spec.loader
     spec.loader.exec_module(module)
+    print(repr(vars(module)))
 
     expected_inspect_repr = "<key for 'inspect' import>: <proxy for 'import inspect'>"
     assert expected_inspect_repr in repr(vars(module))
@@ -482,7 +487,7 @@ with defer_imports.until_use:
     import inspect as gin
 """
 
-    spec, module, _ = create_sample_module(tmp_path, source, DeferredFileLoader)
+    spec, module, _ = create_sample_module(tmp_path, source)
     assert spec.loader
     spec.loader.exec_module(module)
 
@@ -515,7 +520,7 @@ with defer_imports.until_use:
     import importlib.abc
 """
 
-    spec, module, _ = create_sample_module(tmp_path, source, DeferredFileLoader)
+    spec, module, _ = create_sample_module(tmp_path, source)
     assert spec.loader
     spec.loader.exec_module(module)
 
@@ -537,7 +542,7 @@ with defer_imports.until_use:
     import collections.abc as xyz
 """
 
-    spec, module, _ = create_sample_module(tmp_path, source, DeferredFileLoader)
+    spec, module, _ = create_sample_module(tmp_path, source)
     assert spec.loader
     spec.loader.exec_module(module)
 
@@ -586,7 +591,7 @@ with defer_imports.until_use:
     from inspect import isfunction, signature
 """
 
-    spec, module, _ = create_sample_module(tmp_path, source, DeferredFileLoader)
+    spec, module, _ = create_sample_module(tmp_path, source)
     assert spec.loader
     spec.loader.exec_module(module)
 
@@ -617,7 +622,7 @@ with defer_imports.until_use:
     from inspect import Signature as MySignature
 """
 
-    spec, module, _ = create_sample_module(tmp_path, source, DeferredFileLoader)
+    spec, module, _ = create_sample_module(tmp_path, source)
     assert spec.loader
     spec.loader.exec_module(module)
 
@@ -648,7 +653,7 @@ with defer_imports.until_use:
     import asyncio
 """
 
-    spec, module, path = create_sample_module(tmp_path, source, DeferredFileLoader)
+    spec, module, path = create_sample_module(tmp_path, source)
     assert spec.loader
     spec.loader.exec_module(module)
 
@@ -656,8 +661,8 @@ with defer_imports.until_use:
     assert expected_cache.is_file()
 
     with expected_cache.open("rb") as fp:
-        header = fp.read(len(BYTECODE_HEADER))
-    assert header == BYTECODE_HEADER
+        header = fp.read(len(_BYTECODE_HEADER))
+    assert header == _BYTECODE_HEADER
 
 
 def test_error_if_non_import(tmp_path: Path):
@@ -668,7 +673,7 @@ with defer_imports.until_use:
     print("Hello world")
 """
 
-    spec, module, module_path = create_sample_module(tmp_path, source, DeferredFileLoader)
+    spec, module, module_path = create_sample_module(tmp_path, source)
     assert spec.loader
 
     with pytest.raises(SyntaxError) as exc_info:
@@ -690,7 +695,7 @@ class Example:
 """
 
     # Boilerplate to dynamically create and load this module.
-    spec, module, module_path = create_sample_module(tmp_path, source, DeferredFileLoader)
+    spec, module, module_path = create_sample_module(tmp_path, source)
     assert spec.loader
 
     with pytest.raises(SyntaxError) as exc_info:
@@ -713,7 +718,7 @@ def test():
     return inspect.signature(test)
 """
 
-    spec, module, module_path = create_sample_module(tmp_path, source, DeferredFileLoader)
+    spec, module, module_path = create_sample_module(tmp_path, source)
     assert spec.loader
 
     with pytest.raises(SyntaxError) as exc_info:
@@ -733,7 +738,7 @@ with defer_imports.until_use:
     from typing import *
 """
 
-    spec, module, module_path = create_sample_module(tmp_path, source, DeferredFileLoader)
+    spec, module, module_path = create_sample_module(tmp_path, source)
     assert spec.loader
 
     with pytest.raises(SyntaxError) as exc_info:
@@ -754,14 +759,13 @@ with defer_imports.until_use:
     import importlib.abc
     import importlib.util
 """
-    spec, module, _ = create_sample_module(tmp_path, source, DeferredFileLoader)
+    spec, module, _ = create_sample_module(tmp_path, source)
     assert spec.loader
     spec.loader.exec_module(module)
 
     # Prevent the caching of these from interfering with the test.
-    sys.modules.pop("importlib", None)
-    sys.modules.pop("importlib.abc", None)
-    sys.modules.pop("importlib.util", None)
+    for mod in ("importlib", "importlib.abc", "importlib.util"):
+        sys.modules.pop(mod, None)
 
     expected_importlib_repr = "<key for 'importlib' import>: <proxy for 'import importlib'>"
     expected_importlib_abc_repr = "<key for 'abc' import>: <proxy for 'import importlib.abc as ...'>"
@@ -804,7 +808,7 @@ with defer_imports.until_use:
     import asyncio.events
 """
 
-    spec, module, _ = create_sample_module(tmp_path, source, DeferredFileLoader)
+    spec, module, _ = create_sample_module(tmp_path, source)
     assert spec.loader
     spec.loader.exec_module(module)
 
@@ -819,7 +823,7 @@ with defer_imports.until_use:
     from asyncio import base_futures
 """
 
-    spec, module, _ = create_sample_module(tmp_path, source, DeferredFileLoader)
+    spec, module, _ = create_sample_module(tmp_path, source)
     assert spec.loader
     spec.loader.exec_module(module)
 
@@ -898,7 +902,7 @@ class B:
     package_name = "sample_pkg"
     package_init_path = str(sample_pkg_path / "__init__.py")
 
-    loader = DeferredFileLoader(package_name, package_init_path)
+    loader = _DeferredFileLoader(package_name, package_init_path)
     spec = importlib.util.spec_from_file_location(
         package_name,
         package_init_path,
@@ -980,7 +984,7 @@ def Y2():
     package_name = "circular_pkg"
     package_init_path = str(circular_pkg_path / "__init__.py")
 
-    loader = DeferredFileLoader(package_name, package_init_path)
+    loader = _DeferredFileLoader(package_name, package_init_path)
     spec = importlib.util.spec_from_file_location(
         package_name,
         package_init_path,
@@ -1001,77 +1005,9 @@ def Y2():
 def test_import_stdlib():
     """Test that we can import most of the stdlib."""
 
-    import tests.stdlib_imports
+    import tests.sample_stdlib_imports
 
-    assert tests.stdlib_imports
-
-
-@pytest.mark.flaky(reruns=3)
-def test_thread_safety(tmp_path: Path):
-    """Test that trying to access a lazily loaded import from multiple threads doesn't cause race conditions.
-
-    Based on a test for importlib.util.LazyLoader in the CPython test suite.
-
-    Notes
-    -----
-    This test is flaky, seemingly more so in CI than locally. Some information about the failure:
-
-    -   It's the same every time: paraphrased, the "inspect" proxy doesn't have "signature" as an attribute. The proxy
-        should be resolved before this happens, and is even guarded with a RLock and a boolean to prevent this.
-    -   It seemingly only happens on pypy.
-    -   The reproduction rate locally is ~1/100 when run across pypy3.9 and pypy3.10, 50 times each.
-        -   Add 'pytest.mark.parametrize("q", range(50))' to the test for the repetitions.
-        -   Run "hatch test -py pypy3.9,pypy3.10 -- tests/test_deferred.py::test_thread_safety".
-    """
-
-    source = """\
-import defer_imports
-
-with defer_imports.until_use:
-    import inspect
-"""
-
-    spec, module, _ = create_sample_module(tmp_path, source, DeferredFileLoader)
-    assert spec.loader
-    spec.loader.exec_module(module)
-
-    import threading
-    import time
-
-    _missing = type("Missing", (), {})
-
-    class CapturingThread(threading.Thread):
-        """Thread subclass that captures a returned result or raised exception from the called target."""
-
-        def __init__(self, *args: Any, **kwargs: Any) -> None:
-            super().__init__(*args, **kwargs)
-            self.result = _missing
-            self.exc = _missing
-
-        def run(self) -> None:  # pragma: no cover
-            # This has minor modifications from threading.Thread.run() to catch the returned value or raised exception.
-            try:
-                self.result = self._target(*self._args, **self._kwargs)  # pyright: ignore
-            except Exception as exc:  # noqa: BLE001
-                self.exc = exc
-            finally:
-                del self._target, self._args, self._kwargs  # pyright: ignore
-
-    def access_module_attr() -> object:
-        time.sleep(0.2)
-        return module.inspect.signature
-
-    threads: list[CapturingThread] = []
-
-    for i in range(20):
-        thread = CapturingThread(name=f"Thread {i}", target=access_module_attr)
-        threads.append(thread)
-        thread.start()
-
-    for thread in threads:
-        thread.join()
-        assert thread.exc is _missing
-        assert callable(thread.result)  # pyright: ignore
+    assert tests.sample_stdlib_imports
 
 
 @pytest.mark.skip(reason="Leaking patch problem is currently out of scope.")
@@ -1115,7 +1051,7 @@ mock_B = patcher.start()
     package_name = "leaking_patch_pkg"
     package_init_path = str(leaking_patch_pkg_path / "__init__.py")
 
-    loader = DeferredFileLoader(package_name, package_init_path)
+    loader = _DeferredFileLoader(package_name, package_init_path)
     spec = importlib.util.spec_from_file_location(
         package_name,
         package_init_path,
@@ -1161,7 +1097,7 @@ type ManyExpensive = tuple[Expensive, ...]
     package_name = "type_stmt_pkg"
     package_init_path = str(type_stmt_pkg_path / "__init__.py")
 
-    loader = DeferredFileLoader(package_name, package_init_path)
+    loader = _DeferredFileLoader(package_name, package_init_path)
     spec = importlib.util.spec_from_file_location(
         package_name,
         package_init_path,
@@ -1184,3 +1120,84 @@ type ManyExpensive = tuple[Expensive, ...]
 
         assert str(module.ManyExpensive.__value__) == "tuple[type_stmt_pkg.exp.Expensive, ...]"
         assert expected_proxy_repr not in repr(vars(module))
+
+
+# endregion
+
+
+# ============================================================================
+# region -------- Regression tests --------
+# ============================================================================
+
+
+class _Missing:
+    """Private sentinel."""
+
+
+@pytest.mark.flaky(reruns=3)
+def test_thread_safety(tmp_path: Path):
+    """Test that trying to access a lazily loaded import from multiple threads doesn't cause race conditions.
+
+    Based on a test for importlib.util.LazyLoader in the CPython test suite.
+
+    Notes
+    -----
+    This test is flaky, seemingly more so in CI than locally. Some information about the failure:
+
+    -   It's the same every time: paraphrased, the "inspect" proxy doesn't have "signature" as an attribute. The proxy
+        should be resolved before this happens, and is even guarded with a RLock and a boolean to prevent this.
+    -   It seemingly only happens on pypy.
+    -   The reproduction rate locally is ~1/100 when run across pypy3.9 and pypy3.10, 50 times each.
+        -   Add 'pytest.mark.parametrize("q", range(50))' to the test for the repetitions.
+        -   Run "hatch test -py pypy3.9,pypy3.10 -- tests/test_deferred.py::test_thread_safety".
+    """
+
+    source = """\
+import defer_imports
+
+with defer_imports.until_use:
+    import inspect
+"""
+
+    spec, module, _ = create_sample_module(tmp_path, source)
+    assert spec.loader
+    spec.loader.exec_module(module)
+
+    import threading
+    import time
+
+    class CapturingThread(threading.Thread):
+        """Thread subclass that captures a returned result or raised exception from the called target."""
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            self.result = _Missing
+            self.exc = _Missing
+
+        def run(self) -> None:  # pragma: no cover
+            # This has minor modifications from threading.Thread.run() to catch the returned value or raised exception.
+            try:
+                self.result = self._target(*self._args, **self._kwargs)  # pyright: ignore
+            except Exception as exc:  # noqa: BLE001
+                self.exc = exc
+            finally:
+                del self._target, self._args, self._kwargs  # pyright: ignore
+
+    def access_module_attr() -> object:
+        time.sleep(0.2)
+        return module.inspect.signature
+
+    threads: list[CapturingThread] = []
+
+    for i in range(20):
+        thread = CapturingThread(name=f"Thread {i}", target=access_module_attr)
+        threads.append(thread)
+        thread.start()
+
+    for thread in threads:
+        thread.join()
+        assert thread.exc is _Missing
+        assert callable(thread.result)  # pyright: ignore
+
+
+# endregion

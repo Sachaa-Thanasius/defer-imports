@@ -57,7 +57,7 @@ def bench_defer_imports_local() -> float:
 
 
 def bench_defer_imports_global() -> float:
-    with defer_imports.install_import_hook(is_global=True), CatchTime() as ct:
+    with CatchTime() as ct, defer_imports.install_import_hook(apply_all=True):
         import benchmark.sample_defer_global
     return ct.elapsed
 

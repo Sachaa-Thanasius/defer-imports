@@ -9,33 +9,35 @@
 from __future__ import annotations
 
 import sys
+from importlib.machinery import ModuleSpec
 
 
 __all__ = (
-    # collections.abc
+    # -- collections.abc
     "Callable",
     "Generator",
     "Iterable",
     "MutableMapping",
     "Sequence",
-    # typing
+    # -- typing
     "Any",
     "Final",
     "Optional",
     "Union",
-    # types
+    # -- types
     "CodeType",
     "ModuleType",
-    # os
-    "PathLike",
-    # imported with fallbacks
+    # -- importlib.abc
+    "Loader",
+    # -- imported with fallbacks
     "ReadableBuffer",
     "Self",
     "TypeAlias",
     "TypeGuard",
-    # # import and then defined
+    # -- imported and then defined
     "T",
-    # actually defined
+    "PathEntryFinderProtocol",
+    # -- actually defined
     "final",
 )
 
@@ -81,10 +83,10 @@ def __getattr__(name: str) -> object:  # noqa: PLR0911, PLR0912
 
         return globals()[name]
 
-    if name == "PathLike":
-        global PathLike
+    if name == "Loader":
+        global Loader
 
-        from os import PathLike
+        from importlib.abc import Loader
 
         return globals()[name]
 
@@ -137,13 +139,24 @@ def __getattr__(name: str) -> object:  # noqa: PLR0911, PLR0912
         T = TypeVar("T")
         return globals()[name]
 
+    if name == "PathEntryFinderProtocol":
+        from typing import Protocol
+
+        global PathEntryFinderProtocol
+
+        # Copied from _typeshed.importlib.
+        class PathEntryFinderProtocol(Protocol):
+            def find_spec(self, fullname: str, target: ModuleType | None = ..., /) -> ModuleSpec | None: ...
+
+        return globals()[name]
+
     msg = f"module {__name__!r} has no attribute {name!r}"
     raise AttributeError(msg)
 
 
-_original_global_names = tuple(globals())
+_initial_global_names = tuple(globals())
 
 
 def __dir__() -> list[str]:
     # This will hopefully make potential debugging easier.
-    return [*_original_global_names, *__all__]
+    return [*_initial_global_names, *__all__]

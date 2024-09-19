@@ -31,8 +31,6 @@ This can be installed via pip::
 
     python -m pip install defer-imports
 
-It can also easily be vendored, as it has zero dependencies and has around 1,000 lines of code.
-
 
 Usage
 =====

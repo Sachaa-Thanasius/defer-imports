@@ -3,38 +3,44 @@
 # SPDX-License-Identifier: MIT
 
 __all__ = (
-    # collections.abc
+    # -- collections.abc
     "Callable",
     "Generator",
     "Iterable",
     "MutableMapping",
     "Sequence",
-    # typing
+    # -- typing
     "Any",
     "Final",
     "Optional",
     "Union",
-    # types
+    # -- types
     "CodeType",
     "ModuleType",
-    # os
-    "PathLike",
-    # import with fallbacks
+    # -- importlib.abc
+    "Loader",
+    # -- imported with fallbacks
     "ReadableBuffer",
     "Self",
     "TypeAlias",
     "TypeGuard",
-    # import and then defined
+    # -- imported and then defined
     "T",
-    # actually defined
+    "PathEntryFinderProtocol",
+    # -- actually defined
     "final",
 )
 
 from collections.abc import Callable, Generator, Iterable, MutableMapping, Sequence
-from os import PathLike
+from importlib.abc import Loader
+from importlib.machinery import ModuleSpec
 from types import CodeType, ModuleType
-from typing import Any, Final, Optional, TypeVar, Union, final
+from typing import Any, Final, Optional, Protocol, TypeVar, Union, final
 
 from typing_extensions import Buffer as ReadableBuffer, Self, TypeAlias, TypeGuard
 
 T = TypeVar("T")  # noqa: PYI001
+
+# Copied from _typeshed.importlib.
+class PathEntryFinderProtocol(Protocol):
+    def find_spec(self, fullname: str, target: ModuleType | None = ..., /) -> ModuleSpec | None: ...
