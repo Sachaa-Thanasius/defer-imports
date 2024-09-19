@@ -24,19 +24,20 @@ from threading import RLock
 from . import _typing as _tp
 
 
+__version__ = "0.0.3dev0"
+
 __all__ = (
-    "__version__",
+    # -- Compile-time hook
     "install_import_hook",
     "ImportHookContext",
+    # -- Runtime hook
     "until_use",
     "DeferredContext",
+    # -- Console helpers
     "instrument_ipython",
     "DeferredInteractiveConsole",
     "interact",
 )
-
-
-__version__ = "0.0.2"
 
 
 # ============================================================================
@@ -667,9 +668,21 @@ class _DeferredFileFinder(FileFinder):
         self.defer_recursive = recursive
 
     def find_spec(self, fullname: str, target: _tp.Optional[_tp.ModuleType] = None) -> _tp.Optional[ModuleSpec]:
-        """Try to find a spec for "fullname" on sys.path or "path", with some modifications based on deferral state."""
+        """Try to find a spec for "fullname" on sys.path or "path", with some modifications based on deferral state.
+
+        Notes
+        -----
+        This utilizes ModuleSpec.loader_state to pass the deferral configuration to the loader. loader_state is
+        under-documented [1]_, but it is meant to be used for this kind of thing [2]_.
+
+        References
+        ----------
+        .. [1] https://github.com/python/cpython/issues/89527
+        .. [2] https://docs.python.org/3/library/importlib.html#importlib.machinery.ModuleSpec.loader_state
+        """
 
         spec = super().find_spec(fullname, target)
+
         if spec is not None and isinstance(spec.loader, _DeferredFileLoader):
             defer_module_level = self.defer_globally or bool(
                 self.deferred_modules
@@ -678,11 +691,8 @@ class _DeferredFileFinder(FileFinder):
                     or (self.defer_recursive and any(mod.startswith(f"{fullname}.") for mod in self.deferred_modules))
                 )
             )
-
-            # It's under-documented, but spec.loader_state is meant for this kind of thing.
-            # Ref: https://docs.python.org/3/library/importlib.html#importlib.machinery.ModuleSpec.loader_state
-            # Ref: https://github.com/python/cpython/issues/89527
             spec.loader_state = {"defer_module_level": defer_module_level}
+
         return spec
 
     @classmethod
@@ -821,7 +831,7 @@ def install_import_hook(
 
 
 _original_import = contextvars.ContextVar("original_import", default=builtins.__import__)
-"""What builtins.__import__ currently points to."""
+"""What builtins.__import__ last pointed to."""
 
 _is_deferred = contextvars.ContextVar("is_deferred", default=False)
 """Whether imports should be deferred."""
@@ -1090,16 +1100,16 @@ def instrument_ipython() -> None:
     ipython_shell.ast_transformers.append(_DeferredIPythonInstrumenter())
 
 
-_higher_level_console_names = {"code", "DeferredInteractiveConsole", "interact"}
-_lower_level_console_names = _higher_level_console_names.copy() | {"codeop", "_DeferredCompile"}
+_delayed_console_names = {"code", "codeop", "_DeferredCompile", "DeferredInteractiveConsole", "interact"}
 
 
 def __getattr__(name: str) -> _tp.Any:
     # Shim to delay executing expensive console-related functionality until requested.
 
-    if name in _lower_level_console_names:
-        global codeop, _DeferredCompile  # noqa: PLW0603
+    if name in _delayed_console_names:
+        global code, codeop, _DeferredCompile, DeferredInteractiveConsole, interact  # noqa: PLW0603
 
+        import code
         import codeop
 
         class _DeferredCompile(codeop.Compile):
@@ -1122,11 +1132,6 @@ def __getattr__(name: str) -> _tp.Any:
                     if codeob.co_flags & feature.compiler_flag:
                         self.flags |= feature.compiler_flag
                 return codeob
-
-    if name in _higher_level_console_names:
-        global code, DeferredInteractiveConsole, interact  # noqa: PLW0603
-
-        import code
 
         class DeferredInteractiveConsole(code.InteractiveConsole):
             """An emulator of the interactive Python interpreter, but with defer_import's compile-time AST transformer baked in.
@@ -1152,13 +1157,18 @@ def __getattr__(name: str) -> _tp.Any:
 
             DeferredInteractiveConsole().interact()
 
+        return globals()[name]
+
+    msg = f"module {__name__!r} has no attribute {name!r}"
+    raise AttributeError(msg)
+
 
 _initial_global_names = tuple(globals())
 
 
 def __dir__() -> list[str]:
     # This will hopefully make potential debugging easier.
-    return [*_initial_global_names, *__all__]
+    return list(_delayed_console_names.union(_initial_global_names, __all__))
 
 
 # endregion
