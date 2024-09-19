@@ -258,7 +258,7 @@ class DeferredInstrumenter(ast.NodeTransformer):
         return new_import_nodes
 
     @staticmethod
-    def check_With_for_defer_usage(node: ast.With) -> bool:
+    def is_until_use(node: ast.With) -> bool:
         """Only accept "with defer_imports.until_use"."""
 
         return len(node.items) == 1 and (
@@ -280,7 +280,7 @@ class DeferredInstrumenter(ast.NodeTransformer):
                 3. "defer_imports.until_use" block contains a wildcard import.
         """
 
-        if not self.check_With_for_defer_usage(node):
+        if not self.is_until_use(node):
             return self._visit_eager_import_block(node)
 
         if self.scope_depth > 0:
@@ -316,8 +316,7 @@ class DeferredInstrumenter(ast.NodeTransformer):
 
         # Add necessary defer_imports imports.
         if self.module_level:
-            top_level_import = ast.Import(names=[ast.alias(name="defer_imports")])
-            node.body.insert(position, top_level_import)
+            node.body.insert(position, ast.Import(names=[ast.alias(name="defer_imports")]))
             position += 1
 
         defer_class_names = ("DeferredImportKey", "DeferredImportProxy")
@@ -451,9 +450,7 @@ def check_ast_for_defer_usage(data: ast.AST) -> tuple[str, bool]:
     """Check if the given AST uses "with defer_imports.until_use". Also assume "utf-8" is the the encoding."""
 
     encoding = "utf-8"
-    uses_defer = any(
-        isinstance(node, ast.With) and DeferredInstrumenter.check_With_for_defer_usage(node) for node in ast.walk(data)
-    )
+    uses_defer = any(isinstance(node, ast.With) and DeferredInstrumenter.is_until_use(node) for node in ast.walk(data))
     return encoding, uses_defer
 
 
@@ -573,8 +570,8 @@ class DeferredFileFinder(FileFinder):
 
         spec = super().find_spec(fullname, target)
         if spec is not None and isinstance(spec.loader, DeferredFileLoader):
-            defer_module_level = self.defer_globally or (
-                bool(self.deferred_modules)
+            defer_module_level = self.defer_globally or bool(
+                self.deferred_modules
                 and (
                     fullname in self.deferred_modules
                     or (self.defer_recursive and any(mod.startswith(f"{fullname}.") for mod in self.deferred_modules))
@@ -683,10 +680,10 @@ def install_import_hook(
     ----------
     is_global: bool, default=False
         Whether to apply module-level import deferral, i.e. instrumentation of all imports, to all modules henceforth.
-        Mutually exclusive with and has higher priority than module_names.
+        Mutually exclusive with and has higher priority than module_names. More suitable for use in applications.
     module_names: Sequence[str], optional
         A set of modules to apply module-level import deferral to. Mutually exclusive with and has lower priority than
-        is_global.
+        is_global. More suitable for use in libraries.
     recursive: bool, default=False
         Whether module-level import deferral should apply recursively the submodules of the given module_names. If no
         module names are given, this has no effect.
