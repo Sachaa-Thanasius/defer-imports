@@ -24,8 +24,9 @@ __all__ = (
     "Self",
     "TypeAlias",
     "TypeGuard",
-    # -- imported and then defined
+    # -- needs import for definition
     "T",
+    "AcceptsInput",
     "PathEntryFinderProtocol",
     # -- actually defined
     "final",
@@ -40,6 +41,9 @@ from typing import Any, Final, Optional, Protocol, TypeVar, Union, final
 from typing_extensions import Buffer as ReadableBuffer, Self, TypeAlias, TypeGuard
 
 T = TypeVar("T")  # noqa: PYI001
+
+class AcceptsInput(Protocol):
+    def __call__(self, prompt: str = "") -> str: ...
 
 # Copied from _typeshed.importlib.
 class PathEntryFinderProtocol(Protocol):

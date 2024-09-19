@@ -187,9 +187,11 @@ keep-runtime-typing = true
 
 # ---- Test code
 "tests/**/*.py" = [
-    "T201",   # Printing is fine.
-    "T203",   # Pretty printing is fine.
-    "ANN201", # Don't need return annotations for tests.
+    "T201", # Printing is fine.
+    "T203", # Pretty printing is fine.
+    # Don't need return annotations for tests.
+    "ANN201",
+    "ANN202",
     "S102",   # exec is used to test for NameError within a module's namespace.
 ]
 "tests/sample_stdlib_imports.py" = [

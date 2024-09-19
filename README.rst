@@ -15,7 +15,10 @@ defer-imports
     :alt: PyPI supported Python versions
 
 
-A library that implements `PEP 690 <https://peps.python.org/pep-0690/>`_–esque lazy imports in pure Python, but at a user's behest within a context manager.
+A library that implements `PEP 690 <https://peps.python.org/pep-0690/>`_–esque lazy imports in pure Python.
+
+**This is still being developed.**
+
 
 .. contents::
     :local:
@@ -35,24 +38,58 @@ This can be installed via pip::
 Usage
 =====
 
+See the docstrings and comments in the codebase for more details.
+
 Setup
 -----
 
-``defer-imports`` hooks into the Python import system with a path hook. That path hook needs to be registered before code using the import-delaying context manager, ``defer_imports.until_use``, is parsed. To do that, include the following somewhere such that it will be executed before your code:
+To do its work, ``defer-imports`` must hook into the Python import system in multiple ways. Its path hook, for instance, should be registered before other user code is parsed. To do that, include the following somewhere such that it will be executed before your code:
 
 .. code-block:: python
 
     import defer_imports
 
-    defer_imports.install_defer_import_hook()
+    defer_imports.install_import_hook()
 
     import your_code
+
+Making this call without arguments allows user code with imports contained within the ``defer_imports.until_use`` context manager to be deferred until referenced. However, it provides several configuration arguments for toggling global instrumentation (affecting all import statements) and adjusting the granularity of that global instrumentation.
+
+.. code-block:: python
+
+    import defer_imports
+
+    # For all usage, import statements *within the module the hook is installed from* 
+    # are not affected. In this case, that would be this module.
+
+    # Ex 1. Henceforth, instrument all import statements in other pure-Python modules
+    # so that they are deferred. Off by default. If on, it has priority over the other
+    # kwargs.  
+    #
+    # Better suited for applications.
+    defer_imports.install_import_hook(apply_all=True)
+
+    # Ex 2. Henceforth, instrument all import statements *only* in modules whose names
+    # are in the given sequence of strings.
+    #
+    # Better suited for applications.
+    defer_imports.install_import_hook(module_names=(__name__,))
+
+    # Ex 3. Henceforth, instrument all import statements *only* in modules whose names
+    # are in the given sequence *or* whose names indicate they are submodules of any
+    # of the given sequence.
+    #
+    # In this case, the discord, discord.types, and discord.abc.other modules would all
+    # be affected.
+    #
+    # Better suited for applications.
+    defer_imports.install_import_hook(module_names=("discord",), recursive=True)
 
 
 Example
 -------
 
-Assuming the path hook has been registered, you can use the ``defer_imports.until_use`` context manager to decide which imports should be deferred. For instance:
+Assuming the path hook was registered normally (i.e. without providing any configuration), you can use the ``defer_imports.until_use`` context manager to decide which imports should be deferred. For instance:
 
 .. code-block:: python
 
@@ -63,6 +100,10 @@ Assuming the path hook has been registered, you can use the ``defer_imports.unti
         from typing import Final
 
     # inspect and Final won't be imported until referenced.
+
+**Warning: If the context manager is not used as ``defer_imports.until_use``, it will not be instrumented properly. ``until_use`` alone, aliases, and the like are currently not supported.**
+
+If the path hook *was* registered with configuration, then within the affected modules, all global import statements will be instrumented with two exceptions: if they are within ``try-except-else-finally`` blocks, and if they are within non- ``defer_imports.until_use`` ``with`` blocks. Such imports are still performed eagerly. These "escape hatches" mostly match those described in PEP 690. 
 
 
 Use Cases
@@ -78,7 +119,7 @@ Use Cases
 Extra: Console
 --------------
 
-``defer-imports`` works while within a regular Python REPL, as long as that work is being done in a package being imported and not with direct usage of the ``defer_imports.until_use`` context manager. To directly use the context manager in a REPL, use the interactive console included within ``defer_imports.console``.
+``defer-imports`` works while within a regular Python REPL, as long as that work is being done in a package being imported and not with direct usage of the ``defer_imports.until_use`` context manager. To directly use the context manager in a REPL, use the included interactive console.
 
 You can start it from the command line::
 
@@ -102,8 +143,8 @@ You can also start it while within a standard Python REPL:
 
 .. code-block:: pycon
 
-    >>> from defer_imports import console
-    >>> console.interact()
+    >>> from defer_imports import interact
+    >>> interact()
     Python 3.11.9 (tags/v3.11.9:de54cf5, Apr  2 2024, 10:12:12) [MSC v.1938 64 bit (AMD64)] on win32
     Type "help", "copyright", "credits" or "license" for more information.
     (DeferredInteractiveConsole)
@@ -123,17 +164,16 @@ Additionally, if you're using IPython in a terminal or Jupyter environment, ther
 
 .. code-block:: ipython
 
-    In [1]: from defer_imports import console
-    In [2]: console.instrument_ipython()
-    In [3]: import defer_imports
-    In [4]: with defer_imports.until_use:
+    In [1]: import defer_imports
+    In [2]: defer_imports.instrument_ipython()
+    In [3]: with defer_imports.until_use:
     ...:     import numpy
     ...:
-    In [5]: import sys
-    In [6]: print("numpy" in sys.modules)
+    In [4]: import sys
+    In [5]: print("numpy" in sys.modules)
     False
-    In [7]: numpy
-    In [8]: print("numpy" in sys.modules)
+    In [6]: numpy
+    In [7]: print("numpy" in sys.modules)
     True
 
 
@@ -142,31 +182,26 @@ Features
 
 -   Supports multiple Python runtimes/implementations.
 -   Supports all syntactically valid Python import statements.
+-   Has an API for automatically instrumenting all valid import statements, not just those within a specific context manager.
 -   Doesn't break type-checkers like pyright and mypy.
 
 
 Caveats
 =======
 
--   Doesn't support deferred importing within class or function scope.
--   Doesn't support wildcard imports.
--   Doesn't have an API for giving users a choice to automatically defer all imports on a module, library, or application scale.
--   Has a relatively hefty one-time setup cost.
+-   Intentionally doesn't support deferred importing within class or function scope.
+-   Can't support wildcard imports.
+-   Can have a (relatively) hefty one-time cost from invalidating caches in Python's import system on setup.
 
 
 Why?
 ====
 
-Lazy imports, in theory, alleviate several pain points that Python has currently. I'm not alone in thinking that: `PEP 690 <https://peps.python.org/pep-0690/>`_ was put forth to integrate lazy imports into CPython for that reason and explains the benefits much better than I can. While that proposal was rejected, there are other options in the form of third-party libraries that implement lazy importing, albeit with some constraints. Most do not have an API that is as general and ergonomic as what PEP 690 laid out, but they didn't aim to fill those shoes in the first place. Some examples:
+Lazy imports alleviate several of Python's current pain points. Because of that, `PEP 690 <https://peps.python.org/pep-0690/>`_ was put forth to integrate lazy imports into CPython; see that proposal and the surrounding discussions for more information about the history, implementations, benefits, and costs of lazy imports.
 
--   `demandimport <https://github.com/bwesterb/py-demandimport>`_
--   `apipkg <https://github.com/pytest-dev/apipkg>`_
--   `modutil <https://github.com/brettcannon/modutil>`_
--   `metamodule <https://github.com/njsmith/metamodule/>`_
--   `SPEC 1 <https://scientific-python.org/specs/spec-0001/>`_ and its implementation, `lazy-loader <https://github.com/scientific-python/lazy-loader>`_
--   And countless more
+Though that proposal was rejected, there are well-established third-party libraries that provide lazy import mechanisms, albeit with more constraints. Most do not have APIs as integrated or ergonomic as PEP 690's, but that makes sense; most predate the PEP and were not created with that goal in mind.
 
-Then along came `slothy <https://github.com/bswck/slothy>`_, a library that seems to do it better, having been constructed with feedback from multiple CPython core developers as well as one of the minds behind PEP 690. It was the main inspiration for this project. However, the library (currently) limits itself to specific Python implementations by relying on the existence of frames that represent the call stack. For many use cases, that's perfectly fine; PEP 690's implementation was for CPython specifically, and to my knowledge, some of the most popular Python runtimes outside of CPython provide call stack access in some form. Still, I thought that there might be a way to do something similar while avoiding such implementation-specific APIs. After feedback and discussion, that thought crystalized into this library.
+Libraries that do intentionally inject PEP 690's semantics into Python in some form don't fill my needs for one reason or another. For example, `slothy <https://github.com/bswck/slothy>` (currently) limits itself to specific Python implementations by relying on the existence of call stack frames. I wanted to create something similar that took advantage of Python's robust hookable import system to modify code at compile time, didn't rely on implementation-specific APIs, is more ergonomic than the status quo, and will be easier to maintain as Python (and its various implementations) continues evolving.
 
 
 How?
@@ -186,38 +221,9 @@ With this methodology, we can avoid using implementation-specific hacks like fra
 Quirks
 ======
 
-This library tries to hide its implementation details to avoid changing the developer/user experience. That may make debugging harder in certain situations. To that end, here are a few existing rough edges or leaking implementation details:
+This library tries to hide its implementation details to avoid changing the developer/user experience. However, there is one leak in its abstraction: when using dictionary iteration methods on a dictionary or namespace that contains a deferred import key/proxy pair, the members of that pair will be visible, mutable, and will not resolve automatically. PEP 690 specifically addresses this by modifying the builtin ``dict``, allowing each instance to know if it contains proxies and then resolve them automatically during iteration (see the second half of its `"Implementation" section <https://peps.python.org/pep-0690/#implementation>`_ for more details). Note that qualifing ``dict`` iteration methods include ``dict.items()``, ``dict.values()``, etc., but outside of that, the builtin ``dir()`` also qualifies since it can see the keys for objects' internal dictionaries.
 
--   When an deferred import is executed, a key for the result is still put in the local namespace, as with regular imports; however, that key is a ``str`` subclass with modified behavior so that referencing it (via name or via direct access in ``locals``) causes the import to resolve and the key to replace itself with a regular ``str``. As a result, while looking at namespaces with, for instance, ``dir()`` or ``vars()``, the names for deferred imports will look like normal strings while actually being instances of a subclass.
-
-    .. code-block:: python
-
-        import defer_imports
-
-        with defer_imports.until_use:
-            import typing
-
-        print(dir())  # Output: [..., 'typing']
-        print(type(dir()[-1]))  # Output: <class 'defer_imports._core.DeferredImportKey'>
-
-
--   As far as I know, the only way to see a deferred import value without resolving it is by printing the namespace it resides within. The library's tests currently depend on this behavior to see what happens to the imports before and after they are referenced, but I'm open to other ideas:
-
-    .. code-block:: python
-
-        print(locals())  # Output: {..., 'typing': <proxy for 'import typing'>}
-
--   **WARNING:** The library makes no guarantees if you go out of your way to save a deferred import's special key or proxy from the local namespace through atypical means, such as filtering ``dir()``, ``locals().keys()``, ``locals().values()``, etc.
-
-    .. code-block:: python
-
-        # We can technically resolve typing in the local namespace to 
-        # a normal "typing" string as the name and the actual module as the value,
-        # *while* still saving the special key. This is a terrible idea for many reasons,
-        # including that it will keep the special key and proxy alive longer than necessary and will
-        # trigger an import every time the key is compared against for equality. 
-        leak = next(name for name in dir() if nm == "typing")
-        print(leak, type(leak), sep=", ")  # Output: 'typing', <class 'defer_imports._core.DeferredImportKey'>
+As of right now, nothing can be done about this using pure Python without massively slowing down ``dict``. As a result, users should try to avoid interacting with deferred import keys/proxies if encountered while iterating over module dictionaries; the result of doing so is not guaranteed.
 
 
 Benchmarks
@@ -225,7 +231,7 @@ Benchmarks
 
 A bit rough, but there are currently two ways of measuring activation and/or import time:
 
--   ``python -m benchmark.bench_samples`` (run with ``--help`` to see more information)
+-   A local benchmark script, invokable with ``python -m benchmark.bench_samples`` (run with ``--help`` to see more information).
 
     -   To prevent bytecode caching from impacting the benchmark, run with `python -B <https://docs.python.org/3/using/cmdline.html#cmdoption-B>`_, which will set ``sys.dont_write_bytecode`` to ``True`` and cause the benchmark script to purge all existing ``__pycache__`` folders in the project directory.
     -   PyPy is excluded from the benchmark since it takes time to ramp up. 
@@ -258,17 +264,28 @@ A bit rough, but there are currently two ways of measuring activation and/or imp
         CPython         3.13     defer-imports  0.00253s (1.00x)
         ==============  =======  =============  ===================
 
--   ``python -m timeit -n 1 -r 1 -- "import defer_imports"``
+-   Built-in Python timing tools, such as ``timeit`` and ``-X importtime``.
 
+    -   Ex 1. ``python -m timeit -n 1 -r 1 -- "import defer_imports"``
+    -   Ex 2. ``python -X importtime -c "import defer_imports"``
     -   Substitute ``defer_imports`` with other modules, e.g. ``slothy``, to compare.
-    -   This has great variance, so only value the resulting time relative to another import's time in the same process if possible.
+    -   The results can vary greatly between runs, so if possible, only compare the resulting time(s) when collected from the same process.
 
 
 Acknowledgements
 ================
 
--   All the packages mentioned in "Why?" above, for providing inspiration.
--   `PEP 690 <https://peps.python.org/pep-0690/>`_ and its authors, for pushing lazy imports to the point of almost being accepted as a core part of CPython's import system.
--   Jelle Zijlstra, for so easily creating and sharing a `sample implementation <https://gist.github.com/JelleZijlstra/23c01ceb35d1bc8f335128f59a32db4c>`_ that ``slothy`` and ``defer-imports`` are based on.
--   `slothy <https://github.com/bswck/slothy>`_, for being a major reference and inspiration for this project.
--   Sinbad, for all his feedback.
+The design of this library was inspired by the following:
+
+-   `demandimport <https://github.com/bwesterb/py-demandimport>`_
+-   `apipkg <https://github.com/pytest-dev/apipkg>`_
+-   `metamodule <https://github.com/njsmith/metamodule/>`_
+-   `modutil <https://github.com/brettcannon/modutil>`_
+-   `SPEC 1 <https://scientific-python.org/specs/spec-0001/>`_ / `lazy-loader <https://github.com/scientific-python/lazy-loader>`_
+-   `PEP 690 and its authors <https://peps.python.org/pep-0690/>`_
+-   `Jelle Zijlstra's pure-Python proof of concept <https://gist.github.com/JelleZijlstra/23c01ceb35d1bc8f335128f59a32db4c>`_
+-   `slothy <https://github.com/bswck/slothy>`_
+-   `ideas <https://github.com/aroberge/ideas>_`
+-   `Sinbad <https://github.com/mikeshardmind>_`'s feedback
+
+Many aspects of this library are based on or inspired by the above. Without them, this would not exist.

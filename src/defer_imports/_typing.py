@@ -34,8 +34,9 @@ __all__ = (
     "Self",
     "TypeAlias",
     "TypeGuard",
-    # -- imported and then defined
+    # -- needs import for definition
     "T",
+    "AcceptsInput",
     "PathEntryFinderProtocol",
     # -- actually defined
     "final",
@@ -59,8 +60,6 @@ def final(f: object) -> object:
 
 
 def __getattr__(name: str) -> object:  # noqa: PLR0911, PLR0912
-    # Let's cache the return values in the global namespace to avoid repeat calls.
-
     # ---- Pure imports
     if name in {"Callable", "Generator", "Iterable", "MutableMapping", "Sequence"}:
         global Callable, Generator, Iterable, MutableMapping, Sequence
@@ -139,6 +138,16 @@ def __getattr__(name: str) -> object:  # noqa: PLR0911, PLR0912
         T = TypeVar("T")
         return globals()[name]
 
+    if name == "AcceptsInput":
+        from typing import Protocol
+
+        global AcceptsInput
+
+        class AcceptsInput(Protocol):
+            def __call__(self, prompt: str = "") -> str: ...
+
+        return globals()[name]
+
     if name == "PathEntryFinderProtocol":
         from typing import Protocol
 
@@ -158,5 +167,4 @@ _initial_global_names = tuple(globals())
 
 
 def __dir__() -> list[str]:
-    # This will hopefully make potential debugging easier.
     return [*_initial_global_names, *__all__]

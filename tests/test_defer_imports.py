@@ -1130,10 +1130,6 @@ type ManyExpensive = tuple[Expensive, ...]
 # ============================================================================
 
 
-class _Missing:
-    """Private sentinel."""
-
-
 @pytest.mark.flaky(reruns=3)
 def test_thread_safety(tmp_path: Path):
     """Test that trying to access a lazily loaded import from multiple threads doesn't cause race conditions.
@@ -1165,6 +1161,9 @@ with defer_imports.until_use:
 
     import threading
     import time
+
+    class _Missing:
+        """Singleton sentinel."""
 
     class CapturingThread(threading.Thread):
         """Thread subclass that captures a returned result or raised exception from the called target."""

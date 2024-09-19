@@ -196,7 +196,7 @@ class _DeferredInstrumenter(ast.NodeTransformer):
     # region ---- Scope tracking ----
 
     def _visit_scope(self, node: ast.AST) -> ast.AST:
-        """Track Python scope changes. Used to determine if defer_imports.until_use usage is global."""
+        """Track Python scope changes. Used to determine if a use of defer_imports.until_use is global."""
 
         if self.module_level:
             return node
@@ -215,11 +215,14 @@ class _DeferredInstrumenter(ast.NodeTransformer):
     def _visit_eager_import_block(self, node: ast.AST) -> ast.AST:
         """Track if the visitor is within a try-except block or a with statement."""
 
-        self.escape_hatch_depth += 1
-        try:
+        if self.module_level:
+            self.escape_hatch_depth += 1
+            try:
+                return self.generic_visit(node)
+            finally:
+                self.escape_hatch_depth -= 1
+        else:
             return self.generic_visit(node)
-        finally:
-            self.escape_hatch_depth -= 1
 
     visit_Try = _visit_eager_import_block
 
@@ -257,7 +260,7 @@ class _DeferredInstrumenter(ast.NodeTransformer):
     def _create_import_name_replacement(name: str) -> ast.If:
         """Create an AST for changing the name of a variable in locals if the variable is a defer_imports proxy.
 
-        The resulting node if unparsed is almost equivalent to the following::
+        If the node is unparsed, the resulting code is almost equivalent to the following::
 
             if type(name) is _DeferredImportProxy:
                 @temp_proxy = @local_ns.pop("name")
@@ -483,11 +486,11 @@ class _DeferredInstrumenter(ast.NodeTransformer):
 
     def _is_import_to_instrument(self, value: ast.AST) -> bool:
         return (
-            # Only when global instrumentation is enabled.
+            # Only when module-level instrumentation is enabled.
             self.module_level
             # Only at global scope.
             and self.scope_depth == 0
-            # Only with import nodes that we are prepared to handle.
+            # Only with import nodes without wildcards.
             and self._is_non_wildcard_import(value)
             # Only outside of escape hatch blocks.
             and (self.escape_hatch_depth == 0 and not self._is_defer_imports_import(value))
@@ -496,8 +499,6 @@ class _DeferredInstrumenter(ast.NodeTransformer):
     def generic_visit(self, node: ast.AST) -> ast.AST:
         """Called if no explicit visitor function exists for a node.
 
-        Extended Summary
-        ----------------
         Almost a copy of ast.NodeVisitor.generic_visit, but we intercept global sequences of import statements to wrap
         them in a "with defer_imports.until_use" block and instrument them.
         """
@@ -563,7 +564,7 @@ class _DeferredFileLoader(SourceFileLoader):
     defer_module_level: bool
 
     def create_module(self, spec: ModuleSpec) -> _tp.Optional[_tp.ModuleType]:
-        # This method is always run before source_to_code in regular circumstances.
+        # In regular import flows, this method always runs before source_to_code.
         self.defer_module_level = spec.loader_state["defer_module_level"] if (spec.loader_state is not None) else False
         return super().create_module(spec)
 
@@ -653,12 +654,12 @@ class _DeferredFileFinder(FileFinder):
         self,
         path: str,
         *loader_details: tuple[type[_tp.Loader], list[str]],
-        defer_globally: bool = False,
+        defer_all: bool = False,
         deferred_modules: _tp.Sequence[str] = (),
         recursive: bool = False,
     ) -> None:
         super().__init__(path, *loader_details)
-        self.defer_globally = defer_globally
+        self.defer_all = defer_all
         self.deferred_modules = deferred_modules
         self.defer_recursive = recursive
 
@@ -679,7 +680,7 @@ class _DeferredFileFinder(FileFinder):
         spec = super().find_spec(fullname, target)
 
         if spec is not None and isinstance(spec.loader, _DeferredFileLoader):
-            defer_module_level = self.defer_globally or bool(
+            defer_module_level = self.defer_all or bool(
                 self.deferred_modules
                 and (
                     fullname in self.deferred_modules
@@ -708,7 +709,7 @@ class _DeferredFileFinder(FileFinder):
             return cls(
                 path,
                 *loader_details,
-                defer_globally=defer_all,
+                defer_all=defer_all,
                 deferred_modules=deferred_modules,
                 recursive=recursive,
             )
@@ -731,17 +732,17 @@ def _invalidate_path_entry_caches() -> None:
 
 @_tp.final
 class ImportHookContext:
-    """The context manager returned by install_import_hook.
+    r"""The context manager returned by install_import_hook.
 
     Parameters
     ----------
-    path_hook: Callable[[str], PathEntryFinderProtocol]
+    path_hook: \_tp.Callable[[str], \_tp.PathEntryFinderProtocol]
         A path hook to uninstall. Can be uninstalled manually with the uninstall method or automatically upon
         exiting the context manager.
 
     Attributes
     ----------
-    path_hook: Callable[[str], PathEntryFinderProtocol]
+    path_hook: \_tp.Callable[[str], \_tp.PathEntryFinderProtocol]
         A path hook to uninstall. Can be uninstalled manually with the uninstall method or automatically upon
         exiting the context manager.
     """
@@ -772,7 +773,7 @@ def install_import_hook(
     module_names: _tp.Sequence[str] = (),
     recursive: bool = False,
 ) -> ImportHookContext:
-    """Insert a custom defer_imports path hook in sys.path_hooks. Not reentrant. Must be called before using
+    r"""Insert a custom defer_imports path hook in sys.path_hooks. Not reentrant. Must be called before using
     defer_imports.until_use.
 
     Also provides optional configuration for instrumenting ALL import statements, not only ones wrapped by the
@@ -785,7 +786,7 @@ def install_import_hook(
     is_global: bool, default=False
         Whether to apply module-level import deferral, i.e. instrumentation of all imports, to all modules henceforth.
         Mutually exclusive with and has higher priority than module_names. More suitable for use in applications.
-    module_names: Sequence[str], optional
+    module_names: \_tp.Sequence[str], optional
         A set of modules to apply module-level import deferral to. Mutually exclusive with and has lower priority than
         is_global. More suitable for use in libraries.
     recursive: bool, default=False
@@ -829,7 +830,7 @@ _original_import = contextvars.ContextVar("original_import", default=builtins.__
 """What builtins.__import__ last pointed to."""
 
 _is_deferred = contextvars.ContextVar("is_deferred", default=False)
-"""Whether imports should be deferred."""
+"""Whether imports in import statements should be deferred."""
 
 
 class _DeferredImportProxy:
@@ -1095,7 +1096,7 @@ def instrument_ipython() -> None:
     ipython_shell.ast_transformers.append(_DeferredIPythonInstrumenter())
 
 
-_delayed_console_names = {"code", "codeop", "_DeferredCompile", "DeferredInteractiveConsole", "interact"}
+_delayed_console_names = frozenset({"code", "codeop", "_DeferredCompile", "DeferredInteractiveConsole", "interact"})
 
 
 def __getattr__(name: str) -> _tp.Any:
@@ -1129,9 +1130,11 @@ def __getattr__(name: str) -> _tp.Any:
                 return codeob
 
         class DeferredInteractiveConsole(code.InteractiveConsole):
-            """An emulator of the interactive Python interpreter, but with defer_import's compile-time AST transformer baked in.
+            """An emulator of the interactive Python interpreter, but with defer_import's compile-time AST transformer
+            baked in.
 
-            This ensures that defer_imports.until_use works as intended when used directly in an instance of this console.
+            This ensures that defer_imports.until_use works as intended when used directly in an instance of this
+            console.
             """
 
             def __init__(self) -> None:
@@ -1144,12 +1147,26 @@ def __getattr__(name: str) -> _tp.Any:
                 super().__init__(local_ns)
                 self.compile.compiler = _DeferredCompile()
 
-        def interact() -> None:
-            """Closely emulate the interactive Python console, but instrumented by defer_imports.
+        def interact(readfunc: _tp.Optional[_tp.AcceptsInput] = None) -> None:
+            r"""Closely emulate the interactive Python console, but instrumented by defer_imports.
 
-            This supports direct use of the defer_imports.until_use context manager.
+            The resulting console supports direct use of the defer_imports.until_use context manager.
+
+            Parameters
+            ----------
+            readfunc: \_tp.Optional[\_tp.AcceptsInput], optional
+                An input function to replace InteractiveConsole.raw_input(). If not given, we default to trying to
+                import readline to enable GNU readline if available.
             """
 
+            console = DeferredInteractiveConsole()
+            if readfunc is not None:
+                console.raw_input = readfunc
+            else:
+                try:
+                    import readline  # noqa: F401 # pyright: ignore [reportUnusedImport]
+                except ImportError:
+                    pass
             DeferredInteractiveConsole().interact()
 
         return globals()[name]
@@ -1162,7 +1179,6 @@ _initial_global_names = tuple(globals())
 
 
 def __dir__() -> list[str]:
-    # This will hopefully make potential debugging easier.
     return list(_delayed_console_names.union(_initial_global_names, __all__))
 
 
