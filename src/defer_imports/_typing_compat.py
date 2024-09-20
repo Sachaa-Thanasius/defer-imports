@@ -2,8 +2,6 @@
 #
 # SPDX-License-Identifier: MIT
 
-# pyright: reportUnsupportedDunderAll=none
-
 """A __getattr__-based lazy import shim for typing- and annotation-related symbols."""
 
 from __future__ import annotations
@@ -42,24 +40,29 @@ __all__ = (
     "final",
 )
 
+TYPE_CHECKING = False
 
-def final(f: object) -> object:
-    """Decorator to indicate final methods and final classes.
+if TYPE_CHECKING:
+    from typing import final
+else:
 
-    Slightly modified version of typing.final to avoid importing from typing at runtime.
-    """
+    def final(f: object) -> object:
+        """Decorator to indicate final methods and final classes.
 
-    try:
-        f.__final__ = True  # pyright: ignore # Runtime attribute assignment
-    except (AttributeError, TypeError):  # pragma: no cover
-        # Skip the attribute silently if it is not writable.
-        # AttributeError: if the object has __slots__ or a read-only property
-        # TypeError: if it's a builtin class
-        pass
-    return f
+        Slightly modified version of typing.final to avoid importing from typing at runtime.
+        """
+
+        try:
+            f.__final__ = True  # pyright: ignore # Runtime attribute assignment
+        except (AttributeError, TypeError):  # pragma: no cover
+            # Skip the attribute silently if it is not writable.
+            # AttributeError: if the object has __slots__ or a read-only property
+            # TypeError: if it's a builtin class
+            pass
+        return f
 
 
-def __getattr__(name: str) -> object:  # noqa: PLR0911, PLR0912
+def __getattr__(name: str) -> object:  # noqa: PLR0911, PLR0912, PLR0915
     # ---- Pure imports
     if name in {"Callable", "Generator", "Iterable", "MutableMapping", "Sequence"}:
         global Callable, Generator, Iterable, MutableMapping, Sequence
@@ -95,6 +98,8 @@ def __getattr__(name: str) -> object:  # noqa: PLR0911, PLR0912
 
         if sys.version_info >= (3, 12):
             from collections.abc import Buffer as ReadableBuffer
+        elif TYPE_CHECKING:
+            from typing_extensions import Buffer as ReadableBuffer
         else:
             from typing import Union
 
@@ -107,6 +112,8 @@ def __getattr__(name: str) -> object:  # noqa: PLR0911, PLR0912
 
         if sys.version_info >= (3, 11):
             from typing import Self
+        elif TYPE_CHECKING:
+            from typing_extensions import Self
         else:
 
             class Self:
@@ -119,6 +126,8 @@ def __getattr__(name: str) -> object:  # noqa: PLR0911, PLR0912
 
         if sys.version_info >= (3, 10):
             from typing import TypeAlias, TypeGuard
+        elif TYPE_CHECKING:
+            from typing_extensions import TypeAlias, TypeGuard
         else:
 
             class TypeAlias:
@@ -153,8 +162,8 @@ def __getattr__(name: str) -> object:  # noqa: PLR0911, PLR0912
 
         global PathEntryFinderProtocol
 
-        # Copied from _typeshed.importlib.
         class PathEntryFinderProtocol(Protocol):
+            # Copied from _typeshed.importlib.
             def find_spec(self, fullname: str, target: ModuleType | None = ..., /) -> ModuleSpec | None: ...
 
         return globals()[name]
@@ -167,4 +176,4 @@ _initial_global_names = tuple(globals())
 
 
 def __dir__() -> list[str]:
-    return [*_initial_global_names, *__all__]
+    return list(dict.fromkeys(_initial_global_names + __all__))

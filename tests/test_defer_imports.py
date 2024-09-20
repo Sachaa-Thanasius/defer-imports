@@ -9,8 +9,8 @@ expected proxy repr, as that's the only way to inspect it without causing it to 
 import contextlib
 import importlib.util
 import sys
+import types
 from pathlib import Path
-from types import ModuleType
 from typing import Any, cast
 
 import pytest
@@ -48,7 +48,7 @@ def create_sample_module(
 
 
 @contextlib.contextmanager
-def temp_cache_module(name: str, module: ModuleType):
+def temp_cache_module(name: str, module: types.ModuleType):
     """Add a module to sys.modules and then attempt to remove it on exit."""
 
     sys.modules[name] = module
@@ -412,6 +412,114 @@ with defer_imports.until_use:
 del @_DeferredImportKey, @_DeferredImportProxy
 """,
             id="avoids doing anything with wildcard imports",
+        ),
+        pytest.param(
+            """\
+import foo
+try:
+    import hello
+finally:
+    pass
+import bar
+""",
+            """\
+import defer_imports
+from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
+with defer_imports.until_use:
+    @local_ns = locals()
+    @temp_proxy = None
+    import foo
+    if type(foo) is @_DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('foo')
+        @local_ns[@_DeferredImportKey('foo', @temp_proxy)] = @temp_proxy
+    del @temp_proxy, @local_ns
+try:
+    import hello
+finally:
+    pass
+with defer_imports.until_use:
+    @local_ns = locals()
+    @temp_proxy = None
+    import bar
+    if type(bar) is @_DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('bar')
+        @local_ns[@_DeferredImportKey('bar', @temp_proxy)] = @temp_proxy
+    del @temp_proxy, @local_ns
+del @_DeferredImportKey, @_DeferredImportProxy
+""",
+            id="avoids imports in try-finally",
+        ),
+        pytest.param(
+            """\
+import foo
+with nullcontext():
+    import hello
+import bar
+""",
+            """\
+import defer_imports
+from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
+with defer_imports.until_use:
+    @local_ns = locals()
+    @temp_proxy = None
+    import foo
+    if type(foo) is @_DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('foo')
+        @local_ns[@_DeferredImportKey('foo', @temp_proxy)] = @temp_proxy
+    del @temp_proxy, @local_ns
+with nullcontext():
+    import hello
+with defer_imports.until_use:
+    @local_ns = locals()
+    @temp_proxy = None
+    import bar
+    if type(bar) is @_DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('bar')
+        @local_ns[@_DeferredImportKey('bar', @temp_proxy)] = @temp_proxy
+    del @temp_proxy, @local_ns
+del @_DeferredImportKey, @_DeferredImportProxy
+""",
+            id="avoids imports in non-defer_imports.until_use with block",
+        ),
+        pytest.param(
+            """\
+import defer_imports
+import foo
+with defer_imports.until_use:
+    import hello
+import bar
+""",
+            """\
+import defer_imports
+from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
+import defer_imports
+with defer_imports.until_use:
+    @local_ns = locals()
+    @temp_proxy = None
+    import foo
+    if type(foo) is @_DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('foo')
+        @local_ns[@_DeferredImportKey('foo', @temp_proxy)] = @temp_proxy
+    del @temp_proxy, @local_ns
+with defer_imports.until_use:
+    @local_ns = locals()
+    @temp_proxy = None
+    import hello
+    if type(hello) is @_DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('hello')
+        @local_ns[@_DeferredImportKey('hello', @temp_proxy)] = @temp_proxy
+    del @temp_proxy, @local_ns
+with defer_imports.until_use:
+    @local_ns = locals()
+    @temp_proxy = None
+    import bar
+    if type(bar) is @_DeferredImportProxy:
+        @temp_proxy = @local_ns.pop('bar')
+        @local_ns[@_DeferredImportKey('bar', @temp_proxy)] = @temp_proxy
+    del @temp_proxy, @local_ns
+del @_DeferredImportKey, @_DeferredImportProxy
+""",
+            id="still instruments imports in defer_imports.until_use with block",
         ),
     ],
 )

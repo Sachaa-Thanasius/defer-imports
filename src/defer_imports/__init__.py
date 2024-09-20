@@ -21,10 +21,10 @@ from importlib.machinery import BYTECODE_SUFFIXES, SOURCE_SUFFIXES, FileFinder, 
 from itertools import islice, takewhile
 from threading import RLock
 
-from . import _typing as _tp
+from . import _typing_compat as _tp
 
 
-__version__ = "0.0.3dev0"
+__version__ = "0.0.3.dev0"
 
 __all__ = (
     # -- Compile-time hook
@@ -42,6 +42,9 @@ __all__ = (
 
 # ============================================================================
 # region -------- Vendored helpers --------
+#
+# Helper functions vendored from CPython in some way to avoid actually
+# importing them.
 # ============================================================================
 
 
@@ -1057,6 +1060,8 @@ until_use: _tp.Final[DeferredContext] = DeferredContext()
 #
 # Helpers for using defer_imports in various consoles, such as the built-in
 # CPython REPL and IPython.
+#
+# TODO: Add tests for these.
 # ============================================================================
 
 
@@ -1100,7 +1105,7 @@ def instrument_ipython() -> None:
 _delayed_console_names = frozenset({"code", "codeop", "_DeferredCompile", "DeferredInteractiveConsole", "interact"})
 
 
-def __getattr__(name: str) -> _tp.Any:
+def __getattr__(name: str) -> _tp.Any:  # pragma: no cover
     # Shim to delay executing expensive console-related functionality until requested.
 
     if name in _delayed_console_names:
@@ -1156,8 +1161,8 @@ def __getattr__(name: str) -> _tp.Any:
             Parameters
             ----------
             readfunc: \_tp.Optional[\_tp.AcceptsInput], optional
-                An input function to replace InteractiveConsole.raw_input(). If not given, we default to trying to
-                import readline to enable GNU readline if available.
+                An input function to replace InteractiveConsole.raw_input(). If not given, default to trying to import
+                readline to enable GNU readline if available.
             """
 
             console = DeferredInteractiveConsole()
@@ -1179,7 +1184,7 @@ def __getattr__(name: str) -> _tp.Any:
 _initial_global_names = tuple(globals())
 
 
-def __dir__() -> list[str]:
+def __dir__() -> list[str]:  # pragma: no cover
     return list(_delayed_console_names.union(_initial_global_names, __all__))
 
 
