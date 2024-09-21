@@ -64,7 +64,7 @@ bench = "python -B -m benchmark.bench_samples"
 python = ["3.9", "3.10", "3.11", "3.12", "3.13", "pypy3.9", "pypy3.10"]
 
 [tool.hatch.envs.hatch-test]
-extra-dependencies = ["covdefaults"]
+features = ["cov"]
 
 [tool.pytest.ini_options]
 pythonpath = "src"
@@ -140,8 +140,8 @@ extend-ignore = [
     "PT001",   # pytest recommends against empty parentheses on pytest.fixture.
     "PT004",   # Prepending a leading underscore for fixtures that return nothing isn't common practice.
     "PD011",   # Erroneous issue that triggers for any .values attribute access at all.
-    "PLR2004", # I'll determine what counts as a magic number.
-    "RUF002",  # I'll determine what counts as an ambiguous character.
+    "PLR2004", # "Magic number" depends on the use case.
+    "RUF002",  # "Ambiguous character" depends on the use case.
 
     # ---- Recommended by Ruff when using Ruff format
     "E111",
@@ -171,12 +171,9 @@ keep-runtime-typing = true
 
 [tool.ruff.lint.per-file-ignores]
 # ---- Package code
-"src/defer_imports/__init__.py" = [
-    "A002", # Allow some shadowing of builtins by parameter names.
-]
-"src/defer_imports/_typing_compat.py*" = [
+"src/defer_imports/*.py" = [
+    "A002",    # Allow some shadowing of builtins by parameter names.
     "PLW0603", # "global" is used to update variables at global scope.
-    "ERA001",  # Annoying false positive on some comments.
 ]
 
 # ---- Test code

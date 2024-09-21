@@ -49,18 +49,31 @@ To do its work, ``defer-imports`` must hook into the Python import system in mul
 
     import defer_imports
 
+    # For all usage, import statements *within the module the hook is installed from* 
+    # are not affected. In this case, that would be this module.
+
     defer_imports.install_import_hook()
 
     import your_code
 
-Making this call without arguments allows user code with imports contained within the ``defer_imports.until_use`` context manager to be deferred until referenced. However, it provides several configuration arguments for toggling global instrumentation (affecting all import statements) and adjusting the granularity of that global instrumentation.
+It can also be used as a context manager, which makes sense when passing in arguments to adjust the hook:
 
 .. code-block:: python
 
     import defer_imports
 
-    # For all usage, import statements *within the module the hook is installed from* 
-    # are not affected. In this case, that would be this module.
+    with defer_imports.install_import_hook(module_names=(__name__,)) as hook_ctx:
+        import your_code
+
+Making this call without arguments allows user code with imports contained within the ``defer_imports.until_use`` context manager to be deferred until referenced. However, it provides several configuration parameters for toggling global instrumentation (affecting all import statements) and for adjusting the granularity of that global instrumentation.
+
+.. warning::
+
+    Consider using the hook as a context manager form when using these configuration parameters; otherwise, the hook will persist and may cause other packages using ``defer_imports`` to behave differently than expected.  
+
+.. code-block:: python
+
+    import defer_imports
 
     # Ex 1. Henceforth, instrument all import statements in other pure-Python modules
     # so that they are deferred. Off by default. If on, it has priority over the other
@@ -72,18 +85,20 @@ Making this call without arguments allows user code with imports contained withi
     # Ex 2. Henceforth, instrument all import statements *only* in modules whose names
     # are in the given sequence of strings.
     #
-    # Better suited for applications.
-    defer_imports.install_import_hook(module_names=(__name__,))
+    # Better suited for libraries.
+    with defer_imports.install_import_hook(module_names=(__name__,)):
+        ...
 
     # Ex 3. Henceforth, instrument all import statements *only* in modules whose names
     # are in the given sequence *or* whose names indicate they are submodules of any
-    # of the given sequence.
+    # of the sequence members.
     #
     # In this case, the discord, discord.types, and discord.abc.other modules would all
     # be affected.
     #
-    # Better suited for applications.
-    defer_imports.install_import_hook(module_names=("discord",), recursive=True)
+    # Better suited for libraries.
+    with defer_imports.install_import_hook(module_names=("discord",), recursive=True):
+        ...
 
 
 Example
@@ -101,7 +116,9 @@ Assuming the path hook was registered normally (i.e. without providing any confi
 
     # inspect and Final won't be imported until referenced.
 
-**Warning: If the context manager is not used as ``defer_imports.until_use``, it will not be instrumented properly. ``until_use`` alone, aliases, and the like are currently not supported.**
+.. warning::
+
+    If the context manager is not used as ``defer_imports.until_use``, it will not be instrumented properly. ``until_use`` alone, aliases, and the like are currently not supported.
 
 If the path hook *was* registered with configuration, then within the affected modules, all global import statements will be instrumented with two exceptions: if they are within ``try-except-else-finally`` blocks, and if they are within non- ``defer_imports.until_use`` ``with`` blocks. Such imports are still performed eagerly. These "escape hatches" mostly match those described in PEP 690. 
 
@@ -182,16 +199,22 @@ Features
 
 -   Supports multiple Python runtimes/implementations.
 -   Supports all syntactically valid Python import statements.
--   Has an API for automatically instrumenting all valid import statements, not just those within a specific context manager.
+-   Has an API for automatically instrumenting all valid import statements, not just those within a provided context manager.
 -   Doesn't break type-checkers like pyright and mypy.
+-   Allows escape hatches for eager importing via ``try-except-else-finally`` and ``with`` blocks.
 
 
 Caveats
 =======
 
 -   Intentionally doesn't support deferred importing within class or function scope.
--   Can't support wildcard imports.
+-   Eagerly loads wildcard imports.
 -   Can have a (relatively) hefty one-time cost from invalidating caches in Python's import system on setup.
+-   Can't automatically resolve deferred imports when a namespace is being iterated over, leaving a hole in the abstraction.
+
+    -   This library tries to hide its implementation details to avoid changing the developer/user experience. However, there is one leak in its abstraction: when using dictionary iteration methods on a dictionary or namespace that contains a deferred import key/proxy pair, the members of that pair will be visible, mutable, and will not resolve automatically. PEP 690 specifically addresses this by modifying the builtin ``dict``, allowing each instance to know if it contains proxies and then resolve them automatically during iteration (see the second half of its `"Implementation" section <https://peps.python.org/pep-0690/#implementation>`_ for more details). Note that qualifing ``dict`` iteration methods include ``dict.items()``, ``dict.values()``, etc., but outside of that, the builtin ``dir()`` also qualifies since it can see the keys for objects' internal dictionaries.
+
+        As of right now, nothing can be done about this using pure Python without massively slowing down ``dict``. As a result, users should try to avoid interacting with deferred import keys/proxies if encountered while iterating over module dictionaries; the result of doing so is not guaranteed.
 
 
 Why?
@@ -201,7 +224,7 @@ Lazy imports alleviate several of Python's current pain points. Because of that,
 
 Though that proposal was rejected, there are well-established third-party libraries that provide lazy import mechanisms, albeit with more constraints. Most do not have APIs as integrated or ergonomic as PEP 690's, but that makes sense; most predate the PEP and were not created with that goal in mind.
 
-Libraries that do intentionally inject PEP 690's semantics into Python in some form don't fill my needs for one reason or another. For example, `slothy <https://github.com/bswck/slothy>` (currently) limits itself to specific Python implementations by relying on the existence of call stack frames. I wanted to create something similar that took advantage of Python's robust hookable import system to modify code at compile time, didn't rely on implementation-specific APIs, is more ergonomic than the status quo, and will be easier to maintain as Python (and its various implementations) continues evolving.
+Libraries that do intentionally inject PEP 690's semantics into Python in some form don't fill my needs for one reason or another. For example, `slothy <https://github.com/bswck/slothy>`_ (currently) limits itself to specific Python implementations by relying on the existence of call stack frames. I wanted to create something similar that took advantage of Python's robust hookable import system to modify code at compile time, didn't rely on implementation-specific APIs, is more ergonomic than the status quo, and will be easier to maintain as Python (and its various implementations) continues evolving.
 
 
 How?
@@ -216,14 +239,6 @@ Those proxies don't use those stored ``__import__`` arguments themselves, though
 The missing intermediate step is making sure these special proxies are stored with these special keys in the namespace. After all, Python name binding semantics only allow regular strings to be used as variable names/namespace keys; how can this be bypassed? ``defer-imports``'s answer is a little compile-time instrumentation. When a user calls ``defer_imports.install_deferred_import_hook()`` to set up the library machinery (see "Setup" above), what they are actually doing is installing an import hook that will modify the code of any given Python file that uses the ``defer_imports.until_use`` context manager. Using AST transformation, it adds a few lines of code around imports within that context manager to reassign the returned proxies to special keys in the local namespace (via ``locals()``).
 
 With this methodology, we can avoid using implementation-specific hacks like frame manipulation to modify the locals. We can even avoid changing the contract of ``builtins.__import__``, which specifically says it does not modify the global or local namespaces that are passed into it. We may modify and replace members of it, but at no point do we change its size while within ``__import__`` by removing or adding anything.
-
-
-Quirks
-======
-
-This library tries to hide its implementation details to avoid changing the developer/user experience. However, there is one leak in its abstraction: when using dictionary iteration methods on a dictionary or namespace that contains a deferred import key/proxy pair, the members of that pair will be visible, mutable, and will not resolve automatically. PEP 690 specifically addresses this by modifying the builtin ``dict``, allowing each instance to know if it contains proxies and then resolve them automatically during iteration (see the second half of its `"Implementation" section <https://peps.python.org/pep-0690/#implementation>`_ for more details). Note that qualifing ``dict`` iteration methods include ``dict.items()``, ``dict.values()``, etc., but outside of that, the builtin ``dir()`` also qualifies since it can see the keys for objects' internal dictionaries.
-
-As of right now, nothing can be done about this using pure Python without massively slowing down ``dict``. As a result, users should try to avoid interacting with deferred import keys/proxies if encountered while iterating over module dictionaries; the result of doing so is not guaranteed.
 
 
 Benchmarks
@@ -285,7 +300,7 @@ The design of this library was inspired by the following:
 -   `PEP 690 and its authors <https://peps.python.org/pep-0690/>`_
 -   `Jelle Zijlstra's pure-Python proof of concept <https://gist.github.com/JelleZijlstra/23c01ceb35d1bc8f335128f59a32db4c>`_
 -   `slothy <https://github.com/bswck/slothy>`_
--   `ideas <https://github.com/aroberge/ideas>_`
--   `Sinbad <https://github.com/mikeshardmind>_`'s feedback
+-   `ideas <https://github.com/aroberge/ideas>`_
+-   `Sinbad <https://github.com/mikeshardmind>`_'s feedback
 
-Many aspects of this library are based on or inspired by the above. Without them, this would not exist.
+Without them, this would not exist.

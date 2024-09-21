@@ -247,7 +247,7 @@ class _DeferredInstrumenter(ast.NodeTransformer):
         else:
             # Based on importlib.util.decode_source.
             newline_decoder = io.IncrementalNewlineDecoder(None, translate=True)
-            return newline_decoder.decode(self.data.decode(self.encoding))  # pyright: ignore
+            return newline_decoder.decode(self.data.decode(self.encoding))  # pyright: ignore # Common buffer types have decode method.
 
     def _get_node_context(self, node: ast.stmt):  # noqa: ANN202 # Version-dependent and too verbose.
         """Get the location context for a node. That context will be used as an argument to SyntaxError."""
@@ -567,12 +567,13 @@ class _DeferredFileLoader(SourceFileLoader):
     defer_module_level: bool
 
     def create_module(self, spec: ModuleSpec) -> _tp.Optional[_tp.ModuleType]:
-        # In regular import flows, this method always runs before source_to_code.
+        # In regular import flows, this method always runs before source_to_code, so defer_module_level should always
+        # exist.
         self.defer_module_level = spec.loader_state["defer_module_level"] if (spec.loader_state is not None) else False
         return super().create_module(spec)
 
     def source_to_code(self, data: _SourceData, path: _ModulePath, *, _optimize: int = -1) -> _tp.CodeType:  # pyright: ignore [reportIncompatibleMethodOverride]
-        # NOTE: Signature of SourceFileLoader.source_to_code at runtime isn't consistent with the version in typeshed.
+        # NOTE: Signature of SourceFileLoader.source_to_code at runtime and in typeshed aren't consistent.
 
         if not data:
             return super().source_to_code(data, path, _optimize=_optimize)  # pyright: ignore # See note above.
@@ -705,7 +706,7 @@ class _DeferredFileFinder(FileFinder):
         def path_hook_for_DeferredFileFinder(path: str) -> _tp.Self:
             """Path hook for DeferredFileFinder."""
 
-            if not os.path.isdir(path):  # noqa: PTH112 # os is loaded on startup.
+            if not os.path.isdir(path):  # noqa: PTH112 # os is less expensive than pathlib.
                 msg = "only directories are supported"
                 raise ImportError(msg, path=path)
 
@@ -786,12 +787,12 @@ def install_import_hook(
 
     Parameters
     ----------
-    is_global: bool, default=False
+    apply_all: bool, default=False
         Whether to apply module-level import deferral, i.e. instrumentation of all imports, to all modules henceforth.
-        Mutually exclusive with and has higher priority than module_names. More suitable for use in applications.
+        Has higher priority than module_names. More suitable for use in applications.
     module_names: \_tp.Sequence[str], optional
-        A set of modules to apply module-level import deferral to. Mutually exclusive with and has lower priority than
-        is_global. More suitable for use in libraries.
+        A set of modules to apply module-level import deferral to. Has lower priority than apply_all. More suitable for
+        use in libraries.
     recursive: bool, default=False
         Whether module-level import deferral should apply recursively the submodules of the given module_names. If no
         module names are given, this has no effect.
@@ -811,6 +812,7 @@ def install_import_hook(
     )
 
     try:
+        # zipimporter doesn't provide find_spec until 3.10.
         hook_insert_index = sys.path_hooks.index(zipimport.zipimporter) + 1  # pyright: ignore [reportArgumentType]
     except ValueError:
         hook_insert_index = 0
@@ -972,13 +974,13 @@ class _DeferredImportKey(str):
             namespace[key] = module
 
 
-def _deferred___import__(  # noqa: ANN202
+def _deferred___import__(
     name: str,
     globals: _tp.MutableMapping[str, object],
     locals: _tp.MutableMapping[str, object],
     fromlist: _tp.Optional[_tp.Sequence[str]] = None,
     level: int = 0,
-):
+) -> _tp.Any:
     """An limited replacement for __import__ that supports deferred imports by returning proxies."""
 
     fromlist = fromlist or ()
@@ -1021,7 +1023,7 @@ def _deferred___import__(  # noqa: ANN202
 class DeferredContext:
     """A context manager within which imports occur lazily. Not reentrant. Use via defer_imports.until_use.
 
-    This will not work correctly if install_import_hook is not called first elsewhere.
+    This will only work correctly if install_import_hook is called first elsewhere.
 
     Raises
     ------
@@ -1094,7 +1096,7 @@ def instrument_ipython() -> None:
     """
 
     try:
-        ipython_shell: _tp.Any = get_ipython()  # pyright: ignore [reportUndefinedVariable]
+        ipython_shell: _tp.Any = get_ipython()  # pyright: ignore [reportUndefinedVariable] # We guard this.
     except NameError:
         msg = "Not currently in an IPython environment."
         raise RuntimeError(msg) from None
@@ -1109,7 +1111,7 @@ def __getattr__(name: str) -> _tp.Any:  # pragma: no cover
     # Shim to delay executing expensive console-related functionality until requested.
 
     if name in _delayed_console_names:
-        global code, codeop, _DeferredCompile, DeferredInteractiveConsole, interact  # noqa: PLW0603
+        global code, codeop, _DeferredCompile, DeferredInteractiveConsole, interact
 
         import code
         import codeop
@@ -1143,14 +1145,19 @@ def __getattr__(name: str) -> _tp.Any:  # pragma: no cover
             console.
             """
 
-            def __init__(self) -> None:
-                local_ns = {
-                    "__name__": "__console__",
-                    "__doc__": None,
-                    "@_DeferredImportKey": _DeferredImportKey,
-                    "@_DeferredImportProxy": _DeferredImportProxy,
-                }
-                super().__init__(local_ns)
+            def __init__(
+                self,
+                locals: _tp.Optional[_tp.MutableMapping[str, _tp.Any]] = None,
+                filename: str = "<console>",
+            ) -> None:
+                defer_locals = {f"@{klass.__name__}": klass for klass in (_DeferredImportKey, _DeferredImportProxy)}
+
+                if locals is not None:
+                    locals.update(defer_locals)
+                else:
+                    locals = defer_locals | {"__name__": "__console__", "__doc__": None}  # noqa: A001
+
+                super().__init__(locals, filename)
                 self.compile.compiler = _DeferredCompile()
 
         def interact(readfunc: _tp.Optional[_tp.AcceptsInput] = None) -> None:
@@ -1163,17 +1170,72 @@ def __getattr__(name: str) -> _tp.Any:  # pragma: no cover
             readfunc: \_tp.Optional[\_tp.AcceptsInput], optional
                 An input function to replace InteractiveConsole.raw_input(). If not given, default to trying to import
                 readline to enable GNU readline if available.
+
+            Notes
+            -----
+            Parts of this implementation are based on asyncio.__main__ in CPython 3.14.
             """
 
-            console = DeferredInteractiveConsole()
+            py_impl_name = sys.implementation.name
+            sys.audit(f"{py_impl_name}.run_stdin")
+
+            repl_locals = {
+                "__name__": __name__,
+                "__package__": __package__,
+                "__loader__": __loader__,
+                "__spec__": __spec__,
+                "__builtins__": __builtins__,
+                "__file__": __file__,
+                "defer_imports": sys.modules[__name__],
+            }
+            console = DeferredInteractiveConsole(repl_locals)
+
             if readfunc is not None:
                 console.raw_input = readfunc
             else:
                 try:
-                    import readline  # noqa: F401 # pyright: ignore [reportUnusedImport]
+                    import readline
                 except ImportError:
-                    pass
-            DeferredInteractiveConsole().interact()
+                    readline = None
+
+                interactive_hook = getattr(sys, "__interactivehook__", None)
+                if interactive_hook is not None:
+                    sys.audit(f"{py_impl_name}.run_interactivehook")
+                    interactive_hook()
+
+                if sys.version_info >= (3, 13):
+                    import site
+
+                    if interactive_hook is site.register_readline:
+                        # Fix the completer function to use the interactive console locals
+                        try:
+                            import rlcompleter
+                        except ImportError:
+                            pass
+                        else:
+                            if readline is not None:
+                                completer = rlcompleter.Completer(console.locals)
+                                readline.set_completer(completer.complete)
+
+                if startup_path := os.getenv("PYTHONSTARTUP"):
+                    sys.audit(f"{py_impl_name}.run_startup", startup_path)
+
+                    import tokenize
+
+                    with tokenize.open(startup_path) as f:
+                        startup_code = compile(f.read(), startup_path, "exec")
+                        exec(startup_code, console.locals)  # noqa: S102 # pyright: ignore [reportArgumentType]
+
+            banner = (
+                f"Python {sys.version} on {sys.platform}\n"
+                'Type "help", "copyright", "credits" or "license" for more information.\n'
+                f"({type(console).__name__})\n"
+            )
+            ps1 = getattr(sys, "ps1", ">>> ")
+
+            console.write(banner)
+            console.write(f"{ps1}import defer_imports\n")
+            console.interact("")
 
         return globals()[name]
 

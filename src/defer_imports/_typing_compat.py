@@ -11,21 +11,21 @@ from importlib.machinery import ModuleSpec
 
 
 __all__ = (
-    # -- collections.abc
+    # -- from collections.abc
     "Callable",
     "Generator",
     "Iterable",
     "MutableMapping",
     "Sequence",
-    # -- typing
+    # -- from typing
     "Any",
     "Final",
     "Optional",
     "Union",
-    # -- types
+    # -- from types
     "CodeType",
     "ModuleType",
-    # -- importlib.abc
+    # -- from importlib.abc
     "Loader",
     # -- imported with fallbacks
     "ReadableBuffer",
@@ -36,7 +36,7 @@ __all__ = (
     "T",
     "AcceptsInput",
     "PathEntryFinderProtocol",
-    # -- actually defined
+    # -- pure definition
     "final",
 )
 
@@ -148,9 +148,9 @@ def __getattr__(name: str) -> object:  # noqa: PLR0911, PLR0912, PLR0915
         return globals()[name]
 
     if name == "AcceptsInput":
-        from typing import Protocol
-
         global AcceptsInput
+
+        from typing import Protocol
 
         class AcceptsInput(Protocol):
             def __call__(self, prompt: str = "") -> str: ...
@@ -176,4 +176,4 @@ _initial_global_names = tuple(globals())
 
 
 def __dir__() -> list[str]:
-    return list(dict.fromkeys(_initial_global_names + __all__))
+    return list(set(_initial_global_names + __all__))
