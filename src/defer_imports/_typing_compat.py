@@ -27,6 +27,8 @@ __all__ = (
     "ModuleType",
     # -- from importlib.abc
     "Loader",
+    # -- from os
+    "PathLike",
     # -- imported with fallbacks
     "ReadableBuffer",
     "Self",
@@ -89,6 +91,13 @@ def __getattr__(name: str) -> object:  # noqa: PLR0911, PLR0912, PLR0915
         global Loader
 
         from importlib.abc import Loader
+
+        return globals()[name]
+
+    if name == "PathLike":
+        global PathLike
+
+        from os import PathLike
 
         return globals()[name]
 

@@ -11,7 +11,6 @@ import ast
 import builtins
 import contextvars
 import io
-import os
 import sys
 import tokenize
 import warnings
@@ -160,7 +159,7 @@ def _resolve_name(name: str, package: str, level: int) -> str:
 # ============================================================================
 
 
-_StrPath: _tp.TypeAlias = "_tp.Union[str, os.PathLike[str]]"
+_StrPath: _tp.TypeAlias = "_tp.Union[str, _tp.PathLike[str]]"
 _ModulePath: _tp.TypeAlias = "_tp.Union[_StrPath, _tp.ReadableBuffer]"
 _SourceData: _tp.TypeAlias = "_tp.Union[_tp.ReadableBuffer, str, ast.Module, ast.Expression, ast.Interactive]"
 
@@ -196,8 +195,6 @@ class _DeferredInstrumenter(ast.NodeTransformer):
         self.scope_depth = 0
         self.escape_hatch_depth = 0
 
-    # region ---- Scope tracking ----
-
     def _visit_scope(self, node: ast.AST) -> ast.AST:
         """Track Python scope changes. Used to determine if a use of defer_imports.until_use is global."""
 
@@ -231,10 +228,6 @@ class _DeferredInstrumenter(ast.NodeTransformer):
 
     if sys.version_info >= (3, 11):
         visit_TryStar = _visit_eager_import_block
-
-    # endregion
-
-    # region ---- Basic instrumentation ----
 
     def _decode_source(self) -> str:
         """Get the source code corresponding to the given data."""
@@ -449,10 +442,6 @@ class _DeferredInstrumenter(ast.NodeTransformer):
 
         return self.generic_visit(node)
 
-    # endregion
-
-    # region ---- Global imports instrumentation ----
-
     @staticmethod
     def _is_non_wildcard_import(obj: object) -> _tp.TypeGuard[_tp.Union[ast.Import, ast.ImportFrom]]:
         """Check if a given object is an import AST without wildcards."""
@@ -538,7 +527,8 @@ class _DeferredInstrumenter(ast.NodeTransformer):
                     setattr(node, field, new_node)
         return node
 
-    # endregion
+
+# region ---- Import hook machinery ----
 
 
 def _check_source_for_defer_usage(data: _tp.Union[_tp.ReadableBuffer, str]) -> tuple[str, bool]:
@@ -668,26 +658,16 @@ class _DeferredFileLoader(SourceFileLoader):
 
     def exec_module(self, module: _tp.ModuleType) -> None:
         """Execute the module, but only after getting state from module.__spec__.loader_state if present."""
-
         if (spec := module.__spec__) and spec.loader_state is not None:
             self.defer_module_level = spec.loader_state["defer_module_level"]
 
-        return super().exec_module(module)
+        super().exec_module(module)
+        module.__loader__ = None
 
 
 class _DeferredFileFinder(FileFinder):
-    def __init__(
-        self,
-        path: str,
-        *loader_details: tuple[type[_tp.Loader], list[str]],
-        defer_all: bool = False,
-        deferred_modules: _tp.Sequence[str] = (),
-        recursive: bool = False,
-    ) -> None:
-        super().__init__(path, *loader_details)
-        self.defer_all = defer_all
-        self.deferred_modules = deferred_modules
-        self.defer_recursive = recursive
+    def __repr__(self):
+        return f"{type(self).__name__}({self.path!r})"
 
     def find_spec(self, fullname: str, target: _tp.Optional[_tp.ModuleType] = None) -> _tp.Optional[ModuleSpec]:
         """Try to find a spec for "fullname" on sys.path or "path", with some modifications based on deferral state.
@@ -706,41 +686,48 @@ class _DeferredFileFinder(FileFinder):
         spec = super().find_spec(fullname, target)
 
         if spec is not None and isinstance(spec.loader, _DeferredFileLoader):
-            defer_module_level = self.defer_all or bool(
-                self.deferred_modules
-                and (
-                    fullname in self.deferred_modules
-                    or (self.defer_recursive and any(mod.startswith(f"{fullname}.") for mod in self.deferred_modules))
+            # Check defer configuration after finding succeeds, but before loading starts.
+            config = _current_defer_config.get(None)
+
+            if config is None:
+                defer_module_level = False
+            else:
+                # NOTE: The precendence should match what's documented for install_import_hook().
+                defer_module_level = config.apply_all or bool(
+                    config.module_names
+                    and (
+                        fullname in config.module_names
+                        or (config.recursive and any(mod.startswith(f"{fullname}.") for mod in config.module_names))
+                    )
                 )
-            )
+
             spec.loader_state = {"defer_module_level": defer_module_level}
 
         return spec
 
-    @classmethod
-    def path_hook(
-        cls,
-        *loader_details: tuple[type[_tp.Loader], list[str]],
-        defer_all: bool = False,
-        deferred_modules: _tp.Sequence[str] = (),
-        recursive: bool = False,
-    ) -> _tp.Callable[[str], _tp.Self]:
-        def path_hook_for_DeferredFileFinder(path: str) -> _tp.Self:
-            """Path hook for DeferredFileFinder."""
 
-            if not os.path.isdir(path):  # noqa: PTH112 # os is less expensive than pathlib.
-                msg = "only directories are supported"
-                raise ImportError(msg, path=path)
+_DEFER_PATH_HOOK = _DeferredFileFinder.path_hook((_DeferredFileLoader, SOURCE_SUFFIXES))
+"""Singleton import path hook that enables defer_imports's instrumentation."""
 
-            return cls(
-                path,
-                *loader_details,
-                defer_all=defer_all,
-                deferred_modules=deferred_modules,
-                recursive=recursive,
-            )
 
-        return path_hook_for_DeferredFileFinder
+# endregion
+
+
+_current_defer_config: contextvars.ContextVar[_DeferConfig] = contextvars.ContextVar("_current_defer_config")
+"""The current configuration for defer_imports's instrumentation."""
+
+
+class _DeferConfig:
+    """Configuration container, whose contents are used to determine how a module should be instrumented."""
+
+    def __init__(self, apply_all: bool, module_names: _tp.Sequence[str], recursive: bool) -> None:
+        self.apply_all = apply_all
+        self.module_names = module_names
+        self.recursive = recursive
+
+    def __repr__(self) -> str:
+        attrs = ("apply_all", "module_names", "recursive")
+        return f"{type(self).__name__}({', '.join(f'{attr}={getattr(self, attr)}' for attr in attrs)})"
 
 
 def _invalidate_path_entry_caches() -> None:
@@ -758,35 +745,38 @@ def _invalidate_path_entry_caches() -> None:
 
 @_tp.final
 class ImportHookContext:
-    r"""The context manager returned by install_import_hook.
-
-    Parameters
-    ----------
-    path_hook: \_tp.Callable[[str], \_tp.PathEntryFinderProtocol]
-        A path hook to uninstall. Can be uninstalled manually with the uninstall method or automatically upon
-        exiting the context manager.
-
-    Attributes
-    ----------
-    path_hook: \_tp.Callable[[str], \_tp.PathEntryFinderProtocol]
-        A path hook to uninstall. Can be uninstalled manually with the uninstall method or automatically upon
-        exiting the context manager.
+    """The context manager returned by install_import_hook(). Can reset defer_imports's configuration to its previous
+    state and uninstall defer_import's import path hook.
     """
 
-    def __init__(self, path_hook: _tp.Callable[[str], _tp.PathEntryFinderProtocol]) -> None:
-        self.path_hook = path_hook
+    def __init__(self, config_ctx_tok: contextvars.Token[_DeferConfig]) -> None:
+        self._tok = config_ctx_tok
 
     def __enter__(self) -> _tp.Self:
         return self
 
     def __exit__(self, *exc_info: object) -> None:
+        self.reset()
         self.uninstall()
 
-    def uninstall(self) -> None:
-        """Attempt to remove the path hook from sys.path_hooks. If successful, also invalidate path entry caches."""
+    def reset(self) -> None:
+        """Attempt to reset the import hook configuration. If already reset, does nothing."""
 
         try:
-            sys.path_hooks.remove(self.path_hook)
+            tok = self._tok
+        except AttributeError:
+            pass
+        else:
+            del self._tok
+            _current_defer_config.reset(tok)
+
+    def uninstall(self) -> None:
+        """Attempt to remove the path hook from sys.path_hooks and invalidate path entry caches. If already removed,
+        does nothing.
+        """
+
+        try:
+            sys.path_hooks.remove(_DEFER_PATH_HOOK)
         except ValueError:
             pass
         else:
@@ -799,20 +789,20 @@ def install_import_hook(
     module_names: _tp.Sequence[str] = (),
     recursive: bool = False,
 ) -> ImportHookContext:
-    r"""Insert a custom defer_imports path hook in sys.path_hooks. Not reentrant. Must be called before using
-    defer_imports.until_use.
+    r"""Install defer_imports's import hook if it isn't already installed, and optionally configure it. Must be called
+    before using defer_imports.until_use.
 
-    Also provides optional configuration for instrumenting ALL import statements, not only ones wrapped by the
-    defer_imports.until_use context manager.
+    The configuration is for instrumenting ALL import statements, not only ones wrapped by defer_imports.until_use.
 
-    This should be run before the rest of your code. One place to put do that is __init__.py of your package or app.
+    This should be run before the code it is meant to affect is executed. One place to put do that is __init__.py of
+    your package or app.
 
     Parameters
     ----------
     apply_all: bool, default=False
         Whether to apply module-level import deferral, i.e. instrumentation of all imports, to all modules henceforth.
         Has higher priority than module_names. More suitable for use in applications.
-    module_names: \_tp.Sequence[str], optional
+    module_names: _tp.Sequence[str], optional
         A set of modules to apply module-level import deferral to. Has lower priority than apply_all. More suitable for
         use in libraries.
     recursive: bool, default=False
@@ -822,28 +812,23 @@ def install_import_hook(
     Returns
     -------
     ImportHookContext
-        A object that can be used to uninstall the import hook, either manually by calling its uninstall method or
-        automatically by using it as a context manager.
+        A object that can be used to reset the import hook's configuration to its previous state or uninstall it, either
+        automatically by using it as a context manager or manually using its rest() and uninstall methods.
     """
 
-    loader_details = (_DeferredFileLoader, SOURCE_SUFFIXES)
-    path_hook = _DeferredFileFinder.path_hook(
-        loader_details,
-        defer_all=apply_all,
-        deferred_modules=module_names,
-        recursive=recursive,
-    )
+    if _DEFER_PATH_HOOK not in sys.path_hooks:
+        try:
+            # zipimporter doesn't provide find_spec until 3.10.
+            hook_insert_index = sys.path_hooks.index(zipimport.zipimporter) + 1  # pyright: ignore [reportArgumentType]
+        except ValueError:
+            hook_insert_index = 0
 
-    try:
-        # zipimporter doesn't provide find_spec until 3.10.
-        hook_insert_index = sys.path_hooks.index(zipimport.zipimporter) + 1  # pyright: ignore [reportArgumentType]
-    except ValueError:
-        hook_insert_index = 0
+        sys.path_hooks.insert(hook_insert_index, _DEFER_PATH_HOOK)
+        _invalidate_path_entry_caches()
 
-    _invalidate_path_entry_caches()
-    sys.path_hooks.insert(hook_insert_index, path_hook)
-
-    return ImportHookContext(path_hook)
+    config = _DeferConfig(apply_all, module_names, recursive)
+    config_ctx_tok = _current_defer_config.set(config)
+    return ImportHookContext(config_ctx_tok)
 
 
 # endregion
@@ -1061,17 +1046,20 @@ class DeferredContext:
     As part of its implementation, this temporarily replaces builtins.__import__.
     """
 
-    __slots__ = ("_import_ctx_token", "_defer_ctx_token")
+    __slots__ = ("is_active", "_import_ctx_token", "_defer_ctx_token")
 
     def __enter__(self) -> None:
-        self._defer_ctx_token = _is_deferred.set(True)
-        self._import_ctx_token = _original_import.set(builtins.__import__)
-        builtins.__import__ = _deferred___import__
+        self.is_active = bool(_current_defer_config.get(False))
+        if self.is_active:
+            self._defer_ctx_token = _is_deferred.set(True)
+            self._import_ctx_token = _original_import.set(builtins.__import__)
+            builtins.__import__ = _deferred___import__
 
     def __exit__(self, *exc_info: object) -> None:
-        _original_import.reset(self._import_ctx_token)
-        _is_deferred.reset(self._defer_ctx_token)
-        builtins.__import__ = _original_import.get()
+        if self.is_active:
+            _original_import.reset(self._import_ctx_token)
+            _is_deferred.reset(self._defer_ctx_token)
+            builtins.__import__ = _original_import.get()
 
 
 until_use: _tp.Final[DeferredContext] = DeferredContext()
@@ -1127,17 +1115,20 @@ def instrument_ipython() -> None:
     ipython_shell.ast_transformers.append(_DeferredIPythonInstrumenter())
 
 
-_delayed_console_names = frozenset({"code", "codeop", "_DeferredCompile", "DeferredInteractiveConsole", "interact"})
+_delayed_console_names = frozenset(
+    {"code", "codeop", "os", "_DeferredCompile", "DeferredInteractiveConsole", "interact"}
+)
 
 
 def __getattr__(name: str) -> _tp.Any:  # pragma: no cover
     # Shim to delay executing expensive console-related functionality until requested.
 
     if name in _delayed_console_names:
-        global code, codeop, _DeferredCompile, DeferredInteractiveConsole, interact
+        global code, codeop, os, _DeferredCompile, DeferredInteractiveConsole, interact
 
         import code
         import codeop
+        import os
 
         class _DeferredCompile(codeop.Compile):
             """A subclass of codeop.Compile that alters the compilation process via defer_imports's AST transformer."""

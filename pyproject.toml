@@ -32,12 +32,13 @@ dynamic = ["version"]
 path = "src/defer_imports/__init__.py"
 
 [project.optional-dependencies]
-benchmark = ["slothy"]
+bench = ["slothy"]
 test = ["pytest", "pytest-rerunfailures"]
 cov = ["defer-imports[test]", "coverage", "covdefaults"]
-dev = ["defer-imports[benchmark,cov]", "pre-commit", "typing-extensions"]
+dev = ["defer-imports[bench,cov]", "pre-commit", "typing-extensions"]
 
 [project.urls]
+Homepage = "https://github.com/Sachaa-Thanasius/defer-imports"
 Documentation = "https://github.com/Sachaa-Thanasius/defer-imports#readme"
 Issues = "https://github.com/Sachaa-Thanasius/defer-imports/issues"
 Source = "https://github.com/Sachaa-Thanasius/defer-imports"
@@ -48,31 +49,27 @@ packages = ["src/defer_imports"]
 
 # -------- Benchmark config
 
-[tool.hatch.envs.benchmark]
-features = ["benchmark"]
+[tool.hatch.envs.bench]
+features = ["bench"]
 
-[[tool.hatch.envs.benchmark.matrix]]
+[[tool.hatch.envs.bench.matrix]]
 python = ["3.9", "3.10", "3.11", "3.12", "3.13"]
 
-[tool.hatch.envs.benchmark.scripts]
-bench = "python -B -m benchmark.bench_samples"
+[tool.hatch.envs.bench.scripts]
+bench = "python -B -m bench.bench_samples"
 
 
 # -------- Test config
 
-[[tool.hatch.envs.hatch-test.matrix]]
-python = ["3.9", "3.10", "3.11", "3.12", "3.13", "pypy3.9", "pypy3.10"]
-
 [tool.hatch.envs.hatch-test]
 features = ["cov"]
 
+[[tool.hatch.envs.hatch-test.matrix]]
+python = ["3.9", "3.10", "3.11", "3.12", "3.13", "pypy3.9", "pypy3.10"]
+
 [tool.pytest.ini_options]
 pythonpath = "src"
-addopts = [
-    # "--import-mode=importlib", # This breaks a few pytest features currently.
-    "--strict-markers",
-    "--strict-config",
-]
+addopts = ["--import-mode=importlib", "--strict-markers", "--strict-config"]
 
 [tool.coverage.paths]
 defer_imports = ["src"]
@@ -135,7 +132,7 @@ extend-ignore = [
     "ANN101",  # Type of Self for self is usually implicit and/or known by the type-checker.
     "ANN102",  # Type of type[Self] for cls is usually implicit and/or known by the type-checker.
     "ANN204",  # Special method return types are usually implicit and/or known by type checker.
-    "ANN401",  # Any is needed for some parameters.
+    "ANN401",  # Any is needed for some annotations.
     "UP038",   # isinstance performs better with tuples than unions.
     "PT001",   # pytest recommends against empty parentheses on pytest.fixture.
     "PT004",   # Prepending a leading underscore for fixtures that return nothing isn't common practice.
@@ -180,7 +177,7 @@ keep-runtime-typing = true
 "tests/**/*.py" = [
     "T201", # Printing is fine.
     "T203", # Pretty printing is fine.
-    # Don't need return annotations for tests.
+    # Don't need some annotations in tests.
     "ANN201",
     "ANN202",
     "S102",   # exec is used to test for NameError within a module's namespace.
@@ -189,7 +186,7 @@ keep-runtime-typing = true
     "F401",   # Unused imports are fine; we're testing import success.
     "ERA001", # Plenty of imports are commented out with explanations next to them.
 ]
-"benchmark/**/*.py" = [
+"bench/**/*.py" = [
     "T201",   # Printing is fine.
     "F401",   # Unused imports are fine; we're testing import speed.
     "ERA001", # Plenty of imports are commented out with explanations next to them.

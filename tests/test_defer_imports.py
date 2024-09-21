@@ -15,7 +15,13 @@ from typing import Any, cast
 
 import pytest
 
-from defer_imports import _BYTECODE_HEADER, _DeferredFileLoader, _DeferredInstrumenter, install_import_hook
+from defer_imports import (
+    _BYTECODE_HEADER,
+    _DEFER_PATH_HOOK,
+    _DeferredFileLoader,
+    _DeferredInstrumenter,
+    install_import_hook,
+)
 
 
 # ============================================================================
@@ -79,26 +85,23 @@ def better_key_repr(monkeypatch: pytest.MonkeyPatch):
 def test_path_hook_installation():
     """Test the API for putting/removing the defer_imports path hook from sys.path_hooks."""
 
-    def count_defer_path_hooks() -> int:
-        return sum(1 for hook in sys.path_hooks if ("DeferredFileFinder" in hook.__qualname__))
-
     # It shouldn't be on there by default.
-    assert count_defer_path_hooks() == 0
+    assert _DEFER_PATH_HOOK not in sys.path_hooks
     before_length = len(sys.path_hooks)
 
     # It should be present after calling install.
     hook_ctx = install_import_hook()
-    assert count_defer_path_hooks() == 1
+    assert _DEFER_PATH_HOOK in sys.path_hooks
     assert len(sys.path_hooks) == before_length + 1
 
     # Calling uninstall should remove it.
     hook_ctx.uninstall()
-    assert count_defer_path_hooks() == 0
+    assert _DEFER_PATH_HOOK not in sys.path_hooks
     assert len(sys.path_hooks) == before_length
 
     # Calling uninstall if it's not present should do nothing to sys.path_hooks.
     hook_ctx.uninstall()
-    assert count_defer_path_hooks() == 0
+    assert _DEFER_PATH_HOOK not in sys.path_hooks
     assert len(sys.path_hooks) == before_length
 
 

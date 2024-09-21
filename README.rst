@@ -246,12 +246,12 @@ Benchmarks
 
 A bit rough, but there are currently two ways of measuring activation and/or import time:
 
--   A local benchmark script, invokable with ``python -m benchmark.bench_samples`` (run with ``--help`` to see more information).
+-   A local benchmark script, invokable with ``python -m bench.bench_samples`` (run with ``--help`` to see more information).
 
     -   To prevent bytecode caching from impacting the benchmark, run with `python -B <https://docs.python.org/3/using/cmdline.html#cmdoption-B>`_, which will set ``sys.dont_write_bytecode`` to ``True`` and cause the benchmark script to purge all existing ``__pycache__`` folders in the project directory.
     -   PyPy is excluded from the benchmark since it takes time to ramp up. 
     -   The cost of registering ``defer-imports``'s import hook is ignored since that is a one-time startup cost that will hopefully be reduced in time.
-    -   An sample run across versions using ``hatch run benchmark:bench``:
+    -   An sample run across versions using ``hatch run bench:bench``:
 
         (Run once with ``__pycache__`` folders removed and ``sys.dont_write_bytecode=True``):
 
