@@ -1049,7 +1049,7 @@ class DeferredContext:
     __slots__ = ("is_active", "_import_ctx_token", "_defer_ctx_token")
 
     def __enter__(self) -> None:
-        self.is_active = bool(_current_defer_config.get(False))
+        self.is_active: bool = bool(_current_defer_config.get(False))
         if self.is_active:
             self._defer_ctx_token = _is_deferred.set(True)
             self._import_ctx_token = _original_import.set(builtins.__import__)
