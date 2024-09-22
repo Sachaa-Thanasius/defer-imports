@@ -17,7 +17,7 @@ defer-imports
 
 A library that implements `PEP 690 <https://peps.python.org/pep-0690/>`_–esque lazy imports in pure Python.
 
-**This is still being developed.**
+**NOTE: This is still in development.**
 
 
 .. contents::
@@ -56,6 +56,7 @@ To do its work, ``defer-imports`` must hook into the Python import system in mul
 
     import your_code
 
+
 It can also be used as a context manager, which makes sense when passing in arguments to adjust the hook:
 
 .. code-block:: python
@@ -65,11 +66,10 @@ It can also be used as a context manager, which makes sense when passing in argu
     with defer_imports.install_import_hook(module_names=(__name__,)) as hook_ctx:
         import your_code
 
+
 Making this call without arguments allows user code with imports contained within the ``defer_imports.until_use`` context manager to be deferred until referenced. However, it provides several configuration parameters for toggling global instrumentation (affecting all import statements) and for adjusting the granularity of that global instrumentation.
 
-.. warning::
-
-    Consider using the hook as a context manager form when using these configuration parameters; otherwise, the hook will persist and may cause other packages using ``defer_imports`` to behave differently than expected.  
+**WARNING: Consider using the hook as a context manager form when using these configuration parameters; otherwise, the explicit (or implicit) configuration will persist and may cause other packages using ``defer_imports`` to behave differently than expected.**
 
 .. code-block:: python
 
@@ -116,9 +116,7 @@ Assuming the path hook was registered normally (i.e. without providing any confi
 
     # inspect and Final won't be imported until referenced.
 
-.. warning::
-
-    If the context manager is not used as ``defer_imports.until_use``, it will not be instrumented properly. ``until_use`` alone, aliases, and the like are currently not supported.
+**WARNING: If the context manager is not used as ``defer_imports.until_use``, it will not be instrumented properly. ``until_use`` by itself, aliases of it, and the like are currently not supported.**
 
 If the path hook *was* registered with configuration, then within the affected modules, all global import statements will be instrumented with two exceptions: if they are within ``try-except-else-finally`` blocks, and if they are within non- ``defer_imports.until_use`` ``with`` blocks. Such imports are still performed eagerly. These "escape hatches" mostly match those described in PEP 690. 
 
@@ -199,9 +197,10 @@ Features
 
 -   Supports multiple Python runtimes/implementations.
 -   Supports all syntactically valid Python import statements.
--   Has an API for automatically instrumenting all valid import statements, not just those within a provided context manager.
 -   Doesn't break type-checkers like pyright and mypy.
--   Allows escape hatches for eager importing via ``try-except-else-finally`` and ``with`` blocks.
+-   Has an API for automatically instrumenting all valid import statements, not just those used within the provided context manager.
+
+    -   Allows escape hatches for eager importing via ``try-except-else-finally`` and ``with`` blocks.
 
 
 Caveats
@@ -209,7 +208,8 @@ Caveats
 
 -   Intentionally doesn't support deferred importing within class or function scope.
 -   Eagerly loads wildcard imports.
--   Can have a (relatively) hefty one-time cost from invalidating caches in Python's import system on setup.
+-   May clash with other import hooks.
+-   Can have a (relatively) hefty one-time setup cost from invalidating caches in Python's import system.
 -   Can't automatically resolve deferred imports when a namespace is being iterated over, leaving a hole in the abstraction.
 
     -   This library tries to hide its implementation details to avoid changing the developer/user experience. However, there is one leak in its abstraction: when using dictionary iteration methods on a dictionary or namespace that contains a deferred import key/proxy pair, the members of that pair will be visible, mutable, and will not resolve automatically. PEP 690 specifically addresses this by modifying the builtin ``dict``, allowing each instance to know if it contains proxies and then resolve them automatically during iteration (see the second half of its `"Implementation" section <https://peps.python.org/pep-0690/#implementation>`_ for more details). Note that qualifying ``dict`` iteration methods include ``dict.items()``, ``dict.values()``, etc., but outside of that, the builtin ``dir()`` also qualifies since it can see the keys for objects' internal dictionaries.
@@ -224,7 +224,7 @@ Lazy imports alleviate several of Python's current pain points. Because of that,
 
 Though that proposal was rejected, there are well-established third-party libraries that provide lazy import mechanisms, albeit with more constraints. Most do not have APIs as integrated or ergonomic as PEP 690's, but that makes sense; most predate the PEP and were not created with that goal in mind.
 
-Libraries that do intentionally inject PEP 690's semantics into Python in some form don't fill my needs for one reason or another. For example, `slothy <https://github.com/bswck/slothy>`_ (currently) limits itself to specific Python implementations by relying on the existence of call stack frames. I wanted to create something similar that took advantage of Python's robust hookable import system to modify code at compile time, didn't rely on implementation-specific APIs, is more ergonomic than the status quo, and will be easier to maintain as Python (and its various implementations) continues evolving.
+Existing libraries that do intentionally inject or emulate PEP 690's semantics in some form don't fill my needs for one reason or another. For example, `slothy <https://github.com/bswck/slothy>`_ (currently) limits itself to specific Python implementations by relying on the existence of call stack frames. I wanted to create something similar that doesn't rely on implementation-specific APIs, is still more ergonomic than the status quo, and will be easier to maintain as Python (and its various implementations) continues evolving. 
 
 
 How?
@@ -281,8 +281,11 @@ A bit rough, but there are currently two ways of measuring activation and/or imp
 
 -   Built-in Python timing tools, such as ``timeit`` and ``-X importtime``.
 
-    -   Ex 1. ``python -m timeit -n 1 -r 1 -- "import defer_imports"``
-    -   Ex 2. ``python -X importtime -c "import defer_imports"``
+    -   Examples:
+
+        -   ``python -m timeit -n 1 -r 1 -- "import defer_imports"``
+        -   ``python -X importtime -c "import defer_imports"``
+
     -   Substitute ``defer_imports`` with other modules, e.g. ``slothy``, to compare.
     -   The results can vary greatly between runs, so if possible, only compare the resulting time(s) when collected from the same process.
 

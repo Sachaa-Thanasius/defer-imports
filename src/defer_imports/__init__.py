@@ -156,6 +156,8 @@ def _resolve_name(name: str, package: str, level: int) -> str:
 
 # ============================================================================
 # region -------- Compile-time magic --------
+#
+# The AST transformer, import hook machinery, and import hook API.
 # ============================================================================
 
 
@@ -176,7 +178,7 @@ class _DeferredInstrumenter(ast.NodeTransformer):
 
     Notes
     -----
-    This assumes the module is not empty and "with defer_imports.until_use" is used somewhere in it.
+    The transformer assumes the module is not empty and "with defer_imports.until_use" is used somewhere in it.
     """
 
     def __init__(
@@ -238,9 +240,10 @@ class _DeferredInstrumenter(ast.NodeTransformer):
         elif isinstance(self.data, str):
             return self.data
         else:
-            # Based on importlib.util.decode_source.
+            # This is based on importlib.util.decode_source().
             newline_decoder = io.IncrementalNewlineDecoder(None, translate=True)
-            return newline_decoder.decode(self.data.decode(self.encoding))  # pyright: ignore # Common buffer types have decode method.
+            # Expected buffer types (bytes, bytearray, memoryview) are known to have a decode method.
+            return newline_decoder.decode(self.data.decode(self.encoding))  # pyright: ignore
 
     def _get_node_context(self, node: ast.stmt):  # noqa: ANN202 # Version-dependent and too verbose.
         """Get the location context for a node.
@@ -470,15 +473,7 @@ class _DeferredInstrumenter(ast.NodeTransformer):
 
         instrumented_nodes = self._substitute_import_keys(import_nodes)
         wrapper_node = ast.With(
-            items=[
-                ast.withitem(
-                    context_expr=ast.Attribute(
-                        value=ast.Name("defer_imports", ctx=ast.Load()),
-                        attr="until_use",
-                        ctx=ast.Load(),
-                    )
-                )
-            ],
+            [ast.withitem(ast.Attribute(ast.Name("defer_imports", ast.Load()), "until_use", ast.Load()))],
             body=instrumented_nodes,
         )
 
@@ -528,9 +523,6 @@ class _DeferredInstrumenter(ast.NodeTransformer):
         return node
 
 
-# region ---- Import hook machinery ----
-
-
 def _check_source_for_defer_usage(data: _tp.Union[_tp.ReadableBuffer, str]) -> tuple[str, bool]:
     """Get the encoding of the given code and also check if it uses "with defer_imports.until_use"."""
 
@@ -572,17 +564,16 @@ class _DeferredFileLoader(SourceFileLoader):
 
         Notes
         -----
-        If the path points to a bytecode file, check for a defer_imports-specific header. If the header is invalid, raise
-        OSError to invalidate the bytecode; importlib._boostrap_external.SourceLoader.get_code expects this [1]_.
+        If the path points to a bytecode file, check for a defer_imports-specific header. If the header is invalid,
+        raise OSError to invalidate the bytecode; importlib._boostrap_external.SourceLoader.get_code expects this [1]_.
 
-        Another option is to monkeypatch importlib.util.cache_from_source, as beartype [2]_ and typeguard [3]_ do, but that seems
-        less safe.
+        Another option is to monkeypatch importlib.util.cache_from_source, as beartype [2]_ and typeguard do, but that
+        seems unnecessary.
 
         References
         ----------
         .. [1] https://gregoryszorc.com/blog/2017/03/13/from-__past__-import-bytes_literals/
         .. [2] https://github.com/beartype/beartype/blob/e9eeb4e282f438e770520b99deadbe219a1c62dc/beartype/claw/_importlib/_clawimpload.py#L177-L312
-        .. [3] https://github.com/beartype/beartype/blob/e9eeb4e282f438e770520b99deadbe219a1c62dc/beartype/claw/_importlib/clawimpcache.py#L22-L26
         """
 
         data = super().get_data(path)
@@ -605,8 +596,8 @@ class _DeferredFileLoader(SourceFileLoader):
 
         Notes
         -----
-        If the file is a bytecode one, prepend a defer_imports-specific header to it. That way, instrumented bytecode can be
-        identified and invalidated later if necessary [1]_.
+        If the file is a bytecode one, prepend a defer_imports-specific header to it. That way, instrumented bytecode
+        can be identified and invalidated later if necessary [1]_.
 
         References
         ----------
@@ -620,7 +611,7 @@ class _DeferredFileLoader(SourceFileLoader):
 
     # NOTE: Signature of SourceFileLoader.source_to_code at runtime and in typeshed aren't consistent.
     def source_to_code(self, data: _SourceData, path: _ModulePath, *, _optimize: int = -1) -> _tp.CodeType:  # pyright: ignore [reportIncompatibleMethodOverride]
-        """Compile 'data' into a code object, but not before potentially instrumenting it.
+        """Compile "data" into a code object, but not before potentially instrumenting it.
 
         Parameters
         ----------
@@ -658,19 +649,19 @@ class _DeferredFileLoader(SourceFileLoader):
 
     def exec_module(self, module: _tp.ModuleType) -> None:
         """Execute the module, but only after getting state from module.__spec__.loader_state if present."""
+
         if (spec := module.__spec__) and spec.loader_state is not None:
             self.defer_module_level = spec.loader_state["defer_module_level"]
 
-        super().exec_module(module)
-        module.__loader__ = None
+        return super().exec_module(module)
 
 
 class _DeferredFileFinder(FileFinder):
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"{type(self).__name__}({self.path!r})"
 
     def find_spec(self, fullname: str, target: _tp.Optional[_tp.ModuleType] = None) -> _tp.Optional[ModuleSpec]:
-        """Try to find a spec for "fullname" on sys.path or "path", with some modifications based on deferral state.
+        """Try to find a spec for "fullname" on sys.path or "path", with some deferral state attached.
 
         Notes
         -----
@@ -692,7 +683,7 @@ class _DeferredFileFinder(FileFinder):
             if config is None:
                 defer_module_level = False
             else:
-                # NOTE: The precendence should match what's documented for install_import_hook().
+                # NOTE: The configuration precedence order should match what's documented for install_import_hook().
                 defer_module_level = config.apply_all or bool(
                     config.module_names
                     and (
@@ -710,15 +701,12 @@ _DEFER_PATH_HOOK = _DeferredFileFinder.path_hook((_DeferredFileLoader, SOURCE_SU
 """Singleton import path hook that enables defer_imports's instrumentation."""
 
 
-# endregion
-
-
 _current_defer_config: contextvars.ContextVar[_DeferConfig] = contextvars.ContextVar("_current_defer_config")
 """The current configuration for defer_imports's instrumentation."""
 
 
 class _DeferConfig:
-    """Configuration container, whose contents are used to determine how a module should be instrumented."""
+    """Configuration container whose contents are used to determine how a module should be instrumented."""
 
     def __init__(self, apply_all: bool, module_names: _tp.Sequence[str], recursive: bool) -> None:
         self.apply_all = apply_all
@@ -735,9 +723,9 @@ def _invalidate_path_entry_caches() -> None:
 
     Notes
     -----
-    sys.path_importer_cache.clear was tried. Pathfinder.invalidate_caches has a greater upfront cost because it imports
-    importlib.metadata, but it doesn't nuke as much and increase import time later. Maybe the former option would be
-    better if this were called in a .pth file, when the path importer cache is less populated when nuked.
+    sys.path_importer_cache.clear() seems to break everything. Pathfinder.invalidate_caches() doesn't, but it has a
+    greater upfront cost if performed early in an application's lifetime. That's because it imports importlib.metadata.
+    However, it doesn't nuke as much, thereby preventing an increase in import time later.
     """
 
     PathFinder.invalidate_caches()
@@ -749,30 +737,36 @@ class ImportHookContext:
     state and uninstall defer_import's import path hook.
     """
 
-    def __init__(self, config_ctx_tok: contextvars.Token[_DeferConfig]) -> None:
-        self._tok = config_ctx_tok
+    def __init__(self, _config_ctx_tok: contextvars.Token[_DeferConfig], _uninstall_after: bool) -> None:
+        self._tok = _config_ctx_tok
+        self._uninstall_after = _uninstall_after
 
     def __enter__(self) -> _tp.Self:
         return self
 
     def __exit__(self, *exc_info: object) -> None:
         self.reset()
-        self.uninstall()
+        if self._uninstall_after:
+            self.uninstall()
 
     def reset(self) -> None:
-        """Attempt to reset the import hook configuration. If already reset, does nothing."""
+        """Attempt to reset the import hook configuration.
+
+        If already reset, does nothing.
+        """
 
         try:
             tok = self._tok
         except AttributeError:
             pass
         else:
-            del self._tok
             _current_defer_config.reset(tok)
+            del self._tok
 
     def uninstall(self) -> None:
-        """Attempt to remove the path hook from sys.path_hooks and invalidate path entry caches. If already removed,
-        does nothing.
+        """Attempt to remove the path hook from sys.path_hooks and invalidate path entry caches.
+
+        If already removed, does nothing.
         """
 
         try:
@@ -785,6 +779,7 @@ class ImportHookContext:
 
 def install_import_hook(
     *,
+    uninstall_after: bool = False,
     apply_all: bool = False,
     module_names: _tp.Sequence[str] = (),
     recursive: bool = False,
@@ -794,11 +789,13 @@ def install_import_hook(
 
     The configuration is for instrumenting ALL import statements, not only ones wrapped by defer_imports.until_use.
 
-    This should be run before the code it is meant to affect is executed. One place to put do that is __init__.py of
-    your package or app.
+    This should be run before the code it is meant to affect is executed. One place to put do that is __init__.py of a
+    package or app.
 
     Parameters
     ----------
+    uninstall_after: bool, default=False
+        Whether to uninstall the import hook upon exit if this function is used as a context manager.
     apply_all: bool, default=False
         Whether to apply module-level import deferral, i.e. instrumentation of all imports, to all modules henceforth.
         Has higher priority than module_names. More suitable for use in applications.
@@ -823,12 +820,12 @@ def install_import_hook(
         except ValueError:
             hook_insert_index = 0
 
-        sys.path_hooks.insert(hook_insert_index, _DEFER_PATH_HOOK)
         _invalidate_path_entry_caches()
+        sys.path_hooks.insert(hook_insert_index, _DEFER_PATH_HOOK)
 
     config = _DeferConfig(apply_all, module_names, recursive)
     config_ctx_tok = _current_defer_config.set(config)
-    return ImportHookContext(config_ctx_tok)
+    return ImportHookContext(config_ctx_tok, uninstall_after)
 
 
 # endregion
@@ -836,6 +833,8 @@ def install_import_hook(
 
 # ============================================================================
 # region -------- Runtime magic --------
+#
+# The proxies, __import__ replacement, and until_use API.
 # ============================================================================
 
 
@@ -1078,11 +1077,8 @@ until_use: _tp.Final[DeferredContext] = DeferredContext()
 # ============================================================================
 
 
-_features = [getattr(__future__, feat_name) for feat_name in __future__.all_feature_names]
-
-
 class _DeferredIPythonInstrumenter(ast.NodeTransformer):
-    """An AST transformer that wraps defer_import's AST instrumentation to fit IPython's AST hook interface."""
+    """An AST transformer that wraps defer_imports's AST instrumentation to fit IPython's AST hook interface."""
 
     def __init__(self):
         # The wrapped transformer's initial data is an empty string because we only get the actual data within visit().
@@ -1115,13 +1111,15 @@ def instrument_ipython() -> None:
     ipython_shell.ast_transformers.append(_DeferredIPythonInstrumenter())
 
 
+_features = [getattr(__future__, feat_name) for feat_name in __future__.all_feature_names]
+
 _delayed_console_names = frozenset(
     {"code", "codeop", "os", "_DeferredCompile", "DeferredInteractiveConsole", "interact"}
 )
 
 
 def __getattr__(name: str) -> _tp.Any:  # pragma: no cover
-    # Shim to delay executing expensive console-related functionality until requested.
+    # Hack to delay executing expensive console-related functionality until requested.
 
     if name in _delayed_console_names:
         global code, codeop, os, _DeferredCompile, DeferredInteractiveConsole, interact
@@ -1138,22 +1136,24 @@ def __getattr__(name: str) -> _tp.Any:  # pragma: no cover
                 if kwargs.get("incomplete_input", True) is False:
                     flags &= ~codeop.PyCF_DONT_IMPLY_DEDENT  # pyright: ignore
                     flags &= ~codeop.PyCF_ALLOW_INCOMPLETE_INPUT  # pyright: ignore
-
-                # These five lines are the only difference from codeop.Compile.__call__.
                 assert isinstance(flags, int)
-                orig_ast = compile(source, filename, symbol, flags | ast.PyCF_ONLY_AST, True)
-                transformer = _DeferredInstrumenter(source, filename, "utf-8")
-                new_ast = ast.fix_missing_locations(transformer.visit(orig_ast))
-                codeob = compile(new_ast, filename, symbol, flags, True)
+
+                codeob = self._instrumented_compile(source, filename, symbol, flags)
 
                 for feature in _features:
                     if codeob.co_flags & feature.compiler_flag:
                         self.flags |= feature.compiler_flag
                 return codeob
 
+            @staticmethod
+            def _instrumented_compile(source: str, filename: str, symbol: str, flags: int) -> _tp.CodeType:
+                orig_tree = compile(source, filename, symbol, flags | ast.PyCF_ONLY_AST, True)
+                transformer = _DeferredInstrumenter(source, filename)
+                new_tree = ast.fix_missing_locations(transformer.visit(orig_tree))
+                return compile(new_tree, filename, symbol, flags, True)
+
         class DeferredInteractiveConsole(code.InteractiveConsole):
-            """An emulator of the interactive Python interpreter, but with defer_import's compile-time AST transformer
-            baked in.
+            """An emulator of the interactive Python interpreter, but with defer_imports's transformation baked in.
 
             This ensures that defer_imports.until_use works as intended when used directly in an instance of this
             console.
@@ -1187,7 +1187,7 @@ def __getattr__(name: str) -> _tp.Any:  # pragma: no cover
 
             Notes
             -----
-            Parts of this implementation are based on asyncio.__main__ in CPython 3.14.
+            Much of this implementation is based on asyncio.__main__ in CPython 3.14.
             """
 
             py_impl_name = sys.implementation.name
@@ -1197,9 +1197,9 @@ def __getattr__(name: str) -> _tp.Any:  # pragma: no cover
                 "__name__": __name__,
                 "__package__": __package__,
                 "__loader__": __loader__,
+                "__file__": __file__,
                 "__spec__": __spec__,
                 "__builtins__": __builtins__,
-                "__file__": __file__,
                 "defer_imports": sys.modules[__name__],
             }
             console = DeferredInteractiveConsole(repl_locals)
@@ -1221,7 +1221,7 @@ def __getattr__(name: str) -> _tp.Any:  # pragma: no cover
                     import site
 
                     if interactive_hook is site.register_readline:
-                        # Fix the completer function to use the interactive console locals
+                        # Fix the completer function to use the interactive console locals.
                         try:
                             import rlcompleter
                         except ImportError:
@@ -1233,8 +1233,6 @@ def __getattr__(name: str) -> _tp.Any:  # pragma: no cover
 
                 if startup_path := os.getenv("PYTHONSTARTUP"):
                     sys.audit(f"{py_impl_name}.run_startup", startup_path)
-
-                    import tokenize
 
                     with tokenize.open(startup_path) as f:
                         startup_code = compile(f.read(), startup_path, "exec")

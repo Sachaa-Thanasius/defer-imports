@@ -56,7 +56,7 @@ features = ["bench"]
 python = ["3.9", "3.10", "3.11", "3.12", "3.13"]
 
 [tool.hatch.envs.bench.scripts]
-bench = "python -B -m bench.bench_samples"
+bench = "python -m bench.bench_samples"
 
 
 # -------- Test config
@@ -174,7 +174,7 @@ keep-runtime-typing = true
 ]
 
 # ---- Test code
-"tests/**/*.py" = [
+"tests/**/test_*.py" = [
     "T201", # Printing is fine.
     "T203", # Pretty printing is fine.
     # Don't need some annotations in tests.

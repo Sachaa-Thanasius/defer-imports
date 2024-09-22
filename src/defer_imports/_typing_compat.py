@@ -167,9 +167,9 @@ def __getattr__(name: str) -> object:  # noqa: PLR0911, PLR0912, PLR0915
         return globals()[name]
 
     if name == "PathEntryFinderProtocol":
-        from typing import Protocol
-
         global PathEntryFinderProtocol
+
+        from typing import Protocol
 
         class PathEntryFinderProtocol(Protocol):
             # Copied from _typeshed.importlib.
