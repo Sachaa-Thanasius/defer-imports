@@ -131,67 +131,6 @@ Use Cases
 -   If expensive imports are only necessary for certain code paths that won't always be taken, e.g. in subcommands in CLI tools.
 
 
-Extra: Console
---------------
-
-``defer-imports`` works while within a regular Python REPL, as long as that work is being done in a package being imported and not with direct usage of the ``defer_imports.until_use`` context manager. To directly use the context manager in a REPL, use the included interactive console.
-
-You can start it from the command line::
-
-    > python -m defer_imports
-    Python 3.11.9 (tags/v3.11.9:de54cf5, Apr  2 2024, 10:12:12) [MSC v.1938 64 bit (AMD64)] on win32
-    Type "help", "copyright", "credits" or "license" for more information.
-    (DeferredInteractiveConsole)
-    >>> import defer_imports
-    >>> with defer_imports.until_use:
-    ...     import typing
-    ... 
-    >>> import sys           
-    >>> "typing" in sys.modules
-    False
-    >>> typing
-    <module 'typing' from 'C:\\Users\\...\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\typing.py'>
-    >>> "typing" in sys.modules
-    True
-
-You can also start it while within a standard Python REPL:
-
-.. code-block:: pycon
-
-    >>> from defer_imports import interact
-    >>> interact()
-    Python 3.11.9 (tags/v3.11.9:de54cf5, Apr  2 2024, 10:12:12) [MSC v.1938 64 bit (AMD64)] on win32
-    Type "help", "copyright", "credits" or "license" for more information.
-    (DeferredInteractiveConsole)
-    >>> import defer_imports
-    >>> with defer_imports.until_use:
-    ...     import typing
-    ... 
-    >>> import sys           
-    >>> "typing" in sys.modules
-    False
-    >>> typing
-    <module 'typing' from 'C:\\Users\\...\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\typing.py'>
-    >>> "typing" in sys.modules
-    True
-
-Additionally, if you're using IPython in a terminal or Jupyter environment, there is a separate function you can call to ensure the context manager works there as well:
-
-.. code-block:: ipython
-
-    In [1]: import defer_imports
-    In [2]: defer_imports.instrument_ipython()
-    In [3]: with defer_imports.until_use:
-    ...:     import numpy
-    ...:
-    In [4]: import sys
-    In [5]: print("numpy" in sys.modules)
-    False
-    In [6]: numpy
-    In [7]: print("numpy" in sys.modules)
-    True
-
-
 Features
 ========
 
@@ -210,9 +149,9 @@ Caveats
 -   Eagerly loads wildcard imports.
 -   May clash with other import hooks.
 -   Can have a (relatively) hefty one-time setup cost from invalidating caches in Python's import system.
--   Can't automatically resolve deferred imports when a namespace is being iterated over, leaving a hole in the abstraction.
+-   Can't automatically resolve deferred imports when a namespace is being iterated over, leaving a hole in its abstraction.
 
-    -   This library tries to hide its implementation details to avoid changing the developer/user experience. However, there is one leak in its abstraction: when using dictionary iteration methods on a dictionary or namespace that contains a deferred import key/proxy pair, the members of that pair will be visible, mutable, and will not resolve automatically. PEP 690 specifically addresses this by modifying the builtin ``dict``, allowing each instance to know if it contains proxies and then resolve them automatically during iteration (see the second half of its `"Implementation" section <https://peps.python.org/pep-0690/#implementation>`_ for more details). Note that qualifying ``dict`` iteration methods include ``dict.items()``, ``dict.values()``, etc., but outside of that, the builtin ``dir()`` also qualifies since it can see the keys for objects' internal dictionaries.
+    -   When using dictionary iteration methods on a dictionary or namespace that contains a deferred import key/proxy pair, the members of that pair will be visible, mutable, and will not resolve automatically. PEP 690 specifically addresses this by modifying the builtin ``dict``, allowing each instance to know if it contains proxies and then resolve them automatically during iteration (see the second half of its `"Implementation" section <https://peps.python.org/pep-0690/#implementation>`_ for more details). Note that qualifying ``dict`` iteration methods include ``dict.items()``, ``dict.values()``, etc., but outside of that, the builtin ``dir()`` also qualifies since it can see the keys for objects' internal dictionaries.
 
         As of right now, nothing can be done about this using pure Python without massively slowing down ``dict``. Accordingly, users should try to avoid interacting with deferred import keys/proxies if encountered while iterating over module dictionaries; the result of doing so is not guaranteed.
 
@@ -244,9 +183,9 @@ With this methodology, we can avoid using implementation-specific hacks like fra
 Benchmarks
 ==========
 
-A bit rough, but there are currently two ways of measuring activation and/or import time:
+There are currently a few ways of measuring activation and/or import time:
 
--   A local benchmark script, invokable with ``python -m bench.bench_samples`` (run with ``--help`` to see more information).
+-   A local benchmark script, invokable with ``python -m bench.bench_samples``.
 
     -   To prevent bytecode caching from impacting the benchmark, run with `python -B <https://docs.python.org/3/using/cmdline.html#cmdoption-B>`_, which will set ``sys.dont_write_bytecode`` to ``True`` and cause the benchmark script to purge all existing ``__pycache__`` folders in the project directory.
     -   PyPy is excluded from the benchmark since it takes time to ramp up. 

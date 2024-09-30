@@ -2,88 +2,162 @@
 #
 # SPDX-License-Identifier: MIT
 
-"""A __getattr__-based lazy import shim for typing- and annotation-related symbols."""
+"""A shim for typing- and annotation-related symbols, implemented with several other lazy import mechanisms."""
 
 from __future__ import annotations
 
+import importlib.util
 import sys
 from importlib.machinery import ModuleSpec
 
 
 __all__ = (
-    # -- from collections.abc
+    # -- __getattr__-based types or values
     "Callable",
     "Generator",
     "Iterable",
     "MutableMapping",
     "Sequence",
-    # -- from typing
-    "Any",
-    "Final",
-    "Optional",
-    "Union",
-    # -- from types
-    "CodeType",
-    "ModuleType",
-    # -- from importlib.abc
     "Loader",
-    # -- from os
-    "PathLike",
-    # -- imported with fallbacks
     "ReadableBuffer",
     "Self",
     "TypeAlias",
     "TypeGuard",
-    # -- needs import for definition
     "T",
-    "AcceptsInput",
     "PathEntryFinderProtocol",
     # -- pure definition
     "final",
+    # -- LazyLoader-based helpers
+    "lazy_import_module",
+    "lazy_loader_context",
 )
 
 TYPE_CHECKING = False
 
+
+# ============================================================================
+# region -------- importlib.util.LazyLoader-based laziness --------
+# ============================================================================
+
+
+def lazy_import_module(name: str, package: typing.Optional[str] = None) -> types.ModuleType:
+    """Lazily import a name using ``importlib.util.LazyLoader``.
+
+    Notes
+    -----
+    Slightly modified version of a recipe found in the Python 3.12 importlib docs.
+    """
+
+    absolute_name = importlib.util.resolve_name(name, package)
+    try:
+        return sys.modules[absolute_name]
+    except KeyError:
+        pass
+
+    spec = importlib.util.find_spec(absolute_name)
+    if spec is None:
+        msg = f"No module named {name!r}"
+        raise ModuleNotFoundError(msg)
+
+    if spec.loader is None:
+        msg = "missing loader"
+        raise ImportError(msg, name=spec.name)
+
+    spec.loader = loader = importlib.util.LazyLoader(spec.loader)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    loader.exec_module(module)
+    return module
+
+
 if TYPE_CHECKING:
-    from typing import final
+    import types
+    import typing
 else:
+    types = lazy_import_module("types")
+    typing = lazy_import_module("typing")
 
-    def final(f: object) -> object:
-        """Decorator to indicate final methods and final classes.
 
-        Slightly modified version of typing.final to avoid importing from typing at runtime.
-        """
+class _LazyFinder:
+    """An meta-path finder that wraps a found spec's loader with ``importlib.util.LazyLoader``."""
 
+    def find_spec(
+        self,
+        fullname: str,
+        path: typing.Sequence[str] | None,
+        target: types.ModuleType | None = None,
+        /,
+    ) -> ModuleSpec:
+        for finder in sys.meta_path:
+            if finder != self:
+                spec = finder.find_spec(fullname, path, target)
+                if spec is not None:
+                    break
+        else:
+            msg = f"No module named {fullname!r}"
+            raise ModuleNotFoundError(msg, name=fullname)
+
+        if spec.loader is None:
+            msg = "missing loader"
+            raise ImportError(msg, name=spec.name)
+
+        spec.loader = importlib.util.LazyLoader(spec.loader)
+        return spec
+
+
+_LAZY_FINDER = _LazyFinder()
+
+
+class _LazyLoaderContext:
+    """A context manager that temporarily modifies sys.meta_path to make enclosed import statements lazy.
+
+    This operates using ``importlib.util.LazyLoader``. Consequentially, it only works on top-level non-submodule import
+    statements.
+
+    Examples
+    --------
+    These import statements should act lazy::
+
+        with lazy_loader_context:
+            import asyncio
+
+    These should act eager::
+
+        with lazy_loader_context:
+            import asyncio.base_events
+            from typing import Final
+            from . import hello
+    """
+
+    def __enter__(self) -> None:
+        if _LAZY_FINDER not in sys.meta_path:
+            sys.meta_path.insert(0, _LAZY_FINDER)
+
+    def __exit__(self, *exc_info: object):
         try:
-            f.__final__ = True  # pyright: ignore # Runtime attribute assignment
-        except (AttributeError, TypeError):  # pragma: no cover
-            # Skip the attribute silently if it is not writable.
-            # AttributeError: if the object has __slots__ or a read-only property
-            # TypeError: if it's a builtin class
+            sys.meta_path.remove(_LAZY_FINDER)
+        except ValueError:
             pass
-        return f
 
 
-def __getattr__(name: str) -> object:  # noqa: PLR0911, PLR0912, PLR0915
-    # ---- Pure imports
+lazy_loader_context = _LazyLoaderContext()
+
+
+# endregion
+
+
+# ============================================================================
+# region -------- module-level-__getattr__-based laziness --------
+# ============================================================================
+
+
+def __getattr__(name: str) -> typing.Any:  # noqa: PLR0911, PLR0912
+    # region ---- Pure imports
+
     if name in {"Callable", "Generator", "Iterable", "MutableMapping", "Sequence"}:
         global Callable, Generator, Iterable, MutableMapping, Sequence
 
         from collections.abc import Callable, Generator, Iterable, MutableMapping, Sequence
-
-        return globals()[name]
-
-    if name in {"Any", "Final", "Optional", "Union"}:
-        global Any, Final, Optional, Union
-
-        from typing import Any, Final, Optional, Union
-
-        return globals()[name]
-
-    if name in {"CodeType", "ModuleType"}:
-        global CodeType, ModuleType
-
-        from types import CodeType, ModuleType
 
         return globals()[name]
 
@@ -94,14 +168,10 @@ def __getattr__(name: str) -> object:  # noqa: PLR0911, PLR0912, PLR0915
 
         return globals()[name]
 
-    if name == "PathLike":
-        global PathLike
+    # endregion
 
-        from os import PathLike
+    # region ---- Imports with fallbacks
 
-        return globals()[name]
-
-    # ---- Imports with fallbacks
     if name == "ReadableBuffer":
         global ReadableBuffer
 
@@ -147,35 +217,27 @@ def __getattr__(name: str) -> object:  # noqa: PLR0911, PLR0912, PLR0915
 
         return globals()[name]
 
-    # ---- Composed types/values with imports involved
+    # endregion
+
+    # region ---- Composed types/values with imports involved
+
     if name == "T":
         global T
 
-        from typing import TypeVar
-
-        T = TypeVar("T")
-        return globals()[name]
-
-    if name == "AcceptsInput":
-        global AcceptsInput
-
-        from typing import Protocol
-
-        class AcceptsInput(Protocol):
-            def __call__(self, prompt: str = "") -> str: ...
+        T = typing.TypeVar("T")
 
         return globals()[name]
 
     if name == "PathEntryFinderProtocol":
         global PathEntryFinderProtocol
 
-        from typing import Protocol
-
-        class PathEntryFinderProtocol(Protocol):
+        class PathEntryFinderProtocol(typing.Protocol):
             # Copied from _typeshed.importlib.
-            def find_spec(self, fullname: str, target: ModuleType | None = ..., /) -> ModuleSpec | None: ...
+            def find_spec(self, fullname: str, target: types.ModuleType | None = ..., /) -> ModuleSpec | None: ...
 
         return globals()[name]
+
+    # endregion
 
     msg = f"module {__name__!r} has no attribute {name!r}"
     raise AttributeError(msg)
@@ -186,3 +248,26 @@ _initial_global_names = tuple(globals())
 
 def __dir__() -> list[str]:
     return list(set(_initial_global_names + __all__))
+
+
+# endregion
+
+
+if TYPE_CHECKING:
+    from typing import final
+else:
+
+    def final(f: object) -> object:
+        """Decorator to indicate final methods and final classes.
+
+        Slightly modified version of typing.final to avoid importing from typing at runtime.
+        """
+
+        try:
+            f.__final__ = True  # pyright: ignore # Runtime attribute assignment
+        except (AttributeError, TypeError):  # pragma: no cover
+            # Skip the attribute silently if it is not writable.
+            # AttributeError: if the object has __slots__ or a read-only property
+            # TypeError: if it's a builtin class
+            pass
+        return f

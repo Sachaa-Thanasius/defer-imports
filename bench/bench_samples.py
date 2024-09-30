@@ -51,7 +51,7 @@ def bench_slothy() -> float:
 
 
 def bench_defer_imports_local() -> float:
-    with defer_imports.install_import_hook(), CatchTime() as ct:
+    with CatchTime() as ct, defer_imports.install_import_hook():
         import bench.sample_defer_local
     return ct.elapsed
 

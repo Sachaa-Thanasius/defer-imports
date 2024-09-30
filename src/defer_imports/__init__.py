@@ -5,15 +5,10 @@
 """A library that implements PEP 690–esque lazy imports in pure Python."""
 
 from __future__ import annotations
-import __future__
 
-import ast
 import builtins
 import contextvars
-import io
 import sys
-import tokenize
-import warnings
 import zipimport
 from collections import deque
 from importlib.machinery import BYTECODE_SUFFIXES, SOURCE_SUFFIXES, FileFinder, ModuleSpec, PathFinder, SourceFileLoader
@@ -23,27 +18,36 @@ from threading import RLock
 from . import _typing_compat as _tp
 
 
-__version__ = "0.0.3.dev0"
+with _tp.lazy_loader_context:
+    import ast
+    import io
+    import os
+    import tokenize
+    import warnings
+
+TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    import types
+    import typing
+else:
+    types = _tp.lazy_import_module("types")
+    typing = _tp.lazy_import_module("typing")
+
+__version__ = "0.0.3.dev1"
 
 __all__ = (
-    # -- Compile-time hook
     "install_import_hook",
     "ImportHookContext",
-    # -- Runtime hook
     "until_use",
     "DeferredContext",
-    # -- Console helpers
-    "instrument_ipython",
-    "DeferredInteractiveConsole",
-    "interact",
 )
 
 
 # ============================================================================
 # region -------- Vendored helpers --------
 #
-# Helper functions vendored from CPython in some way to avoid actually
-# importing them.
+# Helper functions vendored from CPython in some way.
 # ============================================================================
 
 
@@ -52,7 +56,7 @@ def _sliding_window(iterable: _tp.Iterable[_tp.T], n: int) -> _tp.Generator[tupl
 
     Notes
     -----
-    Slightly modified version of a recipe in the Python 3.12 itertools docs.
+    Slightly modified version of a recipe found in the Python 3.12 itertools docs.
 
     Examples
     --------
@@ -67,7 +71,7 @@ def _sliding_window(iterable: _tp.Iterable[_tp.T], n: int) -> _tp.Generator[tupl
         yield tuple(window)
 
 
-def _sanity_check(name: str, package: _tp.Optional[str], level: int) -> None:
+def _sanity_check(name: str, package: typing.Optional[str], level: int) -> None:
     """Verify arguments are "sane".
 
     Notes
@@ -94,7 +98,7 @@ def _sanity_check(name: str, package: _tp.Optional[str], level: int) -> None:
         raise ValueError(msg)
 
 
-def _calc___package__(globals: _tp.MutableMapping[str, _tp.Any]) -> _tp.Optional[str]:
+def _calc___package__(globals: _tp.MutableMapping[str, typing.Any]) -> typing.Optional[str]:
     """Calculate what __package__ should be.
 
     __package__ is not guaranteed to be defined or could be set to None
@@ -161,29 +165,29 @@ def _resolve_name(name: str, package: str, level: int) -> str:
 # ============================================================================
 
 
-_StrPath: _tp.TypeAlias = "_tp.Union[str, _tp.PathLike[str]]"
-_ModulePath: _tp.TypeAlias = "_tp.Union[_StrPath, _tp.ReadableBuffer]"
-_SourceData: _tp.TypeAlias = "_tp.Union[_tp.ReadableBuffer, str, ast.Module, ast.Expression, ast.Interactive]"
+_StrPath: _tp.TypeAlias = "typing.Union[str, os.PathLike[str]]"
+_ModulePath: _tp.TypeAlias = "typing.Union[_StrPath, _tp.ReadableBuffer]"
+_SourceData: _tp.TypeAlias = "typing.Union[_tp.ReadableBuffer, str, ast.Module, ast.Expression, ast.Interactive]"
 
-
-_TOK_NAME, _TOK_OP = tokenize.NAME, tokenize.OP
 
 _BYTECODE_HEADER = f"defer_imports{__version__}".encode()
 """Custom header for defer_imports-instrumented bytecode files. Should be updated with every version release."""
 
 
-class _DeferredInstrumenter(ast.NodeTransformer):
+class _DeferredInstrumenter:
     """AST transformer that instruments imports within "with defer_imports.until_use: ..." blocks so that their
     results are assigned to custom keys in the global namespace.
 
     Notes
     -----
-    The transformer assumes the module is not empty and "with defer_imports.until_use" is used somewhere in it.
+    The transformer doesn't subclass ast.NodeTransformer but instead vendors its logic to avoid the import cost.
+    Additionally, it assumes the ast being instrumented is not empty and "with defer_imports.until_use" is used
+    somewhere in it.
     """
 
     def __init__(
         self,
-        data: _tp.Union[_tp.ReadableBuffer, str, ast.AST],
+        data: typing.Union[_tp.ReadableBuffer, str, ast.AST],
         filepath: _ModulePath = "<unknown>",
         encoding: str = "utf-8",
         *,
@@ -196,6 +200,13 @@ class _DeferredInstrumenter(ast.NodeTransformer):
 
         self.scope_depth = 0
         self.escape_hatch_depth = 0
+
+    def visit(self, node: ast.AST) -> typing.Any:
+        """Visit a node."""
+
+        method = f"visit_{node.__class__.__name__}"
+        visitor = getattr(self, method, self.generic_visit)
+        return visitor(node)
 
     def _visit_scope(self, node: ast.AST) -> ast.AST:
         """Track Python scope changes. Used to determine if a use of defer_imports.until_use is global."""
@@ -446,13 +457,13 @@ class _DeferredInstrumenter(ast.NodeTransformer):
         return self.generic_visit(node)
 
     @staticmethod
-    def _is_non_wildcard_import(obj: object) -> _tp.TypeGuard[_tp.Union[ast.Import, ast.ImportFrom]]:
+    def _is_non_wildcard_import(obj: object) -> _tp.TypeGuard[typing.Union[ast.Import, ast.ImportFrom]]:
         """Check if a given object is an import AST without wildcards."""
 
         return isinstance(obj, (ast.Import, ast.ImportFrom)) and obj.names[0].name != "*"
 
     @staticmethod
-    def _is_defer_imports_import(node: _tp.Union[ast.Import, ast.ImportFrom]) -> bool:
+    def _is_defer_imports_import(node: typing.Union[ast.Import, ast.ImportFrom]) -> bool:
         """Check if the given import node imports from defer_imports."""
 
         if isinstance(node, ast.Import):
@@ -460,7 +471,7 @@ class _DeferredInstrumenter(ast.NodeTransformer):
         else:
             return node.module is not None and node.module.partition(".")[0] == "defer_imports"
 
-    def _wrap_import_stmts(self, nodes: list[_tp.Any], start: int) -> ast.With:
+    def _wrap_import_stmts(self, nodes: list[typing.Any], start: int) -> ast.With:
         """Wrap a list of consecutive import nodes from a list of statements using a "defer_imports.until_use" block and
         instrument them.
 
@@ -501,7 +512,7 @@ class _DeferredInstrumenter(ast.NodeTransformer):
 
         for field, old_value in ast.iter_fields(node):
             if isinstance(old_value, list):
-                new_values: list[_tp.Any] = []
+                new_values: list[typing.Any] = []
                 for i, value in enumerate(old_value):  # pyright: ignore [reportUnknownArgumentType, reportUnknownVariableType]
                     if self._is_import_to_instrument(value):  # pyright: ignore [reportUnknownArgumentType]
                         value = self._wrap_import_stmts(old_value, i)  # noqa: PLW2901 # pyright: ignore [reportUnknownArgumentType]
@@ -523,8 +534,10 @@ class _DeferredInstrumenter(ast.NodeTransformer):
         return node
 
 
-def _check_source_for_defer_usage(data: _tp.Union[_tp.ReadableBuffer, str]) -> tuple[str, bool]:
+def _check_source_for_defer_usage(data: typing.Union[_tp.ReadableBuffer, str]) -> tuple[str, bool]:
     """Get the encoding of the given code and also check if it uses "with defer_imports.until_use"."""
+
+    _TOK_NAME, _TOK_OP = tokenize.NAME, tokenize.OP
 
     if isinstance(data, str):
         token_stream = tokenize.generate_tokens(io.StringIO(data).readline)
@@ -555,7 +568,7 @@ def _check_ast_for_defer_usage(data: ast.AST) -> tuple[str, bool]:
 class _DeferredFileLoader(SourceFileLoader):
     """A file loader that instruments .py files which use "with defer_imports.until_use: ..."."""
 
-    def __init__(self, *args: _tp.Any, **kwargs: _tp.Any) -> None:
+    def __init__(self, *args: typing.Any, **kwargs: typing.Any) -> None:
         super().__init__(*args, **kwargs)
         self.defer_module_level: bool = False
 
@@ -609,8 +622,8 @@ class _DeferredFileLoader(SourceFileLoader):
 
         return super().set_data(path, data, _mode=_mode)
 
-    # NOTE: Signature of SourceFileLoader.source_to_code at runtime and in typeshed aren't consistent.
-    def source_to_code(self, data: _SourceData, path: _ModulePath, *, _optimize: int = -1) -> _tp.CodeType:  # pyright: ignore [reportIncompatibleMethodOverride]
+    # NOTE: Signature of SourceFileLoader.source_to_code at runtime isn't consistent with signature in typeshed.
+    def source_to_code(self, data: _SourceData, path: _ModulePath, *, _optimize: int = -1) -> types.CodeType:  # pyright: ignore [reportIncompatibleMethodOverride]
         """Compile "data" into a code object, but not before potentially instrumenting it.
 
         Parameters
@@ -622,7 +635,7 @@ class _DeferredFileLoader(SourceFileLoader):
 
         Returns
         -------
-        _tp.CodeType
+        types.CodeType
             The compiled code object.
         """
 
@@ -647,7 +660,7 @@ class _DeferredFileLoader(SourceFileLoader):
 
         return super().source_to_code(new_tree, path, _optimize=_optimize)  # pyright: ignore # See note above.
 
-    def exec_module(self, module: _tp.ModuleType) -> None:
+    def exec_module(self, module: types.ModuleType) -> None:
         """Execute the module, but only after getting state from module.__spec__.loader_state if present."""
 
         if (spec := module.__spec__) and spec.loader_state is not None:
@@ -660,7 +673,7 @@ class _DeferredFileFinder(FileFinder):
     def __repr__(self) -> str:
         return f"{type(self).__name__}({self.path!r})"
 
-    def find_spec(self, fullname: str, target: _tp.Optional[_tp.ModuleType] = None) -> _tp.Optional[ModuleSpec]:
+    def find_spec(self, fullname: str, target: typing.Optional[types.ModuleType] = None) -> typing.Optional[ModuleSpec]:
         """Try to find a spec for "fullname" on sys.path or "path", with some deferral state attached.
 
         Notes
@@ -677,13 +690,14 @@ class _DeferredFileFinder(FileFinder):
         spec = super().find_spec(fullname, target)
 
         if spec is not None and isinstance(spec.loader, _DeferredFileLoader):
-            # Check defer configuration after finding succeeds, but before loading starts.
+            # NOTE: We're locking in defer_imports configuration for this module between finding it and loading it.
+            #       However, it's possible to delay getting the configuration until module execution. Not sure what's
+            #       best.
             config = _current_defer_config.get(None)
 
             if config is None:
                 defer_module_level = False
             else:
-                # NOTE: The configuration precedence order should match what's documented for install_import_hook().
                 defer_module_level = config.apply_all or bool(
                     config.module_names
                     and (
@@ -691,6 +705,9 @@ class _DeferredFileFinder(FileFinder):
                         or (config.recursive and any(mod.startswith(f"{fullname}.") for mod in config.module_names))
                     )
                 )
+
+                if config.loader_class is not None:
+                    spec.loader = config.loader_class(fullname, spec.loader.path)  # pyright: ignore [reportCallIssue]
 
             spec.loader_state = {"defer_module_level": defer_module_level}
 
@@ -708,27 +725,21 @@ _current_defer_config: contextvars.ContextVar[_DeferConfig] = contextvars.Contex
 class _DeferConfig:
     """Configuration container whose contents are used to determine how a module should be instrumented."""
 
-    def __init__(self, apply_all: bool, module_names: _tp.Sequence[str], recursive: bool) -> None:
+    def __init__(
+        self,
+        apply_all: bool,
+        module_names: _tp.Sequence[str],
+        recursive: bool,
+        loader_class: typing.Optional[type[_tp.Loader]],
+    ) -> None:
         self.apply_all = apply_all
         self.module_names = module_names
         self.recursive = recursive
+        self.loader_class = loader_class
 
     def __repr__(self) -> str:
-        attrs = ("apply_all", "module_names", "recursive")
-        return f"{type(self).__name__}({', '.join(f'{attr}={getattr(self, attr)}' for attr in attrs)})"
-
-
-def _invalidate_path_entry_caches() -> None:
-    """Invalidate import-related path entry caches in some way.
-
-    Notes
-    -----
-    sys.path_importer_cache.clear() seems to break everything. Pathfinder.invalidate_caches() doesn't, but it has a
-    greater upfront cost if performed early in an application's lifetime. That's because it imports importlib.metadata.
-    However, it doesn't nuke as much, thereby preventing an increase in import time later.
-    """
-
-    PathFinder.invalidate_caches()
+        attrs = ("apply_all", "module_names", "recursive", "loader_class")
+        return f"{type(self).__name__}({', '.join(f'{attr}={getattr(self, attr)!r}' for attr in attrs)})"
 
 
 @_tp.final
@@ -774,7 +785,7 @@ class ImportHookContext:
         except ValueError:
             pass
         else:
-            _invalidate_path_entry_caches()
+            PathFinder.invalidate_caches()
 
 
 def install_import_hook(
@@ -783,11 +794,13 @@ def install_import_hook(
     apply_all: bool = False,
     module_names: _tp.Sequence[str] = (),
     recursive: bool = False,
+    loader_class: typing.Optional[type[_tp.Loader]] = None,
 ) -> ImportHookContext:
     r"""Install defer_imports's import hook if it isn't already installed, and optionally configure it. Must be called
     before using defer_imports.until_use.
 
-    The configuration is for instrumenting ALL import statements, not only ones wrapped by defer_imports.until_use.
+    The configuration knobs are for instrumenting any global import statements, not only ones wrapped by
+    defer_imports.until_use.
 
     This should be run before the code it is meant to affect is executed. One place to put do that is __init__.py of a
     package or app.
@@ -803,8 +816,11 @@ def install_import_hook(
         A set of modules to apply module-level import deferral to. Has lower priority than apply_all. More suitable for
         use in libraries.
     recursive: bool, default=False
-        Whether module-level import deferral should apply recursively the submodules of the given module_names. If no
-        module names are given, this has no effect.
+        Whether module-level import deferral should apply recursively the submodules of the given module_names. Has the
+        same proirity as module_names. If no module names are given, this has no effect.
+    loader_class: type[importlib_abc.Loader] | None, optional
+        An import loader class for defer_imports to use instead of the default machinery. If supplied, it is assumed to
+        have an initialization signature matching ``(fullname: str, path: str) -> None``.
 
     Returns
     -------
@@ -815,15 +831,14 @@ def install_import_hook(
 
     if _DEFER_PATH_HOOK not in sys.path_hooks:
         try:
-            # zipimporter doesn't provide find_spec until 3.10.
+            # zipimporter doesn't provide find_spec until 3.10, so it technically doesn't meet the protocol.
             hook_insert_index = sys.path_hooks.index(zipimport.zipimporter) + 1  # pyright: ignore [reportArgumentType]
         except ValueError:
             hook_insert_index = 0
 
-        _invalidate_path_entry_caches()
         sys.path_hooks.insert(hook_insert_index, _DEFER_PATH_HOOK)
 
-    config = _DeferConfig(apply_all, module_names, recursive)
+    config = _DeferConfig(apply_all, module_names, recursive, loader_class)
     config_ctx_tok = _current_defer_config.set(config)
     return ImportHookContext(config_ctx_tok, uninstall_after)
 
@@ -946,7 +961,7 @@ class _DeferredImportKey(str):
         proxy = self.defer_key_proxy
 
         # 1. Perform the original __import__ and pray.
-        module: _tp.ModuleType = _original_import.get()(*proxy.defer_proxy_import_args)
+        module: types.ModuleType = _original_import.get()(*proxy.defer_proxy_import_args)
 
         # 2. Transfer nested proxies over to the resolved module.
         module_vars = vars(module)
@@ -985,9 +1000,9 @@ def _deferred___import__(
     name: str,
     globals: _tp.MutableMapping[str, object],
     locals: _tp.MutableMapping[str, object],
-    fromlist: _tp.Optional[_tp.Sequence[str]] = None,
+    fromlist: typing.Optional[_tp.Sequence[str]] = None,
     level: int = 0,
-) -> _tp.Any:
+) -> typing.Any:
     """An limited replacement for __import__ that supports deferred imports by returning proxies."""
 
     fromlist = fromlist or ()
@@ -1045,221 +1060,22 @@ class DeferredContext:
     As part of its implementation, this temporarily replaces builtins.__import__.
     """
 
-    __slots__ = ("is_active", "_import_ctx_token", "_defer_ctx_token")
+    __slots__ = ("_import_ctx_token", "_defer_ctx_token")
+
+    # TODO: Have this turn into a no-op when not being executed with a defer_imports loader.
 
     def __enter__(self) -> None:
-        self.is_active: bool = bool(_current_defer_config.get(False))
-        if self.is_active:
-            self._defer_ctx_token = _is_deferred.set(True)
-            self._import_ctx_token = _original_import.set(builtins.__import__)
-            builtins.__import__ = _deferred___import__
+        self._defer_ctx_token = _is_deferred.set(True)
+        self._import_ctx_token = _original_import.set(builtins.__import__)
+        builtins.__import__ = _deferred___import__
 
     def __exit__(self, *exc_info: object) -> None:
-        if self.is_active:
-            _original_import.reset(self._import_ctx_token)
-            _is_deferred.reset(self._defer_ctx_token)
-            builtins.__import__ = _original_import.get()
+        _original_import.reset(self._import_ctx_token)
+        _is_deferred.reset(self._defer_ctx_token)
+        builtins.__import__ = _original_import.get()
 
 
-until_use: _tp.Final[DeferredContext] = DeferredContext()
-
-
-# endregion
-
-
-# ============================================================================
-# region -------- Console helpers --------
-#
-# Helpers for using defer_imports in various consoles, such as the built-in
-# CPython REPL and IPython.
-#
-# TODO: Add tests for these.
-# ============================================================================
-
-
-class _DeferredIPythonInstrumenter(ast.NodeTransformer):
-    """An AST transformer that wraps defer_imports's AST instrumentation to fit IPython's AST hook interface."""
-
-    def __init__(self):
-        # The wrapped transformer's initial data is an empty string because we only get the actual data within visit().
-        self.actual_transformer = _DeferredInstrumenter("")
-
-    def visit(self, node: ast.AST) -> _tp.Any:
-        # Reset the wrapped transformer before (re)use.
-        self.actual_transformer.data = node
-        self.actual_transformer.scope_depth = 0
-        return ast.fix_missing_locations(self.actual_transformer.visit(node))
-
-
-def instrument_ipython() -> None:
-    """Add defer_import's compile-time AST transformer to a currently running IPython environment.
-
-    This will ensure that defer_imports.until_use works as intended when used directly in a IPython console.
-
-    Raises
-    ------
-    RuntimeError
-        If called in a non-IPython environment.
-    """
-
-    try:
-        ipython_shell: _tp.Any = get_ipython()  # pyright: ignore [reportUndefinedVariable] # We guard this.
-    except NameError:
-        msg = "Not currently in an IPython environment."
-        raise RuntimeError(msg) from None
-
-    ipython_shell.ast_transformers.append(_DeferredIPythonInstrumenter())
-
-
-_features = [getattr(__future__, feat_name) for feat_name in __future__.all_feature_names]
-
-_delayed_console_names = frozenset(
-    {"code", "codeop", "os", "_DeferredCompile", "DeferredInteractiveConsole", "interact"}
-)
-
-
-def __getattr__(name: str) -> _tp.Any:  # pragma: no cover
-    # Hack to delay executing expensive console-related functionality until requested.
-
-    if name in _delayed_console_names:
-        global code, codeop, os, _DeferredCompile, DeferredInteractiveConsole, interact
-
-        import code
-        import codeop
-        import os
-
-        class _DeferredCompile(codeop.Compile):
-            """A subclass of codeop.Compile that alters the compilation process via defer_imports's AST transformer."""
-
-            def __call__(self, source: str, filename: str, symbol: str, **kwargs: object) -> _tp.CodeType:
-                flags = self.flags
-                if kwargs.get("incomplete_input", True) is False:
-                    flags &= ~codeop.PyCF_DONT_IMPLY_DEDENT  # pyright: ignore
-                    flags &= ~codeop.PyCF_ALLOW_INCOMPLETE_INPUT  # pyright: ignore
-                assert isinstance(flags, int)
-
-                codeob = self._instrumented_compile(source, filename, symbol, flags)
-
-                for feature in _features:
-                    if codeob.co_flags & feature.compiler_flag:
-                        self.flags |= feature.compiler_flag
-                return codeob
-
-            @staticmethod
-            def _instrumented_compile(source: str, filename: str, symbol: str, flags: int) -> _tp.CodeType:
-                orig_tree = compile(source, filename, symbol, flags | ast.PyCF_ONLY_AST, True)
-                transformer = _DeferredInstrumenter(source, filename)
-                new_tree = ast.fix_missing_locations(transformer.visit(orig_tree))
-                return compile(new_tree, filename, symbol, flags, True)
-
-        class DeferredInteractiveConsole(code.InteractiveConsole):
-            """An emulator of the interactive Python interpreter, but with defer_imports's transformation baked in.
-
-            This ensures that defer_imports.until_use works as intended when used directly in an instance of this
-            console.
-            """
-
-            def __init__(
-                self,
-                locals: _tp.Optional[_tp.MutableMapping[str, _tp.Any]] = None,
-                filename: str = "<console>",
-            ) -> None:
-                defer_locals = {f"@{klass.__name__}": klass for klass in (_DeferredImportKey, _DeferredImportProxy)}
-
-                if locals is not None:
-                    locals.update(defer_locals)
-                else:
-                    locals = defer_locals | {"__name__": "__console__", "__doc__": None}  # noqa: A001
-
-                super().__init__(locals, filename)
-                self.compile.compiler = _DeferredCompile()
-
-        def interact(readfunc: _tp.Optional[_tp.AcceptsInput] = None) -> None:
-            r"""Closely emulate the interactive Python console, but instrumented by defer_imports.
-
-            The resulting console supports direct use of the defer_imports.until_use context manager.
-
-            Parameters
-            ----------
-            readfunc: \_tp.Optional[\_tp.AcceptsInput], optional
-                An input function to replace InteractiveConsole.raw_input(). If not given, default to trying to import
-                readline to enable GNU readline if available.
-
-            Notes
-            -----
-            Much of this implementation is based on asyncio.__main__ in CPython 3.14.
-            """
-
-            py_impl_name = sys.implementation.name
-            sys.audit(f"{py_impl_name}.run_stdin")
-
-            repl_locals = {
-                "__name__": __name__,
-                "__package__": __package__,
-                "__loader__": __loader__,
-                "__file__": __file__,
-                "__spec__": __spec__,
-                "__builtins__": __builtins__,
-                "defer_imports": sys.modules[__name__],
-            }
-            console = DeferredInteractiveConsole(repl_locals)
-
-            if readfunc is not None:
-                console.raw_input = readfunc
-            else:
-                try:
-                    import readline
-                except ImportError:
-                    readline = None
-
-                interactive_hook = getattr(sys, "__interactivehook__", None)
-                if interactive_hook is not None:
-                    sys.audit(f"{py_impl_name}.run_interactivehook")
-                    interactive_hook()
-
-                if sys.version_info >= (3, 13):
-                    import site
-
-                    if interactive_hook is site.register_readline:
-                        # Fix the completer function to use the interactive console locals.
-                        try:
-                            import rlcompleter
-                        except ImportError:
-                            pass
-                        else:
-                            if readline is not None:
-                                completer = rlcompleter.Completer(console.locals)
-                                readline.set_completer(completer.complete)
-
-                if startup_path := os.getenv("PYTHONSTARTUP"):
-                    sys.audit(f"{py_impl_name}.run_startup", startup_path)
-
-                    with tokenize.open(startup_path) as f:
-                        startup_code = compile(f.read(), startup_path, "exec")
-                        exec(startup_code, console.locals)  # noqa: S102 # pyright: ignore [reportArgumentType]
-
-            banner = (
-                f"Python {sys.version} on {sys.platform}\n"
-                'Type "help", "copyright", "credits" or "license" for more information.\n'
-                f"({type(console).__name__})\n"
-            )
-            ps1 = getattr(sys, "ps1", ">>> ")
-
-            console.write(banner)
-            console.write(f"{ps1}import defer_imports\n")
-            console.interact("")
-
-        return globals()[name]
-
-    msg = f"module {__name__!r} has no attribute {name!r}"
-    raise AttributeError(msg)
-
-
-_initial_global_names = tuple(globals())
-
-
-def __dir__() -> list[str]:  # pragma: no cover
-    return list(_delayed_console_names.union(_initial_global_names, __all__))
+until_use: typing.Final[DeferredContext] = DeferredContext()
 
 
 # endregion

@@ -57,7 +57,7 @@ python = ["3.9", "3.10", "3.11", "3.12", "3.13"]
 
 [tool.hatch.envs.bench.scripts]
 bench = "python -m bench.bench_samples"
-
+raw_import = 'python -X importtime -c "import defer_imports"'
 
 # -------- Test config
 
@@ -139,6 +139,7 @@ extend-ignore = [
     "PD011",   # Erroneous issue that triggers for any .values attribute access at all.
     "PLR2004", # "Magic number" depends on the use case.
     "RUF002",  # "Ambiguous character" depends on the use case.
+    "RUF003",  # "Ambiguous character" depends on the use case.
 
     # ---- Recommended by Ruff when using Ruff format
     "E111",
