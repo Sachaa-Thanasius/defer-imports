@@ -10,8 +10,6 @@ import sys
 import time
 from pathlib import Path
 
-import defer_imports
-
 
 class CatchTime:
     """A context manager that measures the time taken to execute its body."""
@@ -51,12 +49,16 @@ def bench_slothy() -> float:
 
 
 def bench_defer_imports_local() -> float:
+    import defer_imports
+
     with CatchTime() as ct, defer_imports.install_import_hook():
         import bench.sample_defer_local
     return ct.elapsed
 
 
 def bench_defer_imports_global() -> float:
+    import defer_imports
+
     with CatchTime() as ct, defer_imports.install_import_hook(apply_all=True):
         import bench.sample_defer_global
     return ct.elapsed

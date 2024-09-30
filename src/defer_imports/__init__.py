@@ -15,24 +15,46 @@ from importlib.machinery import BYTECODE_SUFFIXES, SOURCE_SUFFIXES, FileFinder, 
 from itertools import islice, takewhile
 from threading import RLock
 
-from . import _typing_compat as _tp
+from . import _bootstrap as _bp
 
 
-with _tp.lazy_loader_context:
+with _bp.lazy_loader_context:
     import ast
     import io
-    import os
+    import os  # noqa: F401
     import tokenize
     import warnings
 
 TYPE_CHECKING = False
 
 if TYPE_CHECKING:
+    import collections.abc as coll_abc
+    import importlib.abc as imp_abc
     import types
     import typing
+
+    _final = typing.final
 else:
-    types = _tp.lazy_import_module("types")
-    typing = _tp.lazy_import_module("typing")
+    coll_abc = _bp.lazy_import_module("collections.abc")
+    imp_abc = _bp.lazy_import_module("importlib.abc")
+    types = _bp.lazy_import_module("types")
+    typing = _bp.lazy_import_module("typing")
+
+    def _final(f: object) -> object:
+        """Decorator to indicate final methods and final classes.
+
+        Slightly modified version of typing.final to avoid importing from typing at runtime.
+        """
+
+        try:
+            f.__final__ = True  # pyright: ignore # Runtime attribute assignment
+        except (AttributeError, TypeError):  # pragma: no cover
+            # Skip the attribute silently if it is not writable.
+            # AttributeError: if the object has __slots__ or a read-only property
+            # TypeError: if it's a builtin class
+            pass
+        return f
+
 
 __version__ = "0.0.3.dev1"
 
@@ -43,6 +65,44 @@ __all__ = (
     "DeferredContext",
 )
 
+if sys.version_info >= (3, 10):  # pragma: >=3.10 cover
+    _TypeAlias: typing.TypeAlias = "typing.TypeAlias"
+    _TypeGuard: typing.TypeAlias = "typing.TypeGuard"
+elif TYPE_CHECKING:
+    from typing_extensions import TypeAlias as _TypeAlias, TypeGuard as _TypeGuard
+else:  # pragma: <3.10 cover
+    _TypeAlias = type("TypeAlias", (), {"__doc__": "Placeholder for typing.TypeAlias."})
+
+    class _PlaceholderGenericAlias(type(list[int])):
+        def __repr__(self) -> str:
+            return f"<import placeholder for {super().__repr__()}>"
+
+    class _PlaceholderMeta(type):
+        def __getitem__(self, item: object) -> _PlaceholderGenericAlias:
+            return _PlaceholderGenericAlias(self, item)
+
+        def __repr__(self) -> str:
+            return f"<import placeholder for {super().__repr__()}>"
+
+    class _TypeGuard(metaclass=_PlaceholderMeta):
+        """Placeholder for typing.TypeGuard."""
+
+
+if sys.version_info >= (3, 11):  # pragma: >=3.11 cover
+    _Self: _TypeAlias = "typing.Self"
+elif TYPE_CHECKING:
+    from typing_extensions import Self as _Self
+else:  # pragma: <3.11 cover
+    _Self = type("Self", (), {"__doc__": "Placeholder for typing.Self."})
+
+
+if sys.version_info >= (3, 12):  # pragma: >=3.12 cover
+    _ReadableBuffer: _TypeAlias = "coll_abc.Buffer"
+elif TYPE_CHECKING:
+    from typing_extensions import Buffer as _ReadableBuffer
+else:  # pragma: <3.12 cover
+    _ReadableBuffer: _TypeAlias = "typing.Union[bytes, bytearray, memoryview]"
+
 
 # ============================================================================
 # region -------- Vendored helpers --------
@@ -51,7 +111,7 @@ __all__ = (
 # ============================================================================
 
 
-def _sliding_window(iterable: _tp.Iterable[_tp.T], n: int) -> _tp.Generator[tuple[_tp.T, ...]]:
+def _sliding_window(iterable: coll_abc.Iterable[_bp.T], n: int) -> coll_abc.Generator[tuple[_bp.T, ...]]:
     """Collect data into overlapping fixed-length chunks or blocks.
 
     Notes
@@ -98,7 +158,7 @@ def _sanity_check(name: str, package: typing.Optional[str], level: int) -> None:
         raise ValueError(msg)
 
 
-def _calc___package__(globals: _tp.MutableMapping[str, typing.Any]) -> typing.Optional[str]:
+def _calc___package__(globals: coll_abc.MutableMapping[str, typing.Any]) -> typing.Optional[str]:
     """Calculate what __package__ should be.
 
     __package__ is not guaranteed to be defined or could be set to None
@@ -165,9 +225,9 @@ def _resolve_name(name: str, package: str, level: int) -> str:
 # ============================================================================
 
 
-_StrPath: _tp.TypeAlias = "typing.Union[str, os.PathLike[str]]"
-_ModulePath: _tp.TypeAlias = "typing.Union[_StrPath, _tp.ReadableBuffer]"
-_SourceData: _tp.TypeAlias = "typing.Union[_tp.ReadableBuffer, str, ast.Module, ast.Expression, ast.Interactive]"
+_StrPath: _TypeAlias = "typing.Union[str, os.PathLike[str]]"
+_ModulePath: _TypeAlias = "typing.Union[_StrPath, _ReadableBuffer]"
+_SourceData: _TypeAlias = "typing.Union[_ReadableBuffer, str, ast.Module, ast.Expression, ast.Interactive]"
 
 
 _BYTECODE_HEADER = f"defer_imports{__version__}".encode()
@@ -187,7 +247,7 @@ class _DeferredInstrumenter:
 
     def __init__(
         self,
-        data: typing.Union[_tp.ReadableBuffer, str, ast.AST],
+        data: typing.Union[_ReadableBuffer, str, ast.AST],
         filepath: _ModulePath = "<unknown>",
         encoding: str = "utf-8",
         *,
@@ -457,7 +517,7 @@ class _DeferredInstrumenter:
         return self.generic_visit(node)
 
     @staticmethod
-    def _is_non_wildcard_import(obj: object) -> _tp.TypeGuard[typing.Union[ast.Import, ast.ImportFrom]]:
+    def _is_non_wildcard_import(obj: object) -> _TypeGuard[typing.Union[ast.Import, ast.ImportFrom]]:
         """Check if a given object is an import AST without wildcards."""
 
         return isinstance(obj, (ast.Import, ast.ImportFrom)) and obj.names[0].name != "*"
@@ -534,7 +594,7 @@ class _DeferredInstrumenter:
         return node
 
 
-def _check_source_for_defer_usage(data: typing.Union[_tp.ReadableBuffer, str]) -> tuple[str, bool]:
+def _check_source_for_defer_usage(data: typing.Union[_ReadableBuffer, str]) -> tuple[str, bool]:
     """Get the encoding of the given code and also check if it uses "with defer_imports.until_use"."""
 
     _TOK_NAME, _TOK_OP = tokenize.NAME, tokenize.OP
@@ -604,7 +664,7 @@ class _DeferredFileLoader(SourceFileLoader):
 
         return data[len(_BYTECODE_HEADER) :]
 
-    def set_data(self, path: str, data: _tp.ReadableBuffer, *, _mode: int = 0o666) -> None:
+    def set_data(self, path: str, data: _ReadableBuffer, *, _mode: int = 0o666) -> None:
         """Write bytes data to a file.
 
         Notes
@@ -728,9 +788,9 @@ class _DeferConfig:
     def __init__(
         self,
         apply_all: bool,
-        module_names: _tp.Sequence[str],
+        module_names: coll_abc.Sequence[str],
         recursive: bool,
-        loader_class: typing.Optional[type[_tp.Loader]],
+        loader_class: typing.Optional[type[imp_abc.Loader]],
     ) -> None:
         self.apply_all = apply_all
         self.module_names = module_names
@@ -742,7 +802,7 @@ class _DeferConfig:
         return f"{type(self).__name__}({', '.join(f'{attr}={getattr(self, attr)!r}' for attr in attrs)})"
 
 
-@_tp.final
+@_final
 class ImportHookContext:
     """The context manager returned by install_import_hook(). Can reset defer_imports's configuration to its previous
     state and uninstall defer_import's import path hook.
@@ -752,7 +812,7 @@ class ImportHookContext:
         self._tok = _config_ctx_tok
         self._uninstall_after = _uninstall_after
 
-    def __enter__(self) -> _tp.Self:
+    def __enter__(self) -> _Self:
         return self
 
     def __exit__(self, *exc_info: object) -> None:
@@ -792,9 +852,9 @@ def install_import_hook(
     *,
     uninstall_after: bool = False,
     apply_all: bool = False,
-    module_names: _tp.Sequence[str] = (),
+    module_names: coll_abc.Sequence[str] = (),
     recursive: bool = False,
-    loader_class: typing.Optional[type[_tp.Loader]] = None,
+    loader_class: typing.Optional[type[imp_abc.Loader]] = None,
 ) -> ImportHookContext:
     r"""Install defer_imports's import hook if it isn't already installed, and optionally configure it. Must be called
     before using defer_imports.until_use.
@@ -866,9 +926,9 @@ class _DeferredImportProxy:
     def __init__(
         self,
         name: str,
-        global_ns: _tp.MutableMapping[str, object],
-        local_ns: _tp.MutableMapping[str, object],
-        fromlist: _tp.Sequence[str],
+        global_ns: coll_abc.MutableMapping[str, object],
+        local_ns: coll_abc.MutableMapping[str, object],
+        fromlist: coll_abc.Sequence[str],
         level: int = 0,
     ) -> None:
         self.defer_proxy_name = name
@@ -902,7 +962,7 @@ class _DeferredImportProxy:
 
         return f"<proxy for {imp_stmt!r}>"
 
-    def __getattr__(self, name: str, /) -> _tp.Self:
+    def __getattr__(self, name: str, /) -> _Self:
         if name in self.defer_proxy_fromlist:
             from_proxy = type(self)(*self.defer_proxy_import_args)
             from_proxy.defer_proxy_fromlist = (name,)
@@ -926,7 +986,7 @@ class _DeferredImportKey(str):
 
     __slots__ = ("defer_key_proxy", "is_resolving", "lock")
 
-    def __new__(cls, key: str, proxy: _DeferredImportProxy, /) -> _tp.Self:
+    def __new__(cls, key: str, proxy: _DeferredImportProxy, /) -> _Self:
         return super().__new__(cls, key)
 
     def __init__(self, key: str, proxy: _DeferredImportProxy, /) -> None:
@@ -998,9 +1058,9 @@ class _DeferredImportKey(str):
 
 def _deferred___import__(
     name: str,
-    globals: _tp.MutableMapping[str, object],
-    locals: _tp.MutableMapping[str, object],
-    fromlist: typing.Optional[_tp.Sequence[str]] = None,
+    globals: coll_abc.MutableMapping[str, object],
+    locals: coll_abc.MutableMapping[str, object],
+    fromlist: typing.Optional[coll_abc.Sequence[str]] = None,
     level: int = 0,
 ) -> typing.Any:
     """An limited replacement for __import__ that supports deferred imports by returning proxies."""
@@ -1041,7 +1101,7 @@ def _deferred___import__(
     return _DeferredImportProxy(name, globals, locals, fromlist, level)
 
 
-@_tp.final
+@_final
 class DeferredContext:
     """A context manager within which imports occur lazily. Not reentrant. Use via defer_imports.until_use.
 
