@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import builtins
 import contextvars
+import importlib.util
 import sys
 import zipimport
 from collections import deque
@@ -15,30 +16,90 @@ from importlib.machinery import BYTECODE_SUFFIXES, SOURCE_SUFFIXES, FileFinder, 
 from itertools import islice, takewhile
 from threading import RLock
 
-from . import _bootstrap as _bp
 
+__version__ = "0.0.3.dev1"
 
-with _bp.lazy_loader_context:
-    import ast
-    import io
-    import os  # noqa: F401
-    import tokenize
-    import warnings
+__all__ = (
+    "install_import_hook",
+    "ImportHookContext",
+    "until_use",
+    "DeferredContext",
+)
 
 TYPE_CHECKING = False
 
+
+# ============================================================================
+# region -------- Lazy import bootstrapping --------
+# ============================================================================
+
+
+def _lazy_import_module(name: str, package: typing.Optional[str] = None) -> types.ModuleType:
+    """Lazily import a module via ``importlib.util.LazyLoader``.
+
+    The "package" argument is required when performing a relative import.
+
+    Notes
+    -----
+    Slightly modified version of a recipe found in the Python 3.12 importlib docs.
+    """
+
+    absolute_name = importlib.util.resolve_name(name, package)
+    try:
+        return sys.modules[absolute_name]
+    except KeyError:
+        pass
+
+    spec = importlib.util.find_spec(absolute_name)
+    if spec is None:
+        msg = f"No module named {name!r}"
+        raise ModuleNotFoundError(msg, name=name)
+
+    if spec.loader is None:
+        msg = "missing loader"
+        raise ImportError(msg, name=spec.name)
+
+    loader = importlib.util.LazyLoader(spec.loader)
+    spec.loader = loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    loader.exec_module(module)
+    return module
+
+
 if TYPE_CHECKING:
+    import ast
     import collections.abc as coll_abc
     import importlib.abc as imp_abc
+    import io
+    import os
+    import tokenize
     import types
     import typing
+    import warnings
+else:
+    ast = _lazy_import_module("ast")
+    coll_abc = _lazy_import_module("collections.abc")
+    imp_abc = _lazy_import_module("importlib.abc")
+    io = _lazy_import_module("io")
+    os = _lazy_import_module("os")
+    tokenize = _lazy_import_module("tokenize")
+    types = _lazy_import_module("types")
+    typing = _lazy_import_module("typing")
+    warnings = _lazy_import_module("warnings")
 
+
+# endregion
+
+
+# ============================================================================
+# region -------- Other typing/annotation-related shims --------
+# ============================================================================
+
+
+if TYPE_CHECKING:
     _final = typing.final
 else:
-    coll_abc = _bp.lazy_import_module("collections.abc")
-    imp_abc = _bp.lazy_import_module("importlib.abc")
-    types = _bp.lazy_import_module("types")
-    typing = _bp.lazy_import_module("typing")
 
     def _final(f: object) -> object:
         """Decorator to indicate final methods and final classes.
@@ -55,15 +116,6 @@ else:
             pass
         return f
 
-
-__version__ = "0.0.3.dev1"
-
-__all__ = (
-    "install_import_hook",
-    "ImportHookContext",
-    "until_use",
-    "DeferredContext",
-)
 
 if sys.version_info >= (3, 10):  # pragma: >=3.10 cover
     _TypeAlias: typing.TypeAlias = "typing.TypeAlias"
@@ -104,6 +156,9 @@ else:  # pragma: <3.12 cover
     _ReadableBuffer: _TypeAlias = "typing.Union[bytes, bytearray, memoryview]"
 
 
+# endregion
+
+
 # ============================================================================
 # region -------- Vendored helpers --------
 #
@@ -111,7 +166,10 @@ else:  # pragma: <3.12 cover
 # ============================================================================
 
 
-def _sliding_window(iterable: coll_abc.Iterable[_bp.T], n: int) -> coll_abc.Generator[tuple[_bp.T, ...]]:
+def _sliding_window(
+    iterable: coll_abc.Iterable[tokenize.TokenInfo],
+    n: int,
+) -> coll_abc.Generator[tuple[tokenize.TokenInfo, ...]]:
     """Collect data into overlapping fixed-length chunks or blocks.
 
     Notes
