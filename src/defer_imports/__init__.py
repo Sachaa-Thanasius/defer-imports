@@ -46,14 +46,30 @@ def _lazy_import_module(name: str, package: typing.Optional[str] = None) -> type
 
     absolute_name = importlib.util.resolve_name(name, package)
     try:
-        return sys.modules[absolute_name]
+        module = sys.modules[absolute_name]
     except KeyError:
         pass
+    else:
+        if module is None:  # pyright: ignore [reportUnnecessaryComparison]
+            msg = f"import of {name} halted; None in sys.modules"
+            raise ModuleNotFoundError(msg, name=name)
 
-    spec = importlib.util.find_spec(absolute_name)
-    if spec is None:
-        msg = f"No module named {name!r}"
-        raise ModuleNotFoundError(msg, name=name)
+        return module
+
+    path = None
+    if "." in absolute_name:
+        parent_name, _, child_name = absolute_name.rpartition(".")
+        parent_module = _lazy_import_module(parent_name)
+        assert parent_module.__spec__ is not None
+        path = parent_module.__spec__.submodule_search_locations
+
+    for finder in sys.meta_path:
+        spec = finder.find_spec(absolute_name, path)
+        if spec is not None:
+            break
+    else:
+        msg = f"No module named {absolute_name!r}"
+        raise ModuleNotFoundError(msg, name=absolute_name)
 
     if spec.loader is None:
         msg = "missing loader"
@@ -61,9 +77,13 @@ def _lazy_import_module(name: str, package: typing.Optional[str] = None) -> type
 
     loader = importlib.util.LazyLoader(spec.loader)
     spec.loader = loader
+
     module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
+    sys.modules[absolute_name] = module
+
     loader.exec_module(module)
+    if path is not None:
+        setattr(parent_module, child_name, module)  # pyright: ignore [reportPossiblyUnboundVariable]
     return module
 
 
@@ -78,15 +98,17 @@ if TYPE_CHECKING:
     import typing
     import warnings
 else:
-    ast = _lazy_import_module("ast")
-    coll_abc = _lazy_import_module("collections.abc")
-    imp_abc = _lazy_import_module("importlib.abc")
-    io = _lazy_import_module("io")
-    os = _lazy_import_module("os")
-    tokenize = _lazy_import_module("tokenize")
-    types = _lazy_import_module("types")
-    typing = _lazy_import_module("typing")
-    warnings = _lazy_import_module("warnings")
+    # fmt: off
+    ast         = _lazy_import_module("ast")
+    coll_abc    = _lazy_import_module("collections.abc")
+    imp_abc     = _lazy_import_module("importlib.abc")
+    io          = _lazy_import_module("io")
+    os          = _lazy_import_module("os")
+    tokenize    = _lazy_import_module("tokenize")
+    types       = _lazy_import_module("types")
+    typing      = _lazy_import_module("typing")
+    warnings    = _lazy_import_module("warnings")
+    # fmt: on
 
 
 # endregion
