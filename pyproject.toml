@@ -56,8 +56,9 @@ features = ["bench"]
 python = ["3.9", "3.10", "3.11", "3.12", "3.13"]
 
 [tool.hatch.envs.bench.scripts]
-bench = "python -m bench.bench_samples"
-raw_import = 'python -X importtime -c "import defer_imports"'
+stdlib = "python -m bench.bench_samples"
+import-time = 'python -X importtime -c "import {args:defer_imports}"'
+simple-import-time = 'python -m timeit -n 1 -r 1 -- "import {args:defer_imports}"'
 
 
 # -------- Test config
@@ -78,12 +79,10 @@ defer_imports = ["src"]
 [tool.coverage.run]
 plugins = ["covdefaults"]
 source = ["defer_imports", "tests"]
-omit = [
-    "src/defer_imports/_typing_compat.py", # Has a module-level __getattr__ that isn't invoked at runtime.
-]
 
 [tool.coverage.report]
 fail_under = 90
+exclude_lines = ["^\\s*(?:el)?if TYPE_CHECKING:$"]
 
 
 # -------- Linter config
@@ -140,6 +139,7 @@ extend-ignore = [
     "PD011",   # Erroneous issue that triggers for any .values attribute access at all.
     "PLR2004", # "Magic number" depends on the use case.
     "RUF002",  # "Ambiguous character" depends on the use case.
+    "RUF003",  # "Ambiguous character" depends on the use case.
 
     # ---- Recommended by Ruff when using Ruff format
     "E111",
@@ -152,13 +152,12 @@ extend-ignore = [
     "ISC002",
 
     # ---- Project-specific rules
-    "RET505", # Returns in both parts of if-else are fine.
-    "SIM108", # if-else instead of a ternary is fine. 
+    "RET505", # Returns in both parts of if-else can be more readable.
+    "SIM108", # if-else instead of a ternary can be more readable. 
 ]
 unfixable = [
     "ERA", # Prevent unlikely erroneous deletion.
 ]
-typing-modules = ["defer_imports._typing_compat"]
 
 [tool.ruff.lint.isort]
 lines-after-imports = 2
@@ -170,15 +169,14 @@ keep-runtime-typing = true
 [tool.ruff.lint.per-file-ignores]
 # ---- Package code
 "src/defer_imports/*.py" = [
-    "A002",    # Allow some shadowing of builtins by parameter names.
-    "PLW0603", # "global" is used to update variables at global scope.
+    "A002", # Allow some shadowing of builtins by parameter names.
 ]
 
 # ---- Test code
 "tests/**/test_*.py" = [
     "T201", # Printing is fine.
-    "T203", # Pretty printing is fine.
-    # Don't need some annotations in tests.
+    "T203", # Pretty-printing is fine.
+    # Don't need return annotations in tests.
     "ANN201",
     "ANN202",
     "S102",   # exec is used to test for NameError within a module's namespace.
