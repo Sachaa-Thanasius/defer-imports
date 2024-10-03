@@ -134,8 +134,11 @@ else:
 
 
 if sys.version_info >= (3, 10):  # pragma: >=3.10 cover
-    _TypeAlias: typing.TypeAlias = "typing.TypeAlias"
-    _TypeGuard: typing.TypeAlias = "typing.TypeGuard"
+    if TYPE_CHECKING:
+        from typing import TypeAlias as _TypeAlias, TypeGuard as _TypeGuard
+    else:
+        _TypeAlias: typing.TypeAlias = "typing.TypeAlias"
+        _TypeGuard: typing.TypeAlias = "typing.TypeGuard"
 elif TYPE_CHECKING:
     from typing_extensions import TypeAlias as _TypeAlias, TypeGuard as _TypeGuard
 else:  # pragma: <3.10 cover
@@ -157,7 +160,10 @@ else:  # pragma: <3.10 cover
 
 
 if sys.version_info >= (3, 11):  # pragma: >=3.11 cover
-    _Self: _TypeAlias = "typing.Self"
+    if TYPE_CHECKING:
+        from typing import Self as _Self
+    else:
+        _Self: _TypeAlias = "typing.Self"
 elif TYPE_CHECKING:
     from typing_extensions import Self as _Self
 else:  # pragma: <3.11 cover
