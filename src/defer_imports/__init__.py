@@ -236,8 +236,7 @@ def _sanity_check(name: str, package: typing.Optional[str], level: int) -> None:
 def _calc___package__(globals: coll_abc.MutableMapping[str, typing.Any]) -> typing.Optional[str]:
     """Calculate what __package__ should be.
 
-    __package__ is not guaranteed to be defined or could be set to None
-    to represent that its proper value is unknown.
+    __package__ is not guaranteed to be defined or could be set to None to represent that its proper value is unknown.
 
     Notes
     -----

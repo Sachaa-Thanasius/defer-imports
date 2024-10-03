@@ -128,7 +128,7 @@ Use Cases
 
     -   If one wants module-level, expensive imports aren't used in commonly run code paths.
 
-        -   A good fit for this is a CLI tool and its subcommand.
+        -   A good fit for this is a CLI tool and its subcommands.
 
     -   If imports are necessary to get symbols that are only used within annotations.
 
@@ -157,7 +157,7 @@ Caveats
     -   Examples of popular packages using clashing import hooks: |typeguard|_, |beartype|_, |jaxtyping|_, |torchtyping|_, |pyximport|_
     -   It's possible to work around this by reaching into ``defer-imports``'s internals and combining its instrumentation machinery with that of another package's, but it's currently not supported well beyond the presence of a ``loader_class`` parameter in ``defer_imports.install_import_hook()``'s signature.
 
--   Can't automatically resolve deferred imports when a namespace is being iterated over, leaving a hole in its abstraction.
+-   Can't automatically resolve deferred imports in a namespace when that namespace is being iterated over, leaving a hole in its abstraction.
 
     -   When using dictionary iteration methods on a dictionary or namespace that contains a deferred import key/proxy pair, the members of that pair will be visible, mutable, and will not resolve automatically. PEP 690 specifically addresses this by modifying the builtin ``dict``, allowing each instance to know if it contains proxies and then resolve them automatically during iteration (see the second half of its `"Implementation" section <https://peps.python.org/pep-0690/#implementation>`_ for more details). Note that qualifying ``dict`` iteration methods include ``dict.items()``, ``dict.values()``, etc., but outside of that, the builtin ``dir()`` also qualifies since it can see the keys for objects' internal dictionaries.
 
