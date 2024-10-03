@@ -235,7 +235,7 @@ There are currently a few ways of measuring activation and/or import time:
             python -X importtime -c "import defer_imports"
             hatch run bench:simple-import-time defer_imports
 
-    -   Substitute ``defer_imports`` with other modules, e.g. ``slothy``, to compare.
+    -   Substitute ``defer_imports`` in the above commands with other modules, e.g. ``slothy``, to compare.
     -   The results can vary greatly between runs. If possible, only compare the resulting time(s) when collected from the same process.
 
 
@@ -287,6 +287,9 @@ Without them, this would not exist.
 
 .. |pyximport| replace:: ``pyximport``
 .. _pyximport: https://github.com/cython/cython/tree/master/pyximport
+
+.. |demandimport| replace:: ``demandimport``
+.. _demandimport: https://github.com/bwesterb/py-demandimport
 
 .. |apipkg| replace:: ``apipkg``
 .. _apipkg: https://github.com/pytest-dev/apipkg
