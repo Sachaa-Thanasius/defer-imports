@@ -57,8 +57,8 @@ python = ["3.9", "3.10", "3.11", "3.12", "3.13"]
 
 [tool.hatch.envs.bench.scripts]
 stdlib = "python -m bench.bench_samples"
-raw_import = 'python -X importtime -c "import defer_imports"'
-
+import-time = 'python -X importtime -c "import {args:defer_imports}"'
+simple-import-time = 'python -m timeit -n 1 -r 1 -- "import {args:defer_imports}"'
 
 # -------- Test config
 
@@ -150,8 +150,8 @@ extend-ignore = [
     "ISC002",
 
     # ---- Project-specific rules
-    "RET505", # Returns in both parts of if-else are fine.
-    "SIM108", # if-else instead of a ternary is fine. 
+    "RET505", # Returns in both parts of if-else can be more readable.
+    "SIM108", # if-else instead of a ternary can be more readable. 
 ]
 unfixable = [
     "ERA", # Prevent unlikely erroneous deletion.
@@ -167,14 +167,13 @@ keep-runtime-typing = true
 [tool.ruff.lint.per-file-ignores]
 # ---- Package code
 "src/defer_imports/*.py" = [
-    "A002",    # Allow some shadowing of builtins by parameter names.
-    "PLW0603", # "global" is used to update variables at global scope.
+    "A002", # Allow some shadowing of builtins by parameter names.
 ]
 
 # ---- Test code
 "tests/**/test_*.py" = [
     "T201", # Printing is fine.
-    "T203", # Pretty printing is fine.
+    "T203", # Pretty-printing is fine.
     # Don't need some annotations in tests.
     "ANN201",
     "ANN202",
