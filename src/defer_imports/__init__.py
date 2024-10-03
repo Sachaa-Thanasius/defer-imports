@@ -35,31 +35,26 @@ TYPE_CHECKING = False
 
 
 def _lazy_import_module(name: str, package: typing.Optional[str] = None) -> types.ModuleType:
-    """Lazily import a module via ``importlib.util.LazyLoader``.
+    """Lazily import a module. Has the same signature as ``importlib.import_module()``.
 
-    The "package" argument is required when performing a relative import.
+    This is purely for limited internal usage, especially since it has not been evaluated for thread safety.
 
     Notes
     -----
-    Slightly modified version of a recipe found in the Python 3.12 importlib docs.
+    Based on importlib code as well as recipes found in the Python 3.12 importlib docs.
     """
 
     absolute_name = importlib.util.resolve_name(name, package)
     try:
-        module = sys.modules[absolute_name]
+        return sys.modules[absolute_name]
     except KeyError:
         pass
-    else:
-        if module is None:  # pyright: ignore [reportUnnecessaryComparison]
-            msg = f"import of {name} halted; None in sys.modules"
-            raise ModuleNotFoundError(msg, name=name)
-
-        return module
 
     path = None
     if "." in absolute_name:
         parent_name, _, child_name = absolute_name.rpartition(".")
-        parent_module = _lazy_import_module(parent_name)
+        # No point delaying the load of the parent when we need to access one of its attributes immediately.
+        parent_module = importlib.import_module(parent_name)
         assert parent_module.__spec__ is not None
         path = parent_module.__spec__.submodule_search_locations
 
@@ -75,15 +70,14 @@ def _lazy_import_module(name: str, package: typing.Optional[str] = None) -> type
         msg = "missing loader"
         raise ImportError(msg, name=spec.name)
 
-    loader = importlib.util.LazyLoader(spec.loader)
-    spec.loader = loader
-
+    spec.loader = loader = importlib.util.LazyLoader(spec.loader)
     module = importlib.util.module_from_spec(spec)
     sys.modules[absolute_name] = module
-
     loader.exec_module(module)
+
     if path is not None:
         setattr(parent_module, child_name, module)  # pyright: ignore [reportPossiblyUnboundVariable]
+
     return module
 
 
@@ -115,7 +109,7 @@ else:
 
 
 # ============================================================================
-# region -------- Other typing/annotation-related shims --------
+# region -------- Shims for typing and annotation symbols --------
 # ============================================================================
 
 
@@ -133,8 +127,8 @@ else:
             f.__final__ = True  # pyright: ignore # Runtime attribute assignment
         except (AttributeError, TypeError):  # pragma: no cover
             # Skip the attribute silently if it is not writable.
-            # AttributeError: if the object has __slots__ or a read-only property
-            # TypeError: if it's a builtin class
+            # AttributeError happens if the object has __slots__ or a
+            # read-only property, TypeError if it's a builtin class.
             pass
         return f
 
@@ -192,16 +186,17 @@ def _sliding_window(
     iterable: coll_abc.Iterable[tokenize.TokenInfo],
     n: int,
 ) -> coll_abc.Generator[tuple[tokenize.TokenInfo, ...]]:
-    """Collect data into overlapping fixed-length chunks or blocks.
+    """Collect tokens into overlapping fixed-length chunks or blocks.
 
     Notes
     -----
-    Slightly modified version of a recipe found in the Python 3.12 itertools docs.
+    Slightly modified version of the sliding_window recipe found in the Python 3.12 itertools docs.
 
     Examples
     --------
-    >>> ["".join(window) for window in sliding_window('ABCDEFG', 4)]
-    ['ABCD', 'BCDE', 'CDEF', 'DEFG']
+    >>> tokens = list(tokenize.generate_tokens(io.StringIO("def func(): ...").readline))
+    >>> [" ".join(item.string for item in window) for window in sliding_window(tokens, 2)]
+    ['def func', 'func (', '( )', ') :', ': ...', '... ', ' ']
     """
 
     iterator = iter(iterable)
@@ -216,7 +211,7 @@ def _sanity_check(name: str, package: typing.Optional[str], level: int) -> None:
 
     Notes
     -----
-    Slightly modified version of importlib._bootstrap._sanity_check to avoid depending on an an implementation detail
+    Slightly modified version of importlib._bootstrap._sanity_check to avoid depending on an implementation detail
     module at runtime.
     """
 
@@ -255,22 +250,21 @@ def _calc___package__(globals: coll_abc.MutableMapping[str, typing.Any]) -> typi
 
     if package is not None:
         if spec is not None and package != spec.parent:
-            category = DeprecationWarning if sys.version_info >= (3, 12) else ImportWarning
-            warnings.warn(
-                f"__package__ != __spec__.parent ({package!r} != {spec.parent!r})",
-                category,
-                stacklevel=3,
-            )
+            if sys.version_info >= (3, 12):  # pragma: >=3.12 cover
+                category = DeprecationWarning
+            else:  # pragma: <3.12 cover
+                category = ImportWarning
+
+            msg = f"__package__ != __spec__.parent ({package!r} != {spec.parent!r})"
+            warnings.warn(msg, category, stacklevel=3)
         return package
 
     if spec is not None:
         return spec.parent
 
-    warnings.warn(
-        "can't resolve package from __spec__ or __package__, falling back on __name__ and __path__",
-        ImportWarning,
-        stacklevel=3,
-    )
+    msg = "can't resolve package from __spec__ or __package__, falling back on __name__ and __path__"
+    warnings.warn(msg, ImportWarning, stacklevel=3)
+
     package = globals["__name__"]
     if "__path__" not in globals:
         package = package.rpartition(".")[0]  # pyright: ignore [reportOptionalMemberAccess]
@@ -320,8 +314,8 @@ class _DeferredInstrumenter:
 
     Notes
     -----
-    The transformer doesn't subclass ast.NodeTransformer but instead vendors its logic to avoid the import cost.
-    Additionally, it assumes the ast being instrumented is not empty and "with defer_imports.until_use" is used
+    The transformer doesn't subclass ast.NodeTransformer but instead vendors its logic to avoid the upfront import cost.
+    Additionally, it assumes the AST being instrumented is not empty and "with defer_imports.until_use" is used
     somewhere in it.
     """
 
@@ -379,7 +373,7 @@ class _DeferredInstrumenter:
 
     visit_Try = _visit_eager_import_block
 
-    if sys.version_info >= (3, 11):
+    if sys.version_info >= (3, 11):  # pragma: >=3.11 cover
         visit_TryStar = _visit_eager_import_block
 
     def _decode_source(self) -> str:
@@ -391,7 +385,7 @@ class _DeferredInstrumenter:
         elif isinstance(self.data, str):
             return self.data
         else:
-            # This is based on importlib.util.decode_source().
+            # Do the same thing as importlib.util.decode_source().
             newline_decoder = io.IncrementalNewlineDecoder(None, translate=True)
             # Expected buffer types (bytes, bytearray, memoryview) are known to have a decode method.
             return newline_decoder.decode(self.data.decode(self.encoding))  # pyright: ignore
@@ -419,7 +413,7 @@ class _DeferredInstrumenter:
     def _create_import_name_replacement(name: str) -> ast.If:
         """Create an AST for changing the name of a variable in locals if the variable is a defer_imports proxy.
 
-        If the node is unparsed, the resulting code is almost equivalent to the following::
+        The resulting node is almost equivalent to the following code::
 
             if type(name) is _DeferredImportProxy:
                 @temp_proxy = @local_ns.pop("name")
@@ -612,10 +606,10 @@ class _DeferredInstrumenter:
             return node.module is not None and node.module.partition(".")[0] == "defer_imports"
 
     def _wrap_import_stmts(self, nodes: list[typing.Any], start: int) -> ast.With:
-        """Wrap a list of consecutive import nodes from a list of statements using a "defer_imports.until_use" block and
+        """Wrap consecutive import nodes within a list of statements using a "defer_imports.until_use" block and
         instrument them.
 
-        The first node must be guaranteed to be an import node.
+        The first node must be an import node.
         """
 
         import_range = tuple(takewhile(lambda i: self._is_non_wildcard_import(nodes[i]), range(start, len(nodes))))
@@ -637,7 +631,7 @@ class _DeferredInstrumenter:
             self.module_level
             # Only at global scope.
             and self.scope_depth == 0
-            # Only with import nodes without wildcards.
+            # Only for import nodes without wildcards.
             and self._is_non_wildcard_import(value)
             # Only outside of escape hatch blocks.
             and (self.escape_hatch_depth == 0 and not self._is_defer_imports_import(value))
@@ -646,8 +640,8 @@ class _DeferredInstrumenter:
     def generic_visit(self, node: ast.AST) -> ast.AST:
         """Called if no explicit visitor function exists for a node.
 
-        Almost a copy of ast.NodeVisitor.generic_visit, but we intercept global sequences of import statements to wrap
-        them in a "with defer_imports.until_use" block and instrument them.
+        In addition to regular functionality, conditionally intercept global sequences of import statements to wrap them
+        in "with defer_imports.until_use" blocks.
         """
 
         for field, old_value in ast.iter_fields(node):
@@ -771,7 +765,7 @@ class _DeferredFileLoader(SourceFileLoader):
         data: _SourceData
             Anything that compile() can handle.
         path: _ModulePath:
-            Where the data was retrieved (when applicable).
+            Where the data was retrieved from (when applicable).
 
         Returns
         -------
@@ -879,7 +873,7 @@ class _DeferConfig:
 
     def __repr__(self) -> str:
         attrs = ("apply_all", "module_names", "recursive", "loader_class")
-        return f"{type(self).__name__}({', '.join(f'{attr}={getattr(self, attr)!r}' for attr in attrs)})"
+        return f'{type(self).__name__}({", ".join(f"{attr}={getattr(self, attr)!r}" for attr in attrs)})'
 
 
 @_final
@@ -1138,8 +1132,8 @@ class _DeferredImportKey(str):
 
 def _deferred___import__(
     name: str,
-    globals: coll_abc.MutableMapping[str, object],
-    locals: coll_abc.MutableMapping[str, object],
+    globals: coll_abc.MutableMapping[str, typing.Any],
+    locals: coll_abc.MutableMapping[str, typing.Any],
     fromlist: typing.Optional[coll_abc.Sequence[str]] = None,
     level: int = 0,
 ) -> typing.Any:
