@@ -45,10 +45,8 @@ def _lazy_import_module(name: str, package: typing.Optional[str] = None) -> type
     """
 
     absolute_name = importlib.util.resolve_name(name, package)
-    try:
+    if absolute_name in sys.modules:
         return sys.modules[absolute_name]
-    except KeyError:
-        pass
 
     path = None
     if "." in absolute_name:
@@ -78,7 +76,7 @@ def _lazy_import_module(name: str, package: typing.Optional[str] = None) -> type
     if path is not None:
         setattr(parent_module, child_name, module)  # pyright: ignore [reportPossiblyUnboundVariable]
 
-    return module
+    return sys.modules[absolute_name]
 
 
 if TYPE_CHECKING:
