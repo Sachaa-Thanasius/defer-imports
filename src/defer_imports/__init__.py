@@ -201,7 +201,7 @@ def _sliding_window(
     Examples
     --------
     >>> tokens = list(tokenize.generate_tokens(io.StringIO("def func(): ...").readline))
-    >>> [" ".join(item.string for item in window) for window in sliding_window(tokens, 2)]
+    >>> [" ".join(item.string for item in window) for window in _sliding_window(tokens, 2)]
     ['def func', 'func (', '( )', ') :', ': ...', '... ', ' ']
     """
 
@@ -263,35 +263,17 @@ def _calc___package__(globals: coll_abc.MutableMapping[str, typing.Any]) -> typi
             msg = f"__package__ != __spec__.parent ({package!r} != {spec.parent!r})"
             warnings.warn(msg, category, stacklevel=3)
         return package
-
-    if spec is not None:
+    elif spec is not None:
         return spec.parent
+    else:
+        msg = "can't resolve package from __spec__ or __package__, falling back on __name__ and __path__"
+        warnings.warn(msg, ImportWarning, stacklevel=3)
 
-    msg = "can't resolve package from __spec__ or __package__, falling back on __name__ and __path__"
-    warnings.warn(msg, ImportWarning, stacklevel=3)
+        package = globals["__name__"]
+        if "__path__" not in globals:
+            package = package.rpartition(".")[0]  # pyright: ignore [reportOptionalMemberAccess]
 
-    package = globals["__name__"]
-    if "__path__" not in globals:
-        package = package.rpartition(".")[0]  # pyright: ignore [reportOptionalMemberAccess]
-
-    return package
-
-
-def _resolve_name(name: str, package: str, level: int) -> str:
-    """Resolve a relative module name to an absolute one.
-
-    Notes
-    -----
-    Slightly modified version of importlib._bootstrap._resolve_name to avoid depending on an implementation detail
-    module at runtime.
-    """
-
-    bits = package.rsplit(".", level - 1)
-    if len(bits) < level:
-        msg = "attempted relative import beyond top-level package"
-        raise ImportError(msg)
-    base = bits[0]
-    return f"{base}.{name}" if name else base
+        return package
 
 
 # endregion
@@ -1137,8 +1119,8 @@ class _DeferredImportKey(str):
 
 def _deferred___import__(
     name: str,
-    globals: coll_abc.MutableMapping[str, typing.Any],
-    locals: coll_abc.MutableMapping[str, typing.Any],
+    globals: coll_abc.MutableMapping[str, object],
+    locals: coll_abc.MutableMapping[str, object],
     fromlist: typing.Optional[coll_abc.Sequence[str]] = None,
     level: int = 0,
 ) -> typing.Any:
@@ -1146,12 +1128,13 @@ def _deferred___import__(
 
     fromlist = fromlist or ()
 
-    package = _calc___package__(globals)
+    package = _calc___package__(globals) if (level != 0) else None
     _sanity_check(name, package, level)
 
-    # Resolve the names of relative imports.
+    # NOTE: This technically repeats work since it recalculates level internally, but it's better for maintenance than
+    #       keeping a copy of importlib._bootstrap._resolve_name() around.
     if level > 0:
-        name = _resolve_name(name, package, level)  # pyright: ignore [reportArgumentType]
+        name = importlib.util.resolve_name(f'{"." * level}{name}', package)
         level = 0
 
     # Handle submodule imports if relevant top-level imports already occurred in the call site's module.
