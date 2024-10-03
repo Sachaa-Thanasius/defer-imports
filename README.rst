@@ -196,7 +196,7 @@ There are currently a few ways of measuring activation and/or import time:
 -   A local benchmark script for timing the import of a significant portion of the standard library.
 
     -   Invokable with ``python -m bench.bench_samples`` or ``hatch run bench:bench``.
-    -   To prevent bytecode caching from impacting the benchmark, run with `python -B <https://docs.python.org/3/using/cmdline.html#cmdoption-B>`_, which will set ``sys.dont_write_bytecode`` to ``True`` and cause the benchmark script to purge all existing ``__pycache__`` folders in the project directory.
+    -   To prevent bytecode caching from impacting the benchmark, run with |python -B|_, which will set ``sys.dont_write_bytecode`` to ``True`` and cause the benchmark script to purge all existing ``__pycache__`` folders in the project directory.
     -   PyPy is excluded from the benchmark since it takes time to ramp up.
     -   An sample run across versions using ``hatch``:
 
@@ -226,14 +226,14 @@ There are currently a few ways of measuring activation and/or import time:
         CPython         3.13     defer-imports  0.00253s (1.00x)
         ==============  =======  =============  ===================
 
--   Commands for only measuring import time of the library, using built-in Python timing tools like |timeit|_ and |-X importtime|_.
+-   Commands for only measuring import time of the library, using built-in Python timing tools like |timeit|_ and |python -X importtime|_.
 
-    -   Examples:
+    -   Examples::
 
-        -   ``python -m timeit -n 1 -r 1 -- "import defer_imports"``
-        -   ``hatch run bench:import-time defer_imports``
-        -   ``python -X importtime -c "import defer_imports"``
-        -   ``hatch run bench:simple-import-time defer_imports``
+            python -m timeit -n 1 -r 1 -- "import defer_imports"
+            hatch run bench:import-time defer_imports
+            python -X importtime -c "import defer_imports"
+            hatch run bench:simple-import-time defer_imports
 
     -   Substitute ``defer_imports`` with other modules, e.g. ``slothy``, to compare.
     -   The results can vary greatly between runs. If possible, only compare the resulting time(s) when collected from the same process.
@@ -267,23 +267,26 @@ Without them, this would not exist.
 .. |timeit| replace:: ``timeit``
 .. _timeit: https://docs.python.org/3/library/timeit.html
 
-.. |-X importtime| replace:: ``-Ximporttime``
-.. _-Ximporttime: https://docs.python.org/3/using/cmdline.html#cmdoption-X
+.. |python -B| replace:: ``python -B``
+.. _python -B: https://docs.python.org/3/using/cmdline.html#cmdoption-B
+
+.. |python -X importtime| replace:: ``python -X importtime``
+.. _python -X importtime: https://docs.python.org/3/using/cmdline.html#cmdoption-X
 
 .. |typeguard| replace:: ``typeguard``
-.. _demandimport: https://github.com/agronholm/typeguard
+.. _typeguard: https://github.com/agronholm/typeguard
 
 .. |beartype| replace:: ``beartype``
-.. _demandimport: https://github.com/beartype/beartype
+.. _beartype: https://github.com/beartype/beartype
 
 .. |jaxtyping| replace:: ``jaxtyping``
-.. _demandimport: https://github.com/patrick-kidger/jaxtyping
+.. _jaxtyping: https://github.com/patrick-kidger/jaxtyping
 
 .. |torchtyping| replace:: ``torchtyping``
-.. _demandimport: https://github.com/patrick-kidger/torchtyping
+.. _torchtyping: https://github.com/patrick-kidger/torchtyping
 
 .. |pyximport| replace:: ``pyximport``
-.. _demandimport: https://github.com/cython/cython/tree/master/pyximport
+.. _pyximport: https://github.com/cython/cython/tree/master/pyximport
 
 .. |apipkg| replace:: ``apipkg``
 .. _apipkg: https://github.com/pytest-dev/apipkg
