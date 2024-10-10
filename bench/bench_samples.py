@@ -38,16 +38,18 @@ def bench_slothy() -> float:
 
 
 def bench_defer_imports_local() -> float:
-    with CatchTime() as ct:  # noqa: SIM117
-        with defer_imports.install_import_hook(uninstall_after=True):
-            import bench.sample_defer_local
+    with CatchTime() as ct:
+        hook_ctx = defer_imports.install_import_hook()
+        import bench.sample_defer_local
+    hook_ctx.uninstall()
     return ct.elapsed
 
 
 def bench_defer_imports_global() -> float:
-    with CatchTime() as ct:  # noqa: SIM117
-        with defer_imports.install_import_hook(uninstall_after=True, apply_all=True):
-            import bench.sample_defer_global
+    with CatchTime() as ct:
+        hook_ctx = defer_imports.install_import_hook(apply_all=True)
+        import bench.sample_defer_global
+    hook_ctx.uninstall()
     return ct.elapsed
 
 

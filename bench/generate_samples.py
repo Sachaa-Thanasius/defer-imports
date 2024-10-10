@@ -568,33 +568,34 @@ _CONTEXT_MANAGER_TEMPLATE = f"""\
 
 def main() -> None:
     bench_path = Path("bench").resolve()
+    tests_path = bench_path.with_name("tests")
 
     # ---- regular imports
-    regular_contents = "\n".join((_PYRIGHT_IGNORE_DIRECTIVES, _GENERATED_BY_COMMENT, _STDLIB_IMPORTS))
-    regular_path = bench_path / "sample_regular.py"
-    regular_path.write_text(regular_contents, encoding="utf-8")
+    sample_reg_contents = "\n".join((_PYRIGHT_IGNORE_DIRECTIVES, _GENERATED_BY_COMMENT, _STDLIB_IMPORTS))
+    sample_reg_path = bench_path / "sample_regular.py"
+    sample_reg_path.write_text(sample_reg_contents, encoding="utf-8")
 
     # ---- defer_imports-instrumented and defer_imports-hooked imports (global)
-    shutil.copy(regular_path, regular_path.with_name("sample_defer_global.py"))
+    shutil.copy(sample_reg_path, sample_reg_path.with_name("sample_defer_global.py"))
 
     # ---- defer_imports-instrumented and defer_imports-hooked imports (local)
-    defer_imports_contents = _CONTEXT_MANAGER_TEMPLATE.format(
+    sample_defer_contents = _CONTEXT_MANAGER_TEMPLATE.format(
         import_stmt="import defer_imports",
         ctx_manager="with defer_imports.until_use:",
     )
-    defer_imports_path = bench_path / "sample_defer_local.py"
-    defer_imports_path.write_text(defer_imports_contents, encoding="utf-8")
+    sample_defer_path = bench_path / "sample_defer_local.py"
+    sample_defer_path.write_text(sample_defer_contents, encoding="utf-8")
 
     # ---- defer_imports-influenced imports (local), but for a test in the tests directory
-    shutil.copy(defer_imports_path, bench_path.with_name("tests") / "sample_stdlib_imports.py")
+    shutil.copy(sample_defer_path, tests_path / "sample_stdlib_imports.py")
 
     # ---- slothy-hooked imports
-    slothy_contents = _CONTEXT_MANAGER_TEMPLATE.format(
+    sample_slothy_contents = _CONTEXT_MANAGER_TEMPLATE.format(
         import_stmt="from slothy import lazy_importing",
         ctx_manager="with lazy_importing():",
     )
-    slothy_path = bench_path / "sample_slothy.py"
-    slothy_path.write_text(slothy_contents, encoding="utf-8")
+    sample_slothy_path = bench_path / "sample_slothy.py"
+    sample_slothy_path.write_text(sample_slothy_contents, encoding="utf-8")
 
 
 if __name__ == "__main__":

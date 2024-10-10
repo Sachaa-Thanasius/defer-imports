@@ -37,17 +37,20 @@ TYPE_CHECKING = False
 def _lazy_import_module(name: str, package: typing.Optional[str] = None) -> types.ModuleType:
     """Lazily import a module. Has the same signature as ``importlib.import_module()``.
 
-    This is purely for limited internal usage, especially since it has not been evaluated for thread safety.
+    This is for limited internal usage, especially since it intentionally does not handle certain edge cases and has
+    not been evaluated for thread safety.
 
     Notes
     -----
     Based on importlib code as well as recipes found in the Python 3.12 importlib docs.
     """
 
+    # 1. Resolve the name.
     absolute_name = importlib.util.resolve_name(name, package)
     if absolute_name in sys.modules:
         return sys.modules[absolute_name]
 
+    # 2. Find the module's parent if it exists.
     path = None
     if "." in absolute_name:
         parent_name, _, child_name = absolute_name.rpartition(".")
@@ -56,6 +59,7 @@ def _lazy_import_module(name: str, package: typing.Optional[str] = None) -> type
         assert parent_module.__spec__ is not None
         path = parent_module.__spec__.submodule_search_locations
 
+    # 3. Find the module spec.
     for finder in sys.meta_path:
         spec = finder.find_spec(absolute_name, path)
         if spec is not None:
@@ -64,17 +68,21 @@ def _lazy_import_module(name: str, package: typing.Optional[str] = None) -> type
         msg = f"No module named {absolute_name!r}"
         raise ModuleNotFoundError(msg, name=absolute_name)
 
-    if spec.loader is None:
+    # 4. Wrap the module loader.
+    if spec.loader is not None:
+        spec.loader = loader = importlib.util.LazyLoader(spec.loader)
+    else:
         msg = "missing loader"
         raise ImportError(msg, name=spec.name)
 
-    spec.loader = loader = importlib.util.LazyLoader(spec.loader)
+    # 5. Execute and return the module
+    # 5.1. Account for the module replacing itself in sys.modules.
     module = importlib.util.module_from_spec(spec)
     sys.modules[absolute_name] = module
     loader.exec_module(module)
 
     if path is not None:
-        setattr(parent_module, child_name, module)  # pyright: ignore [reportPossiblyUnboundVariable]
+        setattr(parent_module, child_name, sys.modules[absolute_name])  # pyright: ignore [reportPossiblyUnboundVariable]
 
     return sys.modules[absolute_name]
 
@@ -198,7 +206,8 @@ def _sliding_window(
 
     Examples
     --------
-    >>> tokens = list(tokenize.generate_tokens(io.StringIO("def func(): ...").readline))
+    >>> source = "def func(): ..."
+    >>> tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
     >>> [" ".join(item.string for item in window) for window in _sliding_window(tokens, 2)]
     ['def func', 'func (', '( )', ') :', ': ...', '... ', ' ']
     """
@@ -260,6 +269,7 @@ def _calc___package__(globals: coll_abc.MutableMapping[str, typing.Any]) -> typi
 
             msg = f"__package__ != __spec__.parent ({package!r} != {spec.parent!r})"
             warnings.warn(msg, category, stacklevel=3)
+
         return package
     elif spec is not None:
         return spec.parent

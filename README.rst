@@ -15,7 +15,7 @@ defer-imports
     :alt: PyPI supported Python versions
 
 
-A library that implements `PEP 690 <pep_690_text_>`_–esque lazy imports in pure Python.
+A library that implements `PEP 690`_–esque lazy imports in pure Python.
 
 **Note: This is still in development.**
 
@@ -69,7 +69,7 @@ The function call's result can be used as a context manager, which makes sense w
 
 Making this call without arguments allows user code with imports contained within the ``defer_imports.until_use`` context manager to be deferred until referenced. However, its several configuration parameters allow toggling global instrumentation (affecting all import statements) and adjusting the granularity of that global instrumentation.
 
-**WARNING: Avoid using the hook as anything other than a context manager when passing in configuration; otherwise, the explicit (or default) configuration will persist and may cause other packages using ``defer_imports`` to behave differently than expected.**
+**WARNING: Avoid using the hook as anything other than a context manager when passing in module-specific configuration; otherwise, the explicit (or default) configuration will persist and may cause other packages using ``defer_imports`` to behave differently than expected.**
 
 .. code-block:: python
 
@@ -155,7 +155,7 @@ Caveats
 -   May clash with other import hooks.
 
     -   Examples of popular packages using clashing import hooks: |typeguard|_, |beartype|_, |jaxtyping|_, |torchtyping|_, |pyximport|_
-    -   It's possible to work around this by reaching into ``defer-imports``'s internals and combining its instrumentation machinery with that of another package's, but it's currently not supported well beyond the presence of a ``loader_class`` parameter in ``defer_imports.install_import_hook()``'s signature.
+    -   It's possible to work around this by reaching into ``defer-imports``'s internals and combining its instrumentation machinery with that of another package's, but it's currently not supported well beyond ``defer_imports.install_import_hook()`` accepting a ``loader_class`` argument.
 
 -   Can't automatically resolve deferred imports in a namespace when that namespace is being iterated over, leaving a hole in its abstraction.
 
@@ -167,7 +167,7 @@ Caveats
 Why?
 ====
 
-Lazy imports alleviate several of Python's current pain points. Because of that, `PEP 690 <pep_690_text_>`_ was put forth to integrate lazy imports into CPython; see that proposal and the surrounding discussions for more information about the history, implementations, benefits, and costs of lazy imports.
+Lazy imports alleviate several of Python's current pain points. Because of that, `PEP 690`_ was put forth to integrate lazy imports into CPython; see that proposal and the surrounding discussions for more information about the history, implementations, benefits, and costs of lazy imports.
 
 Though that proposal was rejected, there are well-established third-party libraries that provide lazy import mechanisms, albeit with more constraints. Most do not have APIs as integrated or ergonomic as PEP 690's, but that makes sense; most predate the PEP and were not created with that goal in mind.
 
@@ -249,7 +249,7 @@ The design of this library was inspired by the following:
 -   |metamodule|_
 -   |modutil|_
 -   `SPEC 1 <https://scientific-python.org/specs/spec-0001/>`_ / |lazy-loader|_
--   `PEP 690 and its authors <pep_690_text_>`_
+-   `PEP 690`_ and its authors
 -   `Jelle Zijlstra's pure-Python proof of concept <https://gist.github.com/JelleZijlstra/23c01ceb35d1bc8f335128f59a32db4c>`_
 -   |slothy|_
 -   |ideas|_
@@ -262,7 +262,7 @@ Without them, this would not exist.
     Common/formatted hyperlinks
 
 
-.. _pep_690_text: https://peps.python.org/pep-0690/
+.. _PEP 690: https://peps.python.org/pep-0690/
 
 .. |timeit| replace:: ``timeit``
 .. _timeit: https://docs.python.org/3/library/timeit.html
