@@ -16,7 +16,7 @@ import zipimport
 from importlib.machinery import BYTECODE_SUFFIXES, SOURCE_SUFFIXES, FileFinder, ModuleSpec, PathFinder, SourceFileLoader
 
 
-__version__ = "0.0.3.dev1"
+__version__ = "0.1.0.dev1"
 
 __all__ = (
     "install_import_hook",
@@ -30,6 +30,9 @@ TYPE_CHECKING = False
 
 # ============================================================================
 # region -------- Lazy import bootstrapping --------
+#
+# A "hack" to lazily import some modules in a different way to reduce import
+# time.
 # ============================================================================
 
 
@@ -203,7 +206,8 @@ else:  # pragma: <3.12 cover
 
 
 def _sliding_window(
-    iterable: typing.Iterable[tokenize.TokenInfo], n: int
+    iterable: typing.Iterable[tokenize.TokenInfo],
+    n: int,
 ) -> typing.Generator[tuple[tokenize.TokenInfo, ...], None, None]:
     """Collect tokens into overlapping fixed-length chunks or blocks.
 
@@ -397,7 +401,7 @@ class _DeferredInstrumenter:
 
         Notes
         -----
-        The return value can serve as the "details" argument for SyntaxError [1]_.
+        The return value is meant to serve as the "details" argument for SyntaxError [1]_.
 
         References
         ----------
