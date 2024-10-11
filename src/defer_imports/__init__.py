@@ -9,12 +9,11 @@ from __future__ import annotations
 import builtins
 import contextvars
 import importlib.util
+import itertools
 import sys
+import threading
 import zipimport
-from collections import deque
 from importlib.machinery import BYTECODE_SUFFIXES, SOURCE_SUFFIXES, FileFinder, ModuleSpec, PathFinder, SourceFileLoader
-from itertools import islice, takewhile
-from threading import RLock
 
 
 __version__ = "0.0.3.dev1"
@@ -37,12 +36,19 @@ TYPE_CHECKING = False
 def _lazy_import_module(name: str, package: typing.Optional[str] = None) -> types.ModuleType:
     """Lazily import a module. Has the same signature as ``importlib.import_module()``.
 
-    This is for limited internal usage, especially since it intentionally does not handle certain edge cases and has
-    not been evaluated for thread safety.
+    This is for limited internal usage, especially since it intentionally does not work in all cases and has not been
+    evaluated for thread safety.
 
     Notes
     -----
-    Based on importlib code as well as recipes found in the Python 3.12 importlib docs.
+    This is based on importlib code as well as recipes found in the Python 3.12 importlib docs.
+
+    Some types of ineligible imports:
+
+    -   from imports
+    -   submodule imports
+    -   module imports where the modules replace themselves in sys.modules during execution, e.g. collections.abc in
+        CPython 3.13
     """
 
     # 1. Resolve the name.
@@ -68,28 +74,27 @@ def _lazy_import_module(name: str, package: typing.Optional[str] = None) -> type
         msg = f"No module named {absolute_name!r}"
         raise ModuleNotFoundError(msg, name=absolute_name)
 
-    # 4. Wrap the module loader.
+    # 4. Wrap the module loader with importlib.util.LazyLoader.
     if spec.loader is not None:
         spec.loader = loader = importlib.util.LazyLoader(spec.loader)
     else:
         msg = "missing loader"
         raise ImportError(msg, name=spec.name)
 
-    # 5. Execute and return the module
-    # 5.1. Account for the module replacing itself in sys.modules.
+    # 5. Execute and return the module.
     module = importlib.util.module_from_spec(spec)
     sys.modules[absolute_name] = module
     loader.exec_module(module)
 
     if path is not None:
-        setattr(parent_module, child_name, sys.modules[absolute_name])  # pyright: ignore [reportPossiblyUnboundVariable]
+        setattr(parent_module, child_name, module)  # pyright: ignore [reportPossiblyUnboundVariable]
 
-    return sys.modules[absolute_name]
+    return module
 
 
 if TYPE_CHECKING:
     import ast
-    import collections.abc as coll_abc
+    import collections
     import importlib.abc as imp_abc
     import io
     import os
@@ -100,7 +105,7 @@ if TYPE_CHECKING:
 else:
     # fmt: off
     ast         = _lazy_import_module("ast")
-    coll_abc    = _lazy_import_module("collections.abc")
+    collections = _lazy_import_module("collections")
     imp_abc     = _lazy_import_module("importlib.abc")
     io          = _lazy_import_module("io")
     os          = _lazy_import_module("os")
@@ -177,7 +182,10 @@ else:  # pragma: <3.11 cover
 
 
 if sys.version_info >= (3, 12):  # pragma: >=3.12 cover
-    _ReadableBuffer: _TypeAlias = "coll_abc.Buffer"
+    if TYPE_CHECKING:
+        from collections.abc import Buffer as _ReadableBuffer
+    else:
+        _ReadableBuffer: _TypeAlias = "collections.abc.Buffer"
 elif TYPE_CHECKING:
     from typing_extensions import Buffer as _ReadableBuffer
 else:  # pragma: <3.12 cover
@@ -195,9 +203,8 @@ else:  # pragma: <3.12 cover
 
 
 def _sliding_window(
-    iterable: coll_abc.Iterable[tokenize.TokenInfo],
-    n: int,
-) -> coll_abc.Generator[tuple[tokenize.TokenInfo, ...]]:
+    iterable: typing.Iterable[tokenize.TokenInfo], n: int
+) -> typing.Generator[tuple[tokenize.TokenInfo, ...], None, None]:
     """Collect tokens into overlapping fixed-length chunks or blocks.
 
     Notes
@@ -213,7 +220,7 @@ def _sliding_window(
     """
 
     iterator = iter(iterable)
-    window = deque(islice(iterator, n - 1), maxlen=n)
+    window = collections.deque(itertools.islice(iterator, n - 1), maxlen=n)
     for x in iterator:
         window.append(x)
         yield tuple(window)
@@ -246,7 +253,7 @@ def _sanity_check(name: str, package: typing.Optional[str], level: int) -> None:
         raise ValueError(msg)
 
 
-def _calc___package__(globals: coll_abc.MutableMapping[str, typing.Any]) -> typing.Optional[str]:
+def _calc___package__(globals: typing.MutableMapping[str, typing.Any]) -> typing.Optional[str]:
     """Calculate what __package__ should be.
 
     __package__ is not guaranteed to be defined or could be set to None to represent that its proper value is unknown.
@@ -607,7 +614,10 @@ class _DeferredInstrumenter:
         The first node must be an import node.
         """
 
-        import_range = tuple(takewhile(lambda i: self._is_non_wildcard_import(nodes[i]), range(start, len(nodes))))
+        def _is_non_wildcard_index(index: int) -> bool:
+            return self._is_non_wildcard_import(nodes[index])
+
+        import_range = tuple(itertools.takewhile(_is_non_wildcard_index, range(start, len(nodes))))
         import_slice = slice(import_range[0], import_range[-1] + 1)
         import_nodes = nodes[import_slice]
 
@@ -857,7 +867,7 @@ class _DeferConfig:
     def __init__(
         self,
         apply_all: bool,
-        module_names: coll_abc.Sequence[str],
+        module_names: typing.Sequence[str],
         recursive: bool,
         loader_class: typing.Optional[type[imp_abc.Loader]],
     ) -> None:
@@ -921,7 +931,7 @@ def install_import_hook(
     *,
     uninstall_after: bool = False,
     apply_all: bool = False,
-    module_names: coll_abc.Sequence[str] = (),
+    module_names: typing.Sequence[str] = (),
     recursive: bool = False,
     loader_class: typing.Optional[type[imp_abc.Loader]] = None,
 ) -> ImportHookContext:
@@ -941,7 +951,7 @@ def install_import_hook(
     apply_all: bool, default=False
         Whether to apply module-level import deferral, i.e. instrumentation of all imports, to all modules henceforth.
         Has higher priority than module_names. More suitable for use in applications.
-    module_names: _tp.Sequence[str], optional
+    module_names: Sequence[str], optional
         A set of modules to apply module-level import deferral to. Has lower priority than apply_all. More suitable for
         use in libraries.
     recursive: bool, default=False
@@ -995,9 +1005,9 @@ class _DeferredImportProxy:
     def __init__(
         self,
         name: str,
-        global_ns: coll_abc.MutableMapping[str, object],
-        local_ns: coll_abc.MutableMapping[str, object],
-        fromlist: coll_abc.Sequence[str],
+        global_ns: typing.MutableMapping[str, object],
+        local_ns: typing.MutableMapping[str, object],
+        fromlist: typing.Sequence[str],
         level: int = 0,
     ) -> None:
         self.defer_proxy_name = name
@@ -1061,7 +1071,7 @@ class _DeferredImportKey(str):
     def __init__(self, key: str, proxy: _DeferredImportProxy, /) -> None:
         self.defer_key_proxy = proxy
         self.is_resolving = False
-        self.lock = RLock()
+        self.lock = threading.RLock()
 
     def __eq__(self, value: object, /) -> bool:
         if not isinstance(value, str):
@@ -1127,9 +1137,9 @@ class _DeferredImportKey(str):
 
 def _deferred___import__(
     name: str,
-    globals: coll_abc.MutableMapping[str, object],
-    locals: coll_abc.MutableMapping[str, object],
-    fromlist: typing.Optional[coll_abc.Sequence[str]] = None,
+    globals: typing.MutableMapping[str, object],
+    locals: typing.MutableMapping[str, object],
+    fromlist: typing.Optional[typing.Sequence[str]] = None,
     level: int = 0,
 ) -> typing.Any:
     """An limited replacement for __import__ that supports deferred imports by returning proxies."""
