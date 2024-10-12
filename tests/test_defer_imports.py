@@ -1114,11 +1114,19 @@ def Y2():
 
 
 def test_import_stdlib():
-    """Test that we can import most of the stdlib."""
+    """Test that defer_imports.until_use works when wrapping imports for most of the stdlib."""
 
-    import tests.sample_stdlib_imports
+    # The finder for tests.sample_stdlib_imports is already cached, so we need to temporarily reset that cache.
+    _temp_cache = dict(sys.path_importer_cache)
+    sys.path_importer_cache.clear()
+
+    with install_import_hook(uninstall_after=True):
+        import tests.sample_stdlib_imports
 
     assert tests.sample_stdlib_imports
+
+    # Revert changes to the path finder cache.
+    sys.path_importer_cache = _temp_cache
 
 
 @pytest.mark.skip(reason="Leaking patch problem is currently out of scope.")

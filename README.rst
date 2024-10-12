@@ -43,7 +43,7 @@ See the docstrings and comments in the codebase for more details.
 Setup
 -----
 
-To do its work, ``defer-imports`` must hook into the Python import system. To do that, include the following call somewhere such that it will be executed before your code:
+To do its work, ``defer-imports`` must hook into the Python import system. Include the following call somewhere such that it will be executed before your code:
 
 .. code-block:: python
 

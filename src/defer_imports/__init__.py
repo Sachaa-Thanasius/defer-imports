@@ -314,6 +314,13 @@ _BYTECODE_HEADER = f"defer_imports{__version__}".encode()
 """Custom header for defer_imports-instrumented bytecode files. Should be updated with every version release."""
 
 
+_is_loaded_using_defer = False
+"""Whether the defer_imports import loader is being used to load a module."""
+
+_is_loaded_lock = threading.Lock()
+"""A lock to guard reading from and writing to _is_loaded_using_defer."""
+
+
 class _DeferredInstrumenter:
     """AST transformer that instruments imports within "with defer_imports.until_use: ..." blocks so that their
     results are assigned to custom keys in the global namespace.
@@ -806,10 +813,21 @@ class _DeferredFileLoader(SourceFileLoader):
     def exec_module(self, module: types.ModuleType) -> None:
         """Execute the module, but only after getting state from module.__spec__.loader_state if present."""
 
+        global _is_loaded_using_defer  # noqa: PLW0603
+
         if (spec := module.__spec__) and spec.loader_state is not None:
             self.defer_module_level = spec.loader_state["defer_module_level"]
 
-        return super().exec_module(module)
+        # Signal to defer_imports.until_use that it's not a no-op during this module's execution.
+        with _is_loaded_lock:
+            _temp = _is_loaded_using_defer
+            _is_loaded_using_defer = True
+
+        try:
+            return super().exec_module(module)
+        finally:
+            with _is_loaded_lock:
+                _is_loaded_using_defer = _temp
 
 
 class _DeferredFileFinder(FileFinder):
@@ -1204,19 +1222,22 @@ class DeferredContext:
     As part of its implementation, this temporarily replaces builtins.__import__.
     """
 
-    __slots__ = ("_import_ctx_token", "_defer_ctx_token")
-
-    # TODO: Have this turn into a no-op when not being executed with a defer_imports loader.
+    __slots__ = ("_is_active", "_import_ctx_token", "_defer_ctx_token")
 
     def __enter__(self) -> None:
-        self._defer_ctx_token = _is_deferred.set(True)
-        self._import_ctx_token = _original_import.set(builtins.__import__)
-        builtins.__import__ = _deferred___import__
+        with _is_loaded_lock:
+            self._is_active = _is_loaded_using_defer
+
+        if self._is_active:
+            self._defer_ctx_token = _is_deferred.set(True)
+            self._import_ctx_token = _original_import.set(builtins.__import__)
+            builtins.__import__ = _deferred___import__
 
     def __exit__(self, *exc_info: object) -> None:
-        _original_import.reset(self._import_ctx_token)
-        _is_deferred.reset(self._defer_ctx_token)
-        builtins.__import__ = _original_import.get()
+        if self._is_active:
+            _original_import.reset(self._import_ctx_token)
+            _is_deferred.reset(self._defer_ctx_token)
+            builtins.__import__ = _original_import.get()
 
 
 until_use: typing.Final[DeferredContext] = DeferredContext()
