@@ -48,10 +48,11 @@ def _lazy_import_module(name: str, package: typing.Optional[str] = None) -> type
 
     Some types of ineligible imports:
 
-    -   from imports
-    -   submodule imports
-    -   module imports where the modules replace themselves in sys.modules during execution, e.g. collections.abc in
-        CPython 3.13
+    -   from imports (where the parent is also expected to be lazy-loaded)
+    -   submodule imports (where the parent is also expected to be lazy-loaded)
+    -   module imports where the modules replace themselves in sys.modules during execution
+        -   often done for performance reasons, like replacing onself with a c-accelerated module
+        -   e.g. collections.abc in CPython 3.13
     """
 
     # 1. Resolve the name.
@@ -98,7 +99,7 @@ def _lazy_import_module(name: str, package: typing.Optional[str] = None) -> type
 if TYPE_CHECKING:
     import ast
     import collections
-    import importlib.abc as imp_abc
+    import importlib.abc as importlib_abc
     import io
     import os
     import tokenize
@@ -107,15 +108,15 @@ if TYPE_CHECKING:
     import warnings
 else:
     # fmt: off
-    ast         = _lazy_import_module("ast")
-    collections = _lazy_import_module("collections")
-    imp_abc     = _lazy_import_module("importlib.abc")
-    io          = _lazy_import_module("io")
-    os          = _lazy_import_module("os")
-    tokenize    = _lazy_import_module("tokenize")
-    types       = _lazy_import_module("types")
-    typing      = _lazy_import_module("typing")
-    warnings    = _lazy_import_module("warnings")
+    ast             = _lazy_import_module("ast")
+    collections     = _lazy_import_module("collections")
+    importlib_abc   = _lazy_import_module("importlib.abc")
+    io              = _lazy_import_module("io")
+    os              = _lazy_import_module("os")
+    tokenize        = _lazy_import_module("tokenize")
+    types           = _lazy_import_module("types")
+    typing          = _lazy_import_module("typing")
+    warnings        = _lazy_import_module("warnings")
     # fmt: on
 
 
@@ -891,7 +892,7 @@ class _DeferConfig:
         apply_all: bool,
         module_names: typing.Sequence[str],
         recursive: bool,
-        loader_class: typing.Optional[type[imp_abc.Loader]],
+        loader_class: typing.Optional[type[importlib_abc.Loader]],
     ) -> None:
         self.apply_all = apply_all
         self.module_names = module_names
@@ -955,7 +956,7 @@ def install_import_hook(
     apply_all: bool = False,
     module_names: typing.Sequence[str] = (),
     recursive: bool = False,
-    loader_class: typing.Optional[type[imp_abc.Loader]] = None,
+    loader_class: typing.Optional[type[importlib_abc.Loader]] = None,
 ) -> ImportHookContext:
     r"""Install defer_imports's import hook if it isn't already installed, and optionally configure it. Must be called
     before using defer_imports.until_use.
@@ -1128,8 +1129,7 @@ class _DeferredImportKey(str):
         module_vars = vars(module)
         for attr_key, attr_val in vars(proxy).items():
             if isinstance(attr_val, _DeferredImportProxy) and not hasattr(module, attr_key):
-                # This could have used setattr() if pypy didn't normalize the attr key type to str, so we resort to
-                # direct placement in the module's __dict__ to avoid that.
+                # NOTE: This doesn't use setattr() because pypy normalizes the attr key type to str.
                 module_vars[_DeferredImportKey(attr_key, attr_val)] = attr_val
 
                 # Change the namespaces as well to make sure nested proxies are replaced in the right place.

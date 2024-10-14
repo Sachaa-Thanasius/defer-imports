@@ -68,10 +68,10 @@ def temp_cache_module(name: str, module: types.ModuleType):
 def better_key_repr(monkeypatch: pytest.MonkeyPatch):
     """Replace defer_imports._comptime._DeferredImportKey.__repr__ with a more verbose version for all tests."""
 
-    def _verbose_repr(self) -> str:  # pyright: ignore  # noqa: ANN001
-        return f"<key for {str.__repr__(self)} import>"  # pyright: ignore
+    def verbose_repr(self: object) -> str:
+        return f"<key for {super(type(self), self).__repr__()} import>"
 
-    monkeypatch.setattr("defer_imports._DeferredImportKey.__repr__", _verbose_repr)  # pyright: ignore [reportUnknownArgumentType]
+    monkeypatch.setattr("defer_imports._DeferredImportKey.__repr__", verbose_repr)
 
 
 # endregion
@@ -524,6 +524,82 @@ del @_DeferredImportKey, @_DeferredImportProxy
 """,
             id="still instruments imports in defer_imports.until_use with block",
         ),
+        pytest.param(
+            """\
+try:
+    import foo
+except:
+    pass
+""",
+            """\
+import defer_imports
+from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
+try:
+    import foo
+except:
+    pass
+del @_DeferredImportKey, @_DeferredImportProxy
+""",
+            id="escape hatch: try",
+        ),
+        pytest.param(
+            """\
+try:
+    raise Exception
+except:
+    import foo
+""",
+            """\
+import defer_imports
+from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
+try:
+    raise Exception
+except:
+    import foo
+del @_DeferredImportKey, @_DeferredImportProxy
+""",
+            id="escape hatch: except",
+        ),
+        pytest.param(
+            """\
+try:
+    print('hi')
+except:
+    print('error')
+else:
+    import foo
+""",
+            """\
+import defer_imports
+from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
+try:
+    print('hi')
+except:
+    print('error')
+else:
+    import foo
+del @_DeferredImportKey, @_DeferredImportProxy
+""",
+            id="escape hatch: else",
+        ),
+        pytest.param(
+            """\
+try:
+    pass
+finally:
+    import foo
+""",
+            """\
+import defer_imports
+from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
+try:
+    pass
+finally:
+    import foo
+del @_DeferredImportKey, @_DeferredImportProxy
+""",
+            id="escape hatch: finally",
+        ),
     ],
 )
 def test_module_instrumentation(before: str, after: str):
@@ -576,7 +652,6 @@ with defer_imports.until_use:
     spec, module, _ = create_sample_module(tmp_path, source)
     assert spec.loader
     spec.loader.exec_module(module)
-    print(repr(vars(module)))
 
     expected_inspect_repr = "<key for 'inspect' import>: <proxy for 'import inspect'>"
     assert expected_inspect_repr in repr(vars(module))
@@ -904,8 +979,6 @@ with defer_imports.until_use:
 
 def test_top_level_and_submodules_2(tmp_path: Path):
     source = """\
-from pprint import pprint
-
 import defer_imports
 
 with defer_imports.until_use:
@@ -1116,17 +1189,23 @@ def Y2():
 def test_import_stdlib():
     """Test that defer_imports.until_use works when wrapping imports for most of the stdlib."""
 
-    # The finder for tests.sample_stdlib_imports is already cached, so we need to temporarily reset that cache.
-    _temp_cache = dict(sys.path_importer_cache)
-    sys.path_importer_cache.clear()
+    _missing: Any = object()
 
-    with install_import_hook(uninstall_after=True):
-        import tests.sample_stdlib_imports
+    # The path finder for the tests directory is already cached, so we need to temporarily reset that entry.
+    _tests_path = str(Path(__file__).parent)
+    _temp_cache = sys.path_importer_cache.pop(_tests_path, _missing)
 
-    assert tests.sample_stdlib_imports
+    try:
+        with install_import_hook(uninstall_after=True):
+            import tests.sample_stdlib_imports
 
-    # Revert changes to the path finder cache.
-    sys.path_importer_cache = _temp_cache
+        # Sample-check the __future__ import.
+        expected_future_import = "<key for '__future__' import>: <proxy for 'import __future__'>"
+        assert expected_future_import in repr(vars(tests.sample_stdlib_imports))
+    finally:
+        # Revert changes to the path finder cache.
+        if _temp_cache is not _missing:
+            sys.path_importer_cache[_tests_path] = _temp_cache
 
 
 @pytest.mark.skip(reason="Leaking patch problem is currently out of scope.")
