@@ -51,7 +51,7 @@ def _lazy_import_module(name: str, package: typing.Optional[str] = None) -> type
     -   from imports (where the parent is also expected to be lazy-loaded)
     -   submodule imports (where the parent is also expected to be lazy-loaded)
     -   module imports where the modules replace themselves in sys.modules during execution
-        -   often done for performance reasons, like replacing onself with a c-accelerated module
+        -   often done for performance reasons, like replacing onself with a C-accelerated module
         -   e.g. collections.abc in CPython 3.13
     """
 
@@ -401,7 +401,7 @@ class _DeferredInstrumenter:
         else:
             # Do the same thing as importlib.util.decode_source().
             newline_decoder = io.IncrementalNewlineDecoder(None, translate=True)
-            # Expected buffer types (bytes, bytearray, memoryview) are known to have a decode method.
+            # Expected buffer types (bytes, bytearray, memoryview) have a decode method.
             return newline_decoder.decode(self.data.decode(self.encoding))  # pyright: ignore
 
     def _get_node_context(self, node: ast.stmt):  # noqa: ANN202 # Version-dependent and too verbose.
@@ -781,7 +781,7 @@ class _DeferredFileLoader(SourceFileLoader):
         ----------
         data: _SourceData
             Anything that compile() can handle.
-        path: _ModulePath:
+        path: _ModulePath
             Where the data was retrieved from (when applicable).
 
         Returns
@@ -1015,10 +1015,10 @@ def install_import_hook(
 # ============================================================================
 
 
-_original_import = contextvars.ContextVar("original_import", default=builtins.__import__)
+_original_import = contextvars.ContextVar("_original_import", default=builtins.__import__)
 """What builtins.__import__ last pointed to."""
 
-_is_deferred = contextvars.ContextVar("is_deferred", default=False)
+_is_deferred = contextvars.ContextVar("_is_deferred", default=False)
 """Whether imports in import statements should be deferred."""
 
 
@@ -1171,8 +1171,8 @@ def _deferred___import__(
     package = _calc___package__(globals) if (level != 0) else None
     _sanity_check(name, package, level)
 
-    # NOTE: This technically repeats work since it recalculates level internally, but it's better for maintenance than
-    #       keeping a copy of importlib._bootstrap._resolve_name() around.
+    # This technically repeats work since it recalculates level internally, but it's better for maintenance than keeping
+    # a copy of importlib._bootstrap._resolve_name() around.
     if level > 0:
         name = importlib.util.resolve_name(f'{"." * level}{name}', package)
         level = 0

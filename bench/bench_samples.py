@@ -83,6 +83,7 @@ def pretty_print_results(results: dict[str, float], minimum: float) -> None:
     time_divider = "=" * time_len
 
     divider = "  ".join((impl_divider, version_divider, benchmark_divider, time_divider))
+    header = "  ".join((impl_header, version_header, benchmark_header, time_header))
 
     impl = platform.python_implementation().ljust(impl_len)
     version = f"{sys.version_info.major}.{sys.version_info.minor}".ljust(version_len)
@@ -94,7 +95,7 @@ def pretty_print_results(results: dict[str, float], minimum: float) -> None:
 
     print()
     print(divider)
-    print(impl_header, version_header, benchmark_header, time_header, sep="  ")
+    print(header)
     print(divider)
 
     for bench_type, result in results.items():

@@ -28,7 +28,7 @@ A library that implements `PEP 690`_–esque lazy imports in pure Python.
 Installation
 ============
 
-**Note: Requires Python 3.9+**
+**defer-imports requires Python 3.9+.**
 
 This can be installed via pip::
 
@@ -69,7 +69,7 @@ The function call's result can be used as a context manager, which makes sense w
 
 Making this call without arguments allows user code with imports contained within the ``defer_imports.until_use`` context manager to be deferred until referenced. However, its several configuration parameters allow toggling global instrumentation (affecting all import statements) and adjusting the granularity of that global instrumentation.
 
-**WARNING: Avoid using the hook as anything other than a context manager when passing in module-specific configuration; otherwise, the explicit (or default) configuration will persist and may cause other packages using ``defer_imports`` to behave differently than expected.**
+**WARNING: Avoid using the hook as anything other than a context manager when passing in module-specific configuration; otherwise, the explicit (or default) configuration will persist and may cause other packages using defer_imports to behave differently than expected.**
 
 .. code-block:: python
 
@@ -116,7 +116,7 @@ Assuming the path hook was registered normally (i.e. without providing any confi
 
     # inspect and Final won't be imported until referenced.
 
-**WARNING: If the context manager is not used as ``defer_imports.until_use``, it will not be instrumented properly. ``until_use`` by itself, aliases of it, and the like are currently not supported.**
+**WARNING: If the context manager is not used as defer_imports.until_use, it will not be instrumented properly. until_use by itself, aliases of it, and the like are currently not supported.**
 
 If the path hook *was* registered with configuration, then within the affected modules, most module-level import statements will be instrumented. There are two supported exceptions: import statements within ``try-except-else-finally`` blocks and within non- ``defer_imports.until_use`` ``with`` blocks. Such imports are still performed eagerly. These "escape hatches" mostly match those described in PEP 690. 
 
@@ -124,9 +124,9 @@ If the path hook *was* registered with configuration, then within the affected m
 Use Cases
 ---------
 
--   Anything that could benefit from overall decreased startup/import time if the symbols resulting from imports aren't used at import time.
+-   Anything that could benefit from overall decreased startup/import time if the symbols resulting from imports aren't used *at* import time.
 
-    -   If one wants module-level, expensive imports aren't used in commonly run code paths.
+    -   If one wants module-level, expensive imports that are rarely needed in common code paths.
 
         -   A good fit for this is a CLI tool and its subcommands.
 
@@ -155,11 +155,11 @@ Caveats
 -   May clash with other import hooks.
 
     -   Examples of popular packages using clashing import hooks: |typeguard|_, |beartype|_, |jaxtyping|_, |torchtyping|_, |pyximport|_
-    -   It's possible to work around this by reaching into ``defer-imports``'s internals and combining its instrumentation machinery with that of another package's, but it's currently not supported well beyond ``defer_imports.install_import_hook()`` accepting a ``loader_class`` argument.
+    -   It's possible to work around this by reaching into ``defer-imports``'s internals, combining its instrumentation machinery with that of another library's, then creating a custom import hook using that machinery, but such a scenario is currently not well-supported beyond ``defer_imports.install_import_hook()`` accepting a ``loader_class`` argument.
 
 -   Can't automatically resolve deferred imports in a namespace when that namespace is being iterated over, leaving a hole in its abstraction.
 
-    -   When using dictionary iteration methods on a dictionary or namespace that contains a deferred import key/proxy pair, the members of that pair will be visible, mutable, and will not resolve automatically. PEP 690 specifically addresses this by modifying the builtin ``dict``, allowing each instance to know if it contains proxies and then resolve them automatically during iteration (see the second half of its `"Implementation" section <https://peps.python.org/pep-0690/#implementation>`_ for more details). Note that qualifying ``dict`` iteration methods include ``dict.items()``, ``dict.values()``, etc., but outside of that, the builtin ``dir()`` also qualifies since it can see the keys for objects' internal dictionaries.
+    -   When using dictionary iteration methods on a dictionary or namespace that contains a deferred import key/proxy pair, the members of that pair will be visible, mutable, and will not resolve automatically. PEP 690 specifically addresses this by modifying the builtin ``dict``, allowing each instance to know if it contains proxies and then resolve them automatically during iteration (see the second half of its `"Implementation" section <https://peps.python.org/pep-0690/#implementation>`_ for more details). Note that qualifying ``dict`` iteration methods include ``dict.items()``, ``dict.values()``, etc., as well as the builtin functions ``locals()``, ``globals()``, ``vars()``, and ``dir()``.
 
         As of right now, nothing can be done about this using pure Python without massively slowing down ``dict``. Accordingly, users should try to avoid interacting with deferred import keys/proxies if encountered while iterating over module dictionaries; the result of doing so is not guaranteed.
 

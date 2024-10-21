@@ -8,12 +8,12 @@ description = "Lazy imports with regular syntax in pure Python."
 requires-python = ">=3.9"
 license = "MIT"
 readme = { file = "README.rst", content-type = "text/x-rst" }
-authors = [{ name = "Sachaa-Thanasius" }]
+authors = [{ name = "Sachaa-Thanasius", email = "sachaathanasius@gmail.com" }]
 classifiers = [
     "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
     "Natural Language :: English",
     "Operating System :: OS Independent",
-    "Programming Language :: Python",
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
@@ -28,20 +28,20 @@ classifiers = [
 ]
 dynamic = ["version"]
 
-[tool.hatch.version]
-path = "src/defer_imports/__init__.py"
-
 [project.optional-dependencies]
-bench = ["slothy"]
+bench = ["slothy==1.0.0"]
 test = ["pytest", "pytest-rerunfailures"]
 cov = ["defer-imports[test]", "coverage", "covdefaults"]
-dev = ["defer-imports[bench,cov]", "pre-commit", "typing-extensions"]
+dev = ["defer-imports[bench,cov]", "hatch", "pre-commit", "typing-extensions"]
 
 [project.urls]
 Homepage = "https://github.com/Sachaa-Thanasius/defer-imports"
 Documentation = "https://github.com/Sachaa-Thanasius/defer-imports#readme"
 Issues = "https://github.com/Sachaa-Thanasius/defer-imports/issues"
 Source = "https://github.com/Sachaa-Thanasius/defer-imports"
+
+[tool.hatch.version]
+path = "src/defer_imports/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/defer_imports"]
