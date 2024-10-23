@@ -25,6 +25,8 @@ __all__ = (
     "DeferredContext",
 )
 
+# Defining this constant locally only works with type checkers as long as they continue to special-case variables with
+# this name.
 TYPE_CHECKING = False
 
 
@@ -48,8 +50,8 @@ def _lazy_import_module(name: str, package: typing.Optional[str] = None) -> type
 
     Some types of ineligible imports:
 
-    -   from imports (where the parent is also expected to be lazy-loaded)
-    -   submodule imports (where the parent is also expected to be lazy-loaded)
+    -   from imports (where the parent is also expected to be lazily imported)
+    -   submodule imports (where the parent is also expected to be lazily imported)
     -   module imports where the modules replace themselves in sys.modules during execution
         -   often done for performance reasons, like replacing onself with a C-accelerated module
         -   e.g. collections.abc in CPython 3.13
@@ -243,7 +245,7 @@ def _sanity_check(name: str, package: typing.Optional[str], level: int) -> None:
     module at runtime.
     """
 
-    if not isinstance(name, str):  # pyright: ignore [reportUnnecessaryIsInstance]
+    if not isinstance(name, str):  # pyright: ignore [reportUnnecessaryIsInstance] # Account for user error.
         msg = f"module name must be str, not {type(name)}"
         raise TypeError(msg)
     if level < 0:
@@ -817,7 +819,7 @@ class _DeferredFileLoader(SourceFileLoader):
     def exec_module(self, module: types.ModuleType) -> None:
         """Execute the module, but only after getting state from module.__spec__.loader_state if present."""
 
-        global _is_loaded_using_defer  # noqa: PLW0603
+        global _is_loaded_using_defer  # noqa: PLW0603 # Reading of/writing to global is guarded with threading lock.
 
         if (spec := module.__spec__) and spec.loader_state is not None:
             self.defer_module_level = spec.loader_state["defer_module_level"]
@@ -872,6 +874,7 @@ class _DeferredFileFinder(FileFinder):
                 )
 
                 if config.loader_class is not None:
+                    # We assume the class has the same initialization signature as the stdlib loader classes.
                     spec.loader = config.loader_class(fullname, spec.loader.path)  # pyright: ignore [reportCallIssue]
 
             spec.loader_state = {"defer_module_level": defer_module_level}
