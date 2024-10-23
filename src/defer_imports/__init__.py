@@ -148,6 +148,22 @@ else:
         return f
 
 
+if not TYPE_CHECKING and sys.version_info <= (3, 11):  # pragma: <=3.11 cover
+
+    class _PlaceholderGenericAlias(type(list[int])):
+        def __repr__(self) -> str:
+            name = f'typing.{super().__repr__().rpartition(".")[2]}'
+            return f"<import placeholder for {name}>"
+
+    class _PlaceholderMeta(type):
+        def __repr__(self) -> str:
+            return f"<import placeholder for typing.{self.__name__}>"
+
+    class _PlaceholderGenericMeta(_PlaceholderMeta):
+        def __getitem__(self, item: object) -> _PlaceholderGenericAlias:
+            return _PlaceholderGenericAlias(self, item)
+
+
 if sys.version_info >= (3, 10):  # pragma: >=3.10 cover
     if TYPE_CHECKING:
         from typing import TypeAlias as _TypeAlias, TypeGuard as _TypeGuard
@@ -157,21 +173,8 @@ if sys.version_info >= (3, 10):  # pragma: >=3.10 cover
 elif TYPE_CHECKING:
     from typing_extensions import TypeAlias as _TypeAlias, TypeGuard as _TypeGuard
 else:  # pragma: <3.10 cover
-    _TypeAlias = type("TypeAlias", (), {"__doc__": "Placeholder for typing.TypeAlias."})
-
-    class _PlaceholderGenericAlias(type(list[int])):
-        def __repr__(self) -> str:
-            return f"<import placeholder for {super().__repr__()}>"
-
-    class _PlaceholderMeta(type):
-        def __getitem__(self, item: object) -> _PlaceholderGenericAlias:
-            return _PlaceholderGenericAlias(self, item)
-
-        def __repr__(self) -> str:
-            return f"<import placeholder for {super().__repr__()}>"
-
-    class _TypeGuard(metaclass=_PlaceholderMeta):
-        """Placeholder for typing.TypeGuard."""
+    _TypeAlias = _PlaceholderMeta("TypeAlias", (), {"__doc__": "Placeholder for typing.TypeAlias."})
+    _TypeGuard = _PlaceholderGenericMeta("TypeGuard", (), {"__doc__": "Placeholder for typing.TypeGuard."})
 
 
 if sys.version_info >= (3, 11):  # pragma: >=3.11 cover
@@ -182,7 +185,7 @@ if sys.version_info >= (3, 11):  # pragma: >=3.11 cover
 elif TYPE_CHECKING:
     from typing_extensions import Self as _Self
 else:  # pragma: <3.11 cover
-    _Self = type("Self", (), {"__doc__": "Placeholder for typing.Self."})
+    _Self = _PlaceholderMeta("Self", (), {"__doc__": "Placeholder for typing.Self."})
 
 
 if sys.version_info >= (3, 12):  # pragma: >=3.12 cover
