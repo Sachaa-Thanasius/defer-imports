@@ -16,7 +16,7 @@ import zipimport
 from importlib.machinery import BYTECODE_SUFFIXES, SOURCE_SUFFIXES, FileFinder, ModuleSpec, PathFinder, SourceFileLoader
 
 
-__version__ = "0.1.0.dev1"
+__version__ = "0.1.0"
 
 __all__ = (
     "install_import_hook",
