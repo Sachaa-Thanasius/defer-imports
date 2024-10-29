@@ -16,7 +16,7 @@ import zipimport
 from importlib.machinery import BYTECODE_SUFFIXES, SOURCE_SUFFIXES, FileFinder, ModuleSpec, PathFinder, SourceFileLoader
 
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = (
     "install_import_hook",
@@ -25,8 +25,7 @@ __all__ = (
     "DeferredContext",
 )
 
-# Defining this constant locally only works with type checkers as long as they continue to special-case variables with
-# this name.
+# NOTE: Defining TYPE_CHECKING locally only works with type-checkers as long as they continue to special-case that name.
 TYPE_CHECKING = False
 
 
@@ -161,6 +160,11 @@ if not TYPE_CHECKING and sys.version_info <= (3, 11):  # pragma: <=3.11 cover
         def __repr__(self) -> str:
             return f"<import placeholder for typing.{self.__name__}>"
 
+        @classmethod
+        def for_typing_name(cls, name: str) -> _Self:
+            doc = f"Placeholder for typing.{name}."
+            return cls(name, (), {"__doc__": doc})
+
     class _PlaceholderGenericMeta(_PlaceholderMeta):
         def __getitem__(self, item: object) -> _PlaceholderGenericAlias:
             return _PlaceholderGenericAlias(self, item)
@@ -175,8 +179,8 @@ if sys.version_info >= (3, 10):  # pragma: >=3.10 cover
 elif TYPE_CHECKING:
     from typing_extensions import TypeAlias as _TypeAlias, TypeGuard as _TypeGuard
 else:  # pragma: <3.10 cover
-    _TypeAlias = _PlaceholderMeta("TypeAlias", (), {"__doc__": "Placeholder for typing.TypeAlias."})
-    _TypeGuard = _PlaceholderGenericMeta("TypeGuard", (), {"__doc__": "Placeholder for typing.TypeGuard."})
+    _TypeAlias = _PlaceholderMeta.for_typing_name("TypeAlias")
+    _TypeGuard = _PlaceholderGenericMeta.for_typing_name("TypeGuard")
 
 
 if sys.version_info >= (3, 11):  # pragma: >=3.11 cover
@@ -187,7 +191,7 @@ if sys.version_info >= (3, 11):  # pragma: >=3.11 cover
 elif TYPE_CHECKING:
     from typing_extensions import Self as _Self
 else:  # pragma: <3.11 cover
-    _Self = _PlaceholderMeta("Self", (), {"__doc__": "Placeholder for typing.Self."})
+    _Self = _PlaceholderMeta.for_typing_name("Self")
 
 
 if sys.version_info >= (3, 12):  # pragma: >=3.12 cover
@@ -211,7 +215,7 @@ else:  # pragma: <3.12 cover
 # ============================================================================
 
 
-def _sliding_window(
+def _sliding_tokens_window(
     iterable: typing.Iterable[tokenize.TokenInfo],
     n: int,
 ) -> typing.Generator[tuple[tokenize.TokenInfo, ...], None, None]:
@@ -311,8 +315,7 @@ def _calc___package__(globals: typing.MutableMapping[str, typing.Any]) -> typing
 # ============================================================================
 
 
-_StrPath: _TypeAlias = "typing.Union[str, os.PathLike[str]]"
-_ModulePath: _TypeAlias = "typing.Union[_StrPath, _ReadableBuffer]"
+_ModulePath: _TypeAlias = "typing.Union[str, os.PathLike[str], _ReadableBuffer]"
 _SourceData: _TypeAlias = "typing.Union[_ReadableBuffer, str, ast.Module, ast.Expression, ast.Interactive]"
 
 
@@ -320,11 +323,22 @@ _BYTECODE_HEADER = f"defer_imports{__version__}".encode()
 """Custom header for defer_imports-instrumented bytecode files. Should be updated with every version release."""
 
 
-_is_loaded_using_defer = False
+_is_executing_using_defer = False
 """Whether the defer_imports import loader is being used to load a module."""
 
-_is_loaded_lock = threading.Lock()
-"""A lock to guard reading from and writing to _is_loaded_using_defer."""
+_is_executing_lock = threading.Lock()
+"""A lock to guard access to _is_executing_using_defer."""
+
+
+def _is_until_use_node(node: ast.With) -> bool:
+    """Only accept "with defer_imports.until_use"."""
+
+    return len(node.items) == 1 and (
+        isinstance(node.items[0].context_expr, ast.Attribute)
+        and isinstance(node.items[0].context_expr.value, ast.Name)
+        and node.items[0].context_expr.value.id == "defer_imports"
+        and node.items[0].context_expr.attr == "until_use"
+    )
 
 
 class _DeferredInstrumenter:
@@ -535,17 +549,6 @@ class _DeferredInstrumenter:
 
         return new_import_nodes
 
-    @staticmethod
-    def is_until_use(node: ast.With) -> bool:
-        """Only accept "with defer_imports.until_use"."""
-
-        return len(node.items) == 1 and (
-            isinstance(node.items[0].context_expr, ast.Attribute)
-            and isinstance(node.items[0].context_expr.value, ast.Name)
-            and node.items[0].context_expr.value.id == "defer_imports"
-            and node.items[0].context_expr.attr == "until_use"
-        )
-
     def visit_With(self, node: ast.With) -> ast.AST:
         """Check that "with defer_imports.until_use" blocks are valid and if so, hook all imports within.
 
@@ -558,7 +561,7 @@ class _DeferredInstrumenter:
                 3. "defer_imports.until_use" block contains a wildcard import.
         """
 
-        if not self.is_until_use(node):
+        if not _is_until_use_node(node):
             return self._visit_eager_import_block(node)
 
         if self.scope_depth > 0:
@@ -690,35 +693,36 @@ class _DeferredInstrumenter:
         return node
 
 
-def _check_source_for_defer_usage(data: typing.Union[_ReadableBuffer, str]) -> tuple[str, bool]:
-    """Get the encoding of the given code and also check if it uses "with defer_imports.until_use"."""
+def _check_tokens_for_defer_usage(tokens: typing.Iterator[tokenize.TokenInfo]) -> bool:
+    """Check if a iterator of tokens has "with defer_imports.until_use" in it."""
 
-    _TOK_NAME, _TOK_OP = tokenize.NAME, tokenize.OP
-
-    if isinstance(data, str):
-        token_stream = tokenize.generate_tokens(io.StringIO(data).readline)
-        encoding = "utf-8"
-    else:
-        token_stream = tokenize.tokenize(io.BytesIO(data).readline)
-        encoding = next(token_stream).string
-
-    uses_defer = any(
-        (tok1.type == _TOK_NAME and tok1.string == "with")
-        and (tok2.type == _TOK_NAME and tok2.string == "defer_imports")
-        and (tok3.type == _TOK_OP and tok3.string == ".")
-        and (tok4.type == _TOK_NAME and tok4.string == "until_use")
-        for tok1, tok2, tok3, tok4 in _sliding_window(token_stream, 4)
+    return any(
+        (tok1.type == tokenize.NAME and tok1.string == "with")
+        and (tok2.type == tokenize.NAME and tok2.string == "defer_imports")
+        and (tok3.type == tokenize.OP and tok3.string == ".")
+        and (tok4.type == tokenize.NAME and tok4.string == "until_use")
+        for tok1, tok2, tok3, tok4 in _sliding_tokens_window(tokens, 4)
     )
 
-    return encoding, uses_defer
+
+def _check_ast_for_defer_usage(data: ast.AST) -> bool:
+    """Check if the given AST uses "with defer_imports.until_use"."""
+
+    return any(isinstance(node, ast.With) and _is_until_use_node(node) for node in ast.walk(data))
 
 
-def _check_ast_for_defer_usage(data: ast.AST) -> tuple[str, bool]:
-    """Check if the given AST uses "with defer_imports.until_use". Also assume "utf-8" is the the encoding."""
+def _get_encoding_and_defer_usage(data: _SourceData) -> tuple[str, bool]:
+    """Get the encoding of some source code as well as whether it uses the until_use context manager."""
 
-    encoding = "utf-8"
-    uses_defer = any(isinstance(node, ast.With) and _DeferredInstrumenter.is_until_use(node) for node in ast.walk(data))
-    return encoding, uses_defer
+    if isinstance(data, ast.AST):
+        return "utf-8", _check_ast_for_defer_usage(data)
+    elif isinstance(data, str):
+        token_gen = tokenize.generate_tokens(io.StringIO(data).readline)
+        return "utf-8", _check_tokens_for_defer_usage(token_gen)
+    else:
+        token_gen = tokenize.tokenize(io.BytesIO(data).readline)
+        encoding = next(token_gen).string
+        return encoding, _check_tokens_for_defer_usage(token_gen)
 
 
 class _DeferredFileLoader(SourceFileLoader):
@@ -788,6 +792,8 @@ class _DeferredFileLoader(SourceFileLoader):
             Anything that compile() can handle.
         path: _ModulePath
             Where the data was retrieved from (when applicable).
+        _optimize: int, default=-1
+            The optimization level to compile the data with.
 
         Returns
         -------
@@ -798,13 +804,16 @@ class _DeferredFileLoader(SourceFileLoader):
         if not data:
             return super().source_to_code(data, path, _optimize=_optimize)  # pyright: ignore # See note above.
 
-        if isinstance(data, ast.AST):
-            encoding, uses_defer = _check_ast_for_defer_usage(data)
-        else:
-            encoding, uses_defer = _check_source_for_defer_usage(data)
+        if not self.defer_module_level:
+            encoding, uses_defer = _get_encoding_and_defer_usage(data)
 
-        if not uses_defer:
-            return super().source_to_code(data, path, _optimize=_optimize)  # pyright: ignore # See note above.
+            if not uses_defer:
+                return super().source_to_code(data, path, _optimize=_optimize)  # pyright: ignore # See note above.
+
+        elif isinstance(data, (str, ast.AST)):
+            encoding = "utf-8"
+        else:
+            encoding, _ = tokenize.detect_encoding(io.BytesIO(data).readline)
 
         if isinstance(data, ast.AST):
             orig_tree = data
@@ -819,21 +828,21 @@ class _DeferredFileLoader(SourceFileLoader):
     def exec_module(self, module: types.ModuleType) -> None:
         """Execute the module, but only after getting state from module.__spec__.loader_state if present."""
 
-        global _is_loaded_using_defer  # noqa: PLW0603 # Reading of/writing to global is guarded with threading lock.
+        global _is_executing_using_defer  # noqa: PLW0603 # Access to global is guarded with threading lock.
 
-        if (spec := module.__spec__) and spec.loader_state is not None:
+        if (spec := module.__spec__) is not None and spec.loader_state is not None:
             self.defer_module_level = spec.loader_state["defer_module_level"]
 
         # Signal to defer_imports.until_use that it's not a no-op during this module's execution.
-        with _is_loaded_lock:
-            _temp = _is_loaded_using_defer
-            _is_loaded_using_defer = True
+        with _is_executing_lock:
+            _temp = _is_executing_using_defer
+            _is_executing_using_defer = True
 
         try:
             return super().exec_module(module)
         finally:
-            with _is_loaded_lock:
-                _is_loaded_using_defer = _temp
+            with _is_executing_lock:
+                _is_executing_using_defer = _temp
 
 
 class _DeferredFileFinder(FileFinder):
@@ -964,7 +973,7 @@ def install_import_hook(
     recursive: bool = False,
     loader_class: typing.Optional[type[importlib_abc.Loader]] = None,
 ) -> ImportHookContext:
-    r"""Install defer_imports's import hook if it isn't already installed, and optionally configure it. Must be called
+    """Install defer_imports's import hook if it isn't already installed, and optionally configure it. Must be called
     before using defer_imports.until_use.
 
     The configuration knobs are for instrumenting any global import statements, not only ones wrapped by
@@ -980,7 +989,7 @@ def install_import_hook(
     apply_all: bool, default=False
         Whether to apply module-level import deferral, i.e. instrumentation of all imports, to all modules henceforth.
         Has higher priority than module_names. More suitable for use in applications.
-    module_names: Sequence[str], optional
+    module_names: typing.Sequence[str], optional
         A set of modules to apply module-level import deferral to. Has lower priority than apply_all. More suitable for
         use in libraries.
     recursive: bool, default=False
@@ -1213,7 +1222,8 @@ def _deferred___import__(
 class DeferredContext:
     """A context manager within which imports occur lazily. Not reentrant. Use via defer_imports.until_use.
 
-    This will only work correctly if install_import_hook is called first elsewhere.
+    If defer_imports isn't set up properly, e.g. install_import_hook is not called first elsewhere, this should be a
+    no-op equivalent to contextlib.nullcontext.
 
     Raises
     ------
@@ -1231,8 +1241,8 @@ class DeferredContext:
     __slots__ = ("_is_active", "_import_ctx_token", "_defer_ctx_token")
 
     def __enter__(self) -> None:
-        with _is_loaded_lock:
-            self._is_active = _is_loaded_using_defer
+        with _is_executing_lock:
+            self._is_active = _is_executing_using_defer
 
         if self._is_active:
             self._defer_ctx_token = _is_deferred.set(True)

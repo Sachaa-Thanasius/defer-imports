@@ -99,13 +99,16 @@ select = [
     "UP",
     "YTT",
     "ANN",
+    "ASYNC",
     "S",
     "BLE",
+    # "FBT",
     "B",
     "A",
     "COM",
     "C4",
     "DTZ",
+    "T10",
     "EM",
     "ISC",
     "G",
@@ -122,10 +125,12 @@ select = [
     "ERA",
     "PL",
     "TRY",
+    "PERF",
+    "FURB",
     "RUF",
 ]
 extend-ignore = [
-    # ---- General ignores
+    # ---- General
     "S101",    # Use of assert here is a known quantity for typing cases. All uses should be safe to optimize out.
     "SIM105",  # Suppressable exception. contextlib.suppress is a stylistic choice with overhead.
     "C90",     # McCabe complexity.
@@ -145,9 +150,9 @@ extend-ignore = [
     "E111",
     "E114",
     "E117",
+    "E501",
     "COM812",
     "COM819",
-    "E501",
     "ISC001",
     "ISC002",
 
@@ -174,21 +179,24 @@ keep-runtime-typing = true
 
 # ---- Test code
 "tests/**/test_*.py" = [
-    "T201", # Printing is fine.
-    "T203", # Pretty-printing is fine.
-    # Don't need return annotations in tests.
-    "ANN201",
-    "ANN202",
+    "T201",   # Printing is fine.
+    "T203",   # Pretty-printing is fine.
+    "ANN201", # Don't need return annotations in tests.
+    "ANN202", # Don't need return annotations in tests.
     "S102",   # exec is used to test for NameError within a module's namespace.
 ]
 "tests/sample_stdlib_imports.py" = [
     "F401",   # Unused imports are fine; we're testing import success.
     "ERA001", # Plenty of imports are commented out with explanations next to them.
+    "T100",   # Importing pdb is fine.
 ]
 "bench/**/*.py" = [
     "T201",   # Printing is fine.
     "F401",   # Unused imports are fine; we're testing import speed.
     "ERA001", # Plenty of imports are commented out with explanations next to them.
+]
+"bench/**/sample_*.py" = [
+    "T100", # Importing pdb is fine.
 ]
 
 
