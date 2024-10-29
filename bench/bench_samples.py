@@ -38,23 +38,19 @@ def bench_slothy() -> float:
 
 
 def bench_defer_imports_local() -> float:
-    with CatchTime() as ct:
-        hook_ctx = defer_imports.install_import_hook()
+    with defer_imports.install_import_hook(uninstall_after=True), CatchTime() as ct:
         import bench.sample_defer_local
-    hook_ctx.uninstall()
     return ct.elapsed
 
 
 def bench_defer_imports_global() -> float:
-    with CatchTime() as ct:
-        hook_ctx = defer_imports.install_import_hook(apply_all=True)
+    with defer_imports.install_import_hook(uninstall_after=True, apply_all=True), CatchTime() as ct:
         import bench.sample_defer_global
-    hook_ctx.uninstall()
     return ct.elapsed
 
 
 def remove_pycaches() -> None:
-    """Remove all cached Python bytecode files from the current working directory."""
+    """Remove all cached Python bytecode files from the current directory."""
 
     for dir_ in Path().rglob("__pycache__"):
         shutil.rmtree(dir_)
@@ -119,11 +115,13 @@ def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser()
+
+    default_exec_order = list(BENCH_FUNCS)
     parser.add_argument(
         "--exec-order",
         action="extend",
         nargs=4,
-        choices=BENCH_FUNCS.keys(),
+        choices=default_exec_order,
         type=str,
         help="The order in which the influenced (or not influenced) imports are run",
     )
@@ -132,7 +130,7 @@ def main() -> None:
     if sys.dont_write_bytecode:
         remove_pycaches()
 
-    exec_order: list[str] = args.exec_order or list(BENCH_FUNCS)
+    exec_order: list[str] = args.exec_order or default_exec_order
 
     results = {type_: BENCH_FUNCS[type_]() for type_ in exec_order}
     minimum = min(results.values())
