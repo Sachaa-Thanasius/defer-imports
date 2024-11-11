@@ -6,12 +6,17 @@
 
 from __future__ import annotations
 
+import ast
 import builtins
+import collections
 import contextvars
 import importlib.util
+import io
 import itertools
 import sys
 import threading
+import tokenize
+import types
 import zipimport
 from importlib.machinery import BYTECODE_SUFFIXES, SOURCE_SUFFIXES, FileFinder, ModuleSpec, PathFinder, SourceFileLoader
 
@@ -33,92 +38,59 @@ TYPE_CHECKING = False
 # region -------- Lazy import bootstrapping --------
 #
 # A "hack" to lazily import some modules in a different way to reduce import
-# time.
+# time. These modules are only going to be used in uncommon or unused code
+# paths, e.g. annotation introspection, so they're unlikely to be resolved
+# as soon as defer_imports APIs are used.
 # ============================================================================
 
 
-def _lazy_import_module(name: str, package: typing.Optional[str] = None) -> types.ModuleType:
-    """Lazily import a module. Has the same signature as ``importlib.import_module()``.
-
-    This is for limited internal usage, especially since it intentionally does not work in all cases and has not been
-    evaluated for thread safety.
-
-    Notes
-    -----
-    This is based on importlib code as well as recipes found in the Python 3.12 importlib docs.
-
-    Some types of ineligible imports:
-
-    -   from imports (where the parent is also expected to be lazily imported)
-    -   submodule imports (where the parent is also expected to be lazily imported)
-    -   module imports where the modules replace themselves in sys.modules during execution
-        -   often done for performance reasons, like replacing onself with a C-accelerated module
-        -   e.g. collections.abc in CPython 3.13
+class _LazyFinder:
+    """A module spec finder that wraps a spec's loader with ``importlib.util.LazyLoader``.
+    It uses the rest of the meta path to actually find the spec.
     """
 
-    # 1. Resolve the name.
-    absolute_name = importlib.util.resolve_name(name, package)
-    if absolute_name in sys.modules:
-        return sys.modules[absolute_name]
+    @classmethod
+    def find_spec(
+        cls,
+        fullname: str,
+        path: typing.Sequence[str] | None = None,
+        target: types.ModuleType | None = None,
+        /,
+    ) -> typing.Optional[ModuleSpec]:
+        for finder in sys.meta_path:
+            if finder is not cls:
+                spec = finder.find_spec(fullname, path, target)
+                if spec is not None:
+                    break
+        else:
+            msg = f"No module named {fullname!r}"
+            raise ModuleNotFoundError(msg, name=fullname)
 
-    # 2. Find the module's parent if it exists.
-    path = None
-    if "." in absolute_name:
-        parent_name, _, child_name = absolute_name.rpartition(".")
-        # No point delaying the load of the parent when we need to access one of its attributes immediately.
-        parent_module = importlib.import_module(parent_name)
-        assert parent_module.__spec__ is not None
-        path = parent_module.__spec__.submodule_search_locations
+        if spec.loader is not None:
+            spec.loader = importlib.util.LazyLoader(spec.loader)
 
-    # 3. Find the module spec.
-    for finder in sys.meta_path:
-        spec = finder.find_spec(absolute_name, path)
-        if spec is not None:
-            break
-    else:
-        msg = f"No module named {absolute_name!r}"
-        raise ModuleNotFoundError(msg, name=absolute_name)
-
-    # 4. Wrap the module loader with importlib.util.LazyLoader.
-    if spec.loader is not None:
-        spec.loader = loader = importlib.util.LazyLoader(spec.loader)
-    else:
-        msg = "missing loader"
-        raise ImportError(msg, name=spec.name)
-
-    # 5. Execute and return the module.
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[absolute_name] = module
-    loader.exec_module(module)
-
-    if path is not None:
-        setattr(parent_module, child_name, module)  # pyright: ignore [reportPossiblyUnboundVariable]
-
-    return module
+        return spec
 
 
-if TYPE_CHECKING:
-    import ast
-    import collections
-    import importlib.abc as importlib_abc
-    import io
-    import os
-    import tokenize
-    import types
+class _LazyImportContext:
+    """Temporarily prepend _LazyFinder to the meta path to "lazify" import statements in the with block."""
+
+    def __enter__(self):
+        if _LazyFinder not in sys.meta_path:
+            sys.meta_path.insert(0, _LazyFinder)
+
+    def __exit__(self, *exc_info: object):
+        try:
+            sys.meta_path.remove(_LazyFinder)
+        except ValueError:
+            pass
+
+
+with _LazyImportContext():
+    import importlib.abc
+    import os  # noqa: F401 # Used in a stringified type alias.
     import typing
     import warnings
-else:
-    # fmt: off
-    ast             = _lazy_import_module("ast")
-    collections     = _lazy_import_module("collections")
-    importlib_abc   = _lazy_import_module("importlib.abc")
-    io              = _lazy_import_module("io")
-    os              = _lazy_import_module("os")
-    tokenize        = _lazy_import_module("tokenize")
-    types           = _lazy_import_module("types")
-    typing          = _lazy_import_module("typing")
-    warnings        = _lazy_import_module("warnings")
-    # fmt: on
 
 
 # endregion
@@ -126,6 +98,11 @@ else:
 
 # ============================================================================
 # region -------- Shims for typing and annotation symbols --------
+#
+# Most of this is to avoid depending on typing_extensions for typing and
+# annotation constructs that aren't available at runtime on some Python
+# versions. The placeholders won't have the same functionality, but they are
+# introspectable at runtime.
 # ============================================================================
 
 
@@ -140,7 +117,7 @@ else:
         """
 
         try:
-            f.__final__ = True  # pyright: ignore # Runtime attribute assignment
+            f.__final__ = True
         except (AttributeError, TypeError):  # pragma: no cover
             # Skip the attribute silently if it is not writable.
             # AttributeError happens if the object has __slots__ or a
@@ -341,7 +318,7 @@ def _is_until_use_node(node: ast.With) -> bool:
     )
 
 
-class _DeferredInstrumenter:
+class _DeferredInstrumenter(ast.NodeTransformer):
     """AST transformer that instruments imports within "with defer_imports.until_use: ..." blocks so that their
     results are assigned to custom keys in the global namespace.
 
@@ -367,13 +344,6 @@ class _DeferredInstrumenter:
 
         self.scope_depth = 0
         self.escape_hatch_depth = 0
-
-    def visit(self, node: ast.AST) -> typing.Any:
-        """Visit a node."""
-
-        method = f"visit_{node.__class__.__name__}"
-        visitor = getattr(self, method, self.generic_visit)
-        return visitor(node)
 
     def _visit_scope(self, node: ast.AST) -> ast.AST:
         """Track Python scope changes. Used to determine if a use of defer_imports.until_use is global."""
@@ -907,7 +877,7 @@ class _DeferConfig:
         apply_all: bool,
         module_names: typing.Sequence[str],
         recursive: bool,
-        loader_class: typing.Optional[type[importlib_abc.Loader]],
+        loader_class: typing.Optional[type[importlib.abc.Loader]],
     ) -> None:
         self.apply_all = apply_all
         self.module_names = module_names
@@ -971,7 +941,7 @@ def install_import_hook(
     apply_all: bool = False,
     module_names: typing.Sequence[str] = (),
     recursive: bool = False,
-    loader_class: typing.Optional[type[importlib_abc.Loader]] = None,
+    loader_class: typing.Optional[type[importlib.abc.Loader]] = None,
 ) -> ImportHookContext:
     """Install defer_imports's import hook if it isn't already installed, and optionally configure it. Must be called
     before using defer_imports.until_use.
