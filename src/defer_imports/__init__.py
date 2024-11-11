@@ -37,7 +37,9 @@ TYPE_CHECKING = False
 # region -------- Lazy import bootstrapping --------
 #
 # A "hack" to lazily import some modules in a different way to reduce import
-# time.
+# time. These modules are only going to be used in uncommon or unused code
+# paths, e.g. annotation introspection, so they're unlikely to be resolved
+# as soon as defer_imports APIs are used.
 # ============================================================================
 
 
@@ -85,9 +87,8 @@ class _LazyImportContext:
 
 
 with _LazyImportContext():
-    # For uncommon or unused code paths, e.g. annotation introspection.
     import importlib.abc
-    import os  # noqa: F401
+    import os  # noqa: F401 # Used in a stringified type alias.
     import typing
     import warnings
 
@@ -868,23 +869,32 @@ class _DeferredPathFinder(PathFinder):
 
     @staticmethod
     def _determine_instrument_level(fullname: str, config: _DeferConfig) -> bool:
-        """Determine whether only imports in until_use blocks should be instrumented or all imports should be. Returns
-        True for the former, False for the latter.
+        """Determine whether what to instrument in the module with the given name: only imports in until_use blocks, or
+        all imports. Returns True for the former, False for the latter.
+
+        Parameters
+        ----------
+        fullname: str
+            The name of the module about to be instrumented.
+        config: _DeferConfig
+            The user-provided configuration for defer-imports.
         """
 
-        # This could be written as one boolean expression, but currently, splitting it out makes it a bit more readable
-        # by making the hierarchy of configuration options clearer.
+        # Splitting the boolean logic out likes this makes it a bit more readable by making the configuration hierarchy
+        # clearer, imo.
 
-        if config.apply_all:
-            return True
+        module_names = config.module_names
 
-        if not config.module_names:
+        if not module_names:
             return False
 
-        if fullname in config.module_names:
+        if len(module_names) == 1 and module_names[0] == "*":
             return True
 
-        return config.recursive and any(mod.startswith(f"{fullname}.") for mod in config.module_names)
+        if fullname in module_names:
+            return True
+
+        return any(mod.endswith(".*") and fullname.startswith(mod.rpartition(".")[0]) for mod in module_names)
 
     @staticmethod
     def _pick_loader_class(config: _DeferConfig) -> _LoaderInit:
@@ -901,21 +911,14 @@ _current_defer_config: contextvars.ContextVar[_DeferConfig] = contextvars.Contex
 class _DeferConfig:
     """Configuration container whose contents are used to determine how a module should be instrumented."""
 
-    def __init__(
-        self,
-        apply_all: bool,
-        module_names: typing.Sequence[str],
-        recursive: bool,
-        loader_class: typing.Optional[_LoaderInit],
-    ) -> None:
-        self.apply_all = apply_all
+    __slots__ = ("module_names", "loader_class")
+
+    def __init__(self, module_names: typing.Sequence[str], loader_class: typing.Optional[_LoaderInit]) -> None:
         self.module_names = module_names
-        self.recursive = recursive
         self.loader_class = loader_class
 
     def __repr__(self) -> str:
-        attrs = ("apply_all", "module_names", "recursive", "loader_class")
-        return f'{type(self).__name__}({", ".join(f"{attr}={getattr(self, attr)!r}" for attr in attrs)})'
+        return f"{type(self).__name__}(module_names={self.module_names!r}, loader_class={self.loader_class!r})"
 
 
 @_final
@@ -960,10 +963,8 @@ class ImportHookContext:
 
 def install_import_hook(
     *,
-    uninstall_after: bool = False,
-    apply_all: bool = False,
     module_names: typing.Sequence[str] = (),
-    recursive: bool = False,
+    uninstall_after: bool = False,
     loader_class: typing.Optional[_LoaderInit] = None,
 ) -> ImportHookContext:
     """Install defer_imports's import hook if it isn't already installed, and optionally configure it. Must be called
@@ -999,6 +1000,14 @@ def install_import_hook(
         automatically by using it as a context manager or manually using its rest() and uninstall methods.
     """
 
+    if isinstance(module_names, str):
+        msg = "module_names should be a sequence of strings, not a string."
+        raise TypeError(msg)
+
+    if "*" in module_names and len(module_names) != 1:
+        msg = '"*" should be the passed in alone.'
+        raise ValueError(msg)
+
     if _DeferredPathFinder not in sys.meta_path:
         try:
             finder_index = sys.meta_path.index(PathFinder)
@@ -1009,7 +1018,7 @@ def install_import_hook(
             _DeferredPathFinder._original_pathfinder = sys.meta_path[finder_index]  # pyright: ignore [reportAttributeAccessIssue]
             sys.meta_path[finder_index] = _DeferredPathFinder
 
-    config = _DeferConfig(apply_all, module_names, recursive, loader_class)
+    config = _DeferConfig(module_names, loader_class)
     config_ctx_tok = _current_defer_config.set(config)
     return ImportHookContext(config_ctx_tok, uninstall_after)
 
