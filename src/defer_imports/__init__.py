@@ -46,6 +46,7 @@ TYPE_CHECKING = False
 
 class _LazyFinder:
     """A module spec finder that wraps a spec's loader with ``importlib.util.LazyLoader``.
+
     It uses the rest of the meta path to actually find the spec.
     """
 
@@ -72,21 +73,21 @@ class _LazyFinder:
         return spec
 
 
-class _LazyImportContext:
-    """Temporarily prepend _LazyFinder to the meta path to "lazify" import statements in the with block."""
+class _LazyFinderContext:
+    """Temporarily prepend _LazyFinder to the meta path to "lazify" some types of import statements in context."""
 
-    def __enter__(self):
+    def __enter__(self) -> None:
         if _LazyFinder not in sys.meta_path:
             sys.meta_path.insert(0, _LazyFinder)
 
-    def __exit__(self, *exc_info: object):
+    def __exit__(self, *exc_info: object) -> None:
         try:
             sys.meta_path.remove(_LazyFinder)
         except ValueError:
             pass
 
 
-with _LazyImportContext():
+with _LazyFinderContext():
     import importlib.abc
     import os  # noqa: F401 # Used in a stringified type alias.
     import typing
@@ -294,6 +295,7 @@ def _calc___package__(globals: typing.MutableMapping[str, typing.Any]) -> typing
 
 _ModulePath: _TypeAlias = "typing.Union[str, os.PathLike[str], _ReadableBuffer]"
 _SourceData: _TypeAlias = "typing.Union[_ReadableBuffer, str, ast.Module, ast.Expression, ast.Interactive]"
+_LoaderInit: _TypeAlias = "typing.Callable[[str, str], importlib.abc.Loader]"
 
 
 _BYTECODE_HEADER = f"defer_imports{__version__}".encode()
@@ -711,7 +713,7 @@ class _DeferredFileLoader(SourceFileLoader):
         raise OSError to invalidate the bytecode; importlib._boostrap_external.SourceLoader.get_code expects this [1]_.
 
         Another option is to monkeypatch importlib.util.cache_from_source, as beartype [2]_ and typeguard do, but that
-        seems unnecessary.
+        seems excessive for this use case.
 
         References
         ----------
@@ -796,7 +798,7 @@ class _DeferredFileLoader(SourceFileLoader):
         return super().source_to_code(new_tree, path, _optimize=_optimize)  # pyright: ignore # See note above.
 
     def exec_module(self, module: types.ModuleType) -> None:
-        """Execute the module, but only after getting state from module.__spec__.loader_state if present."""
+        """Execute the module (while setting and maintaining relevant state)."""
 
         global _is_executing_using_defer  # noqa: PLW0603 # Access to global is guarded with threading lock.
 
@@ -841,24 +843,44 @@ class _DeferredFileFinder(FileFinder):
             #       best.
             config = _current_defer_config.get(None)
 
-            if config is None:
-                defer_module_level = False
+            if config is not None:
+                defer_module_level = self._determine_instrument_level(fullname, config)
+                loader_class = self._pick_loader_class(config)
             else:
-                defer_module_level = config.apply_all or bool(
-                    config.module_names
-                    and (
-                        fullname in config.module_names
-                        or (config.recursive and any(mod.startswith(f"{fullname}.") for mod in config.module_names))
-                    )
-                )
+                defer_module_level = False
+                loader_class = _DeferredFileLoader
 
-                if config.loader_class is not None:
-                    # We assume the class has the same initialization signature as the stdlib loader classes.
-                    spec.loader = config.loader_class(fullname, spec.loader.path)  # pyright: ignore [reportCallIssue]
-
+            spec.loader = loader_class(spec.loader.name, spec.loader.path)
             spec.loader_state = {"defer_module_level": defer_module_level}
 
         return spec
+
+    @staticmethod
+    def _determine_instrument_level(fullname: str, config: _DeferConfig) -> bool:
+        """Determine whether only imports in until_use blocks should be instrumented or all imports should be. Returns
+        True for the former, False for the latter.
+        """
+
+        # This could be written as one boolean expression, but currently, splitting it out makes it a bit more readable
+        # by making the hierarchy of configuration options clearer.
+
+        if config.apply_all:
+            return True
+
+        if not config.module_names:
+            return False
+
+        if fullname in config.module_names:
+            return True
+
+        return config.recursive and any(fullname.startswith(f"{mod}.") for mod in config.module_names)
+
+    @staticmethod
+    def _pick_loader_class(config: _DeferConfig) -> _LoaderInit:
+        if config.loader_class is None:
+            return _DeferredFileLoader
+        else:
+            return config.loader_class
 
 
 _DEFER_PATH_HOOK = _DeferredFileFinder.path_hook((_DeferredFileLoader, SOURCE_SUFFIXES))
@@ -877,7 +899,7 @@ class _DeferConfig:
         apply_all: bool,
         module_names: typing.Sequence[str],
         recursive: bool,
-        loader_class: typing.Optional[type[importlib.abc.Loader]],
+        loader_class: typing.Optional[_LoaderInit],
     ) -> None:
         self.apply_all = apply_all
         self.module_names = module_names
@@ -941,7 +963,7 @@ def install_import_hook(
     apply_all: bool = False,
     module_names: typing.Sequence[str] = (),
     recursive: bool = False,
-    loader_class: typing.Optional[type[importlib.abc.Loader]] = None,
+    loader_class: typing.Optional[typing.Callable[[str, str], importlib.abc.Loader]] = None,
 ) -> ImportHookContext:
     """Install defer_imports's import hook if it isn't already installed, and optionally configure it. Must be called
     before using defer_imports.until_use.
