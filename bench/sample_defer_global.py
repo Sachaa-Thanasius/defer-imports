@@ -87,10 +87,10 @@ import csv
 import ctypes
 import ctypes._aix
 import ctypes._endian
-import ctypes.macholib
-import ctypes.macholib.dyld
-import ctypes.macholib.dylib
 
+# import ctypes.macholib  # Doesn't exist in WSL
+# import ctypes.macholib.dyld  # Doesn't exist in WSL
+# import ctypes.macholib.dylib  # Doesn't exist in WSL
 # import ctypes.macholib.framework  # Doesn't exist in 3.9+ in WSL
 import ctypes.util
 import dataclasses

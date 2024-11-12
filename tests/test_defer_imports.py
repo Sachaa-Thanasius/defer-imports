@@ -13,7 +13,7 @@ import sys
 import threading
 import time
 import types
-from importlib.machinery import SourceFileLoader
+from importlib.machinery import PathFinder, SourceFileLoader
 from pathlib import Path
 from typing import Any, cast
 
@@ -21,9 +21,9 @@ import pytest
 
 from defer_imports import (
     _BYTECODE_HEADER,
-    _DEFER_PATH_HOOK,
     _DeferredFileLoader,
     _DeferredInstrumenter,
+    _DeferredPathFinder,
     install_import_hook,
 )
 
@@ -86,27 +86,30 @@ def better_key_repr(monkeypatch: pytest.MonkeyPatch):
 # ============================================================================
 
 
-def test_path_hook_installation():
-    """Test the API for putting/removing the defer_imports path hook from sys.path_hooks."""
+def test_meta_path_finder_installation():
+    """Test the API for putting/removing the defer_imports meta path finder from sys.meta_path."""
 
     # It shouldn't be on there by default.
-    assert _DEFER_PATH_HOOK not in sys.path_hooks
-    before_length = len(sys.path_hooks)
+    assert _DeferredPathFinder not in sys.meta_path
+    before_length = len(sys.meta_path)
 
     # It should be present after calling install.
     hook_ctx = install_import_hook()
-    assert _DEFER_PATH_HOOK in sys.path_hooks
-    assert len(sys.path_hooks) == before_length + 1
+    assert PathFinder not in sys.meta_path
+    assert _DeferredPathFinder in sys.meta_path
+    assert len(sys.meta_path) == before_length
 
     # Calling uninstall should remove it.
     hook_ctx.uninstall()
-    assert _DEFER_PATH_HOOK not in sys.path_hooks
-    assert len(sys.path_hooks) == before_length
+    assert PathFinder in sys.meta_path
+    assert _DeferredPathFinder not in sys.meta_path
+    assert len(sys.meta_path) == before_length
 
-    # Calling uninstall if it's not present should do nothing to sys.path_hooks.
+    # Calling uninstall if it's not present should do nothing to sys.meta_path.
     hook_ctx.uninstall()
-    assert _DEFER_PATH_HOOK not in sys.path_hooks
-    assert len(sys.path_hooks) == before_length
+    assert PathFinder in sys.meta_path
+    assert _DeferredPathFinder not in sys.meta_path
+    assert len(sys.meta_path) == before_length
 
 
 @pytest.mark.parametrize(
