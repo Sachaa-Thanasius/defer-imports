@@ -19,10 +19,10 @@ from importlib.machinery import BYTECODE_SUFFIXES, SOURCE_SUFFIXES, FileFinder, 
 __version__ = "0.1.1"
 
 __all__ = (
-    "install_import_hook",
-    "ImportHookContext",
-    "until_use",
     "DeferredContext",
+    "ImportHookContext",
+    "install_import_hook",
+    "until_use",
 )
 
 # NOTE: Defining TYPE_CHECKING locally only works with type-checkers as long as they continue to special-case that name.
@@ -1238,7 +1238,7 @@ class DeferredContext:
     As part of its implementation, this temporarily replaces builtins.__import__.
     """
 
-    __slots__ = ("_is_active", "_import_ctx_token", "_defer_ctx_token")
+    __slots__ = ("_defer_ctx_token", "_import_ctx_token", "_is_active")
 
     def __enter__(self) -> None:
         with _is_executing_lock:
