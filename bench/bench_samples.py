@@ -11,7 +11,7 @@ import sys
 import time
 from pathlib import Path
 
-import defer_imports
+import defer_imports._ast_rewrite
 
 
 class CatchTime:
@@ -38,13 +38,13 @@ def bench_slothy() -> float:
 
 
 def bench_defer_imports_local() -> float:
-    with defer_imports.install_import_hook(uninstall_after=True), CatchTime() as ct:
+    with defer_imports._ast_rewrite.install_import_hook(uninstall_after=True), CatchTime() as ct:
         import bench.sample_defer_local
     return ct.elapsed
 
 
 def bench_defer_imports_global() -> float:
-    with defer_imports.install_import_hook(uninstall_after=True, apply_all=True), CatchTime() as ct:
+    with defer_imports._ast_rewrite.install_import_hook(uninstall_after=True, apply_all=True), CatchTime() as ct:
         import bench.sample_defer_global
     return ct.elapsed
 
@@ -52,11 +52,11 @@ def bench_defer_imports_global() -> float:
 def remove_pycaches() -> None:
     """Remove all cached Python bytecode files from the current directory."""
 
-    for dir_ in Path().rglob("__pycache__"):
-        shutil.rmtree(dir_)
+    for cache_dir in Path().rglob("__pycache__"):
+        shutil.rmtree(cache_dir)
 
-    for file in Path().rglob("*.py[co]"):
-        file.unlink()
+    for cache_file in Path().rglob("*.py[co]"):
+        cache_file.unlink()
 
 
 def pretty_print_results(results: dict[str, float], minimum: float) -> None:

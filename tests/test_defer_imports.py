@@ -19,7 +19,7 @@ from typing import Any, cast
 
 import pytest
 
-from defer_imports import (
+from defer_imports._ast_rewrite import (
     _BYTECODE_HEADER,
     _DeferredFileLoader,
     _DeferredInstrumenter,
@@ -70,12 +70,12 @@ def temp_cache_module(name: str, module: types.ModuleType):
 
 @pytest.fixture(autouse=True)
 def better_key_repr(monkeypatch: pytest.MonkeyPatch):
-    """Replace defer_imports._comptime._DeferredImportKey.__repr__ with a more verbose version for all tests."""
+    """Replace _DeferredImportKey.__repr__ with a more verbose version for all tests."""
 
     def verbose_repr(self: object) -> str:
         return f"<key for {super(type(self), self).__repr__()} import>"
 
-    monkeypatch.setattr("defer_imports._DeferredImportKey.__repr__", verbose_repr)
+    monkeypatch.setattr("defer_imports._ast_rewrite._DeferredImportKey.__repr__", verbose_repr)
 
 
 # endregion
@@ -117,21 +117,13 @@ def test_meta_path_finder_installation():
     [
         pytest.param(
             """'''Module docstring here'''""",
-            '''\
-"""Module docstring here"""
-from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
-del @_DeferredImportKey, @_DeferredImportProxy
-''',
-            id="inserts statements after module docstring",
+            '''"""Module docstring here"""\n''',
+            id="only docstring stays as only element",
         ),
         pytest.param(
             """from __future__ import annotations""",
-            """\
-from __future__ import annotations
-from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
-del @_DeferredImportKey, @_DeferredImportProxy
-""",
-            id="Inserts statements after __future__ import",
+            """from __future__ import annotations\n""",
+            id="only __future__ import stays as only element",
         ),
         pytest.param(
             """\
@@ -143,12 +135,10 @@ with defer_imports.until_use, nullcontext():
     import inspect
 """,
             """\
-from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
 from contextlib import nullcontext
 import defer_imports
 with defer_imports.until_use, nullcontext():
     import inspect
-del @_DeferredImportKey, @_DeferredImportProxy
 """,
             id="does nothing if used with another context manager",
         ),
@@ -160,17 +150,17 @@ with defer_imports.until_use:
     import inspect
 """,
             """\
-from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
+from defer_imports._ast_rewrite import _DeferredImportKey as @_DeferredImportKey, \
+_DeferredImportProxy as @_DeferredImportProxy, _actual_until_use as @_actual_until_use
 import defer_imports
-with defer_imports.until_use:
+with @_actual_until_use:
     @local_ns = locals()
     @temp_proxy = None
     import inspect
-    if type(inspect) is @_DeferredImportProxy:
-        @temp_proxy = @local_ns.pop('inspect')
-        @local_ns[@_DeferredImportKey('inspect', @temp_proxy)] = @temp_proxy
+    if inspect.__class__ is @_DeferredImportProxy:
+        @temp_proxy = @local_ns[@_DeferredImportKey('inspect', @temp_proxy)] = @local_ns.pop('inspect')
     del @temp_proxy, @local_ns
-del @_DeferredImportKey, @_DeferredImportProxy
+del @_DeferredImportKey, @_DeferredImportProxy, @_actual_until_use
 """,
             id="regular import",
         ),
@@ -183,21 +173,20 @@ with defer_imports.until_use:
     import importlib.abc
 """,
             """\
-from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
+from defer_imports._ast_rewrite import _DeferredImportKey as @_DeferredImportKey, \
+_DeferredImportProxy as @_DeferredImportProxy, _actual_until_use as @_actual_until_use
 import defer_imports
-with defer_imports.until_use:
+with @_actual_until_use:
     @local_ns = locals()
     @temp_proxy = None
     import importlib
-    if type(importlib) is @_DeferredImportProxy:
-        @temp_proxy = @local_ns.pop('importlib')
-        @local_ns[@_DeferredImportKey('importlib', @temp_proxy)] = @temp_proxy
+    if importlib.__class__ is @_DeferredImportProxy:
+        @temp_proxy = @local_ns[@_DeferredImportKey('importlib', @temp_proxy)] = @local_ns.pop('importlib')
     import importlib.abc
-    if type(importlib) is @_DeferredImportProxy:
-        @temp_proxy = @local_ns.pop('importlib')
-        @local_ns[@_DeferredImportKey('importlib', @temp_proxy)] = @temp_proxy
+    if importlib.__class__ is @_DeferredImportProxy:
+        @temp_proxy = @local_ns[@_DeferredImportKey('importlib', @temp_proxy)] = @local_ns.pop('importlib')
     del @temp_proxy, @local_ns
-del @_DeferredImportKey, @_DeferredImportProxy
+del @_DeferredImportKey, @_DeferredImportProxy, @_actual_until_use
 """,
             id="mixed imports",
         ),
@@ -209,17 +198,17 @@ with defer_imports.until_use:
     from . import a
 """,
             """\
-from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
+from defer_imports._ast_rewrite import _DeferredImportKey as @_DeferredImportKey, \
+_DeferredImportProxy as @_DeferredImportProxy, _actual_until_use as @_actual_until_use
 import defer_imports
-with defer_imports.until_use:
+with @_actual_until_use:
     @local_ns = locals()
     @temp_proxy = None
     from . import a
-    if type(a) is @_DeferredImportProxy:
-        @temp_proxy = @local_ns.pop('a')
-        @local_ns[@_DeferredImportKey('a', @temp_proxy)] = @temp_proxy
+    if a.__class__ is @_DeferredImportProxy:
+        @temp_proxy = @local_ns[@_DeferredImportKey('a', @temp_proxy)] = @local_ns.pop('a')
     del @temp_proxy, @local_ns
-del @_DeferredImportKey, @_DeferredImportProxy
+del @_DeferredImportKey, @_DeferredImportProxy, @_actual_until_use
 """,
             id="relative import",
         ),
@@ -244,17 +233,16 @@ def test_instrumentation(before: str, after: str):
 import inspect
 """,
             """\
-import defer_imports
-from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
-with defer_imports.until_use:
+from defer_imports._ast_rewrite import _DeferredImportKey as @_DeferredImportKey, \
+_DeferredImportProxy as @_DeferredImportProxy, _actual_until_use as @_actual_until_use
+with @_actual_until_use:
     @local_ns = locals()
     @temp_proxy = None
     import inspect
-    if type(inspect) is @_DeferredImportProxy:
-        @temp_proxy = @local_ns.pop('inspect')
-        @local_ns[@_DeferredImportKey('inspect', @temp_proxy)] = @temp_proxy
+    if inspect.__class__ is @_DeferredImportProxy:
+        @temp_proxy = @local_ns[@_DeferredImportKey('inspect', @temp_proxy)] = @local_ns.pop('inspect')
     del @temp_proxy, @local_ns
-del @_DeferredImportKey, @_DeferredImportProxy
+del @_DeferredImportKey, @_DeferredImportProxy, @_actual_until_use
 """,
             id="regular import",
         ),
@@ -265,25 +253,22 @@ import world
 import foo
 """,
             """\
-import defer_imports
-from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
-with defer_imports.until_use:
+from defer_imports._ast_rewrite import _DeferredImportKey as @_DeferredImportKey, \
+_DeferredImportProxy as @_DeferredImportProxy, _actual_until_use as @_actual_until_use
+with @_actual_until_use:
     @local_ns = locals()
     @temp_proxy = None
     import hello
-    if type(hello) is @_DeferredImportProxy:
-        @temp_proxy = @local_ns.pop('hello')
-        @local_ns[@_DeferredImportKey('hello', @temp_proxy)] = @temp_proxy
+    if hello.__class__ is @_DeferredImportProxy:
+        @temp_proxy = @local_ns[@_DeferredImportKey('hello', @temp_proxy)] = @local_ns.pop('hello')
     import world
-    if type(world) is @_DeferredImportProxy:
-        @temp_proxy = @local_ns.pop('world')
-        @local_ns[@_DeferredImportKey('world', @temp_proxy)] = @temp_proxy
+    if world.__class__ is @_DeferredImportProxy:
+        @temp_proxy = @local_ns[@_DeferredImportKey('world', @temp_proxy)] = @local_ns.pop('world')
     import foo
-    if type(foo) is @_DeferredImportProxy:
-        @temp_proxy = @local_ns.pop('foo')
-        @local_ns[@_DeferredImportKey('foo', @temp_proxy)] = @temp_proxy
+    if foo.__class__ is @_DeferredImportProxy:
+        @temp_proxy = @local_ns[@_DeferredImportKey('foo', @temp_proxy)] = @local_ns.pop('foo')
     del @temp_proxy, @local_ns
-del @_DeferredImportKey, @_DeferredImportProxy
+del @_DeferredImportKey, @_DeferredImportProxy, @_actual_until_use
 """,
             id="multiple imports consecutively",
         ),
@@ -297,30 +282,27 @@ print("hello")
 import foo
 """,
             """\
-import defer_imports
-from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
-with defer_imports.until_use:
+from defer_imports._ast_rewrite import _DeferredImportKey as @_DeferredImportKey, \
+_DeferredImportProxy as @_DeferredImportProxy, _actual_until_use as @_actual_until_use
+with @_actual_until_use:
     @local_ns = locals()
     @temp_proxy = None
     import hello
-    if type(hello) is @_DeferredImportProxy:
-        @temp_proxy = @local_ns.pop('hello')
-        @local_ns[@_DeferredImportKey('hello', @temp_proxy)] = @temp_proxy
+    if hello.__class__ is @_DeferredImportProxy:
+        @temp_proxy = @local_ns[@_DeferredImportKey('hello', @temp_proxy)] = @local_ns.pop('hello')
     import world
-    if type(world) is @_DeferredImportProxy:
-        @temp_proxy = @local_ns.pop('world')
-        @local_ns[@_DeferredImportKey('world', @temp_proxy)] = @temp_proxy
+    if world.__class__ is @_DeferredImportProxy:
+        @temp_proxy = @local_ns[@_DeferredImportKey('world', @temp_proxy)] = @local_ns.pop('world')
     del @temp_proxy, @local_ns
 print('hello')
-with defer_imports.until_use:
+with @_actual_until_use:
     @local_ns = locals()
     @temp_proxy = None
     import foo
-    if type(foo) is @_DeferredImportProxy:
-        @temp_proxy = @local_ns.pop('foo')
-        @local_ns[@_DeferredImportKey('foo', @temp_proxy)] = @temp_proxy
+    if foo.__class__ is @_DeferredImportProxy:
+        @temp_proxy = @local_ns[@_DeferredImportKey('foo', @temp_proxy)] = @local_ns.pop('foo')
     del @temp_proxy, @local_ns
-del @_DeferredImportKey, @_DeferredImportProxy
+del @_DeferredImportKey, @_DeferredImportProxy, @_actual_until_use
 """,
             id="multiple imports separated by statement 1",
         ),
@@ -335,32 +317,29 @@ def do_the_thing(a: int) -> int:
 import foo
 """,
             """\
-import defer_imports
-from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
-with defer_imports.until_use:
+from defer_imports._ast_rewrite import _DeferredImportKey as @_DeferredImportKey, \
+_DeferredImportProxy as @_DeferredImportProxy, _actual_until_use as @_actual_until_use
+with @_actual_until_use:
     @local_ns = locals()
     @temp_proxy = None
     import hello
-    if type(hello) is @_DeferredImportProxy:
-        @temp_proxy = @local_ns.pop('hello')
-        @local_ns[@_DeferredImportKey('hello', @temp_proxy)] = @temp_proxy
+    if hello.__class__ is @_DeferredImportProxy:
+        @temp_proxy = @local_ns[@_DeferredImportKey('hello', @temp_proxy)] = @local_ns.pop('hello')
     import world
-    if type(world) is @_DeferredImportProxy:
-        @temp_proxy = @local_ns.pop('world')
-        @local_ns[@_DeferredImportKey('world', @temp_proxy)] = @temp_proxy
+    if world.__class__ is @_DeferredImportProxy:
+        @temp_proxy = @local_ns[@_DeferredImportKey('world', @temp_proxy)] = @local_ns.pop('world')
     del @temp_proxy, @local_ns
 
 def do_the_thing(a: int) -> int:
     return a
-with defer_imports.until_use:
+with @_actual_until_use:
     @local_ns = locals()
     @temp_proxy = None
     import foo
-    if type(foo) is @_DeferredImportProxy:
-        @temp_proxy = @local_ns.pop('foo')
-        @local_ns[@_DeferredImportKey('foo', @temp_proxy)] = @temp_proxy
+    if foo.__class__ is @_DeferredImportProxy:
+        @temp_proxy = @local_ns[@_DeferredImportKey('foo', @temp_proxy)] = @local_ns.pop('foo')
     del @temp_proxy, @local_ns
-del @_DeferredImportKey, @_DeferredImportProxy
+del @_DeferredImportKey, @_DeferredImportProxy, @_actual_until_use
 """,
             id="multiple imports separated by statement 2",
         ),
@@ -373,21 +352,20 @@ def do_the_thing(a: int) -> int:
     return a
 """,
             """\
-import defer_imports
-from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
-with defer_imports.until_use:
+from defer_imports._ast_rewrite import _DeferredImportKey as @_DeferredImportKey, \
+_DeferredImportProxy as @_DeferredImportProxy, _actual_until_use as @_actual_until_use
+with @_actual_until_use:
     @local_ns = locals()
     @temp_proxy = None
     import hello
-    if type(hello) is @_DeferredImportProxy:
-        @temp_proxy = @local_ns.pop('hello')
-        @local_ns[@_DeferredImportKey('hello', @temp_proxy)] = @temp_proxy
+    if hello.__class__ is @_DeferredImportProxy:
+        @temp_proxy = @local_ns[@_DeferredImportKey('hello', @temp_proxy)] = @local_ns.pop('hello')
     del @temp_proxy, @local_ns
 
 def do_the_thing(a: int) -> int:
     import world
     return a
-del @_DeferredImportKey, @_DeferredImportProxy
+del @_DeferredImportKey, @_DeferredImportProxy, @_actual_until_use
 """,
             id="nothing done for imports within function",
         ),
@@ -398,26 +376,24 @@ from world import *
 import foo
 """,
             """\
-import defer_imports
-from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
-with defer_imports.until_use:
+from defer_imports._ast_rewrite import _DeferredImportKey as @_DeferredImportKey, \
+_DeferredImportProxy as @_DeferredImportProxy, _actual_until_use as @_actual_until_use
+with @_actual_until_use:
     @local_ns = locals()
     @temp_proxy = None
     import hello
-    if type(hello) is @_DeferredImportProxy:
-        @temp_proxy = @local_ns.pop('hello')
-        @local_ns[@_DeferredImportKey('hello', @temp_proxy)] = @temp_proxy
+    if hello.__class__ is @_DeferredImportProxy:
+        @temp_proxy = @local_ns[@_DeferredImportKey('hello', @temp_proxy)] = @local_ns.pop('hello')
     del @temp_proxy, @local_ns
 from world import *
-with defer_imports.until_use:
+with @_actual_until_use:
     @local_ns = locals()
     @temp_proxy = None
     import foo
-    if type(foo) is @_DeferredImportProxy:
-        @temp_proxy = @local_ns.pop('foo')
-        @local_ns[@_DeferredImportKey('foo', @temp_proxy)] = @temp_proxy
+    if foo.__class__ is @_DeferredImportProxy:
+        @temp_proxy = @local_ns[@_DeferredImportKey('foo', @temp_proxy)] = @local_ns.pop('foo')
     del @temp_proxy, @local_ns
-del @_DeferredImportKey, @_DeferredImportProxy
+del @_DeferredImportKey, @_DeferredImportProxy, @_actual_until_use
 """,
             id="avoids doing anything with wildcard imports",
         ),
@@ -431,29 +407,27 @@ finally:
 import bar
 """,
             """\
-import defer_imports
-from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
-with defer_imports.until_use:
+from defer_imports._ast_rewrite import _DeferredImportKey as @_DeferredImportKey, \
+_DeferredImportProxy as @_DeferredImportProxy, _actual_until_use as @_actual_until_use
+with @_actual_until_use:
     @local_ns = locals()
     @temp_proxy = None
     import foo
-    if type(foo) is @_DeferredImportProxy:
-        @temp_proxy = @local_ns.pop('foo')
-        @local_ns[@_DeferredImportKey('foo', @temp_proxy)] = @temp_proxy
+    if foo.__class__ is @_DeferredImportProxy:
+        @temp_proxy = @local_ns[@_DeferredImportKey('foo', @temp_proxy)] = @local_ns.pop('foo')
     del @temp_proxy, @local_ns
 try:
     import hello
 finally:
     pass
-with defer_imports.until_use:
+with @_actual_until_use:
     @local_ns = locals()
     @temp_proxy = None
     import bar
-    if type(bar) is @_DeferredImportProxy:
-        @temp_proxy = @local_ns.pop('bar')
-        @local_ns[@_DeferredImportKey('bar', @temp_proxy)] = @temp_proxy
+    if bar.__class__ is @_DeferredImportProxy:
+        @temp_proxy = @local_ns[@_DeferredImportKey('bar', @temp_proxy)] = @local_ns.pop('bar')
     del @temp_proxy, @local_ns
-del @_DeferredImportKey, @_DeferredImportProxy
+del @_DeferredImportKey, @_DeferredImportProxy, @_actual_until_use
 """,
             id="avoids imports in try-finally",
         ),
@@ -465,27 +439,25 @@ with nullcontext():
 import bar
 """,
             """\
-import defer_imports
-from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
-with defer_imports.until_use:
+from defer_imports._ast_rewrite import _DeferredImportKey as @_DeferredImportKey, \
+_DeferredImportProxy as @_DeferredImportProxy, _actual_until_use as @_actual_until_use
+with @_actual_until_use:
     @local_ns = locals()
     @temp_proxy = None
     import foo
-    if type(foo) is @_DeferredImportProxy:
-        @temp_proxy = @local_ns.pop('foo')
-        @local_ns[@_DeferredImportKey('foo', @temp_proxy)] = @temp_proxy
+    if foo.__class__ is @_DeferredImportProxy:
+        @temp_proxy = @local_ns[@_DeferredImportKey('foo', @temp_proxy)] = @local_ns.pop('foo')
     del @temp_proxy, @local_ns
 with nullcontext():
     import hello
-with defer_imports.until_use:
+with @_actual_until_use:
     @local_ns = locals()
     @temp_proxy = None
     import bar
-    if type(bar) is @_DeferredImportProxy:
-        @temp_proxy = @local_ns.pop('bar')
-        @local_ns[@_DeferredImportKey('bar', @temp_proxy)] = @temp_proxy
+    if bar.__class__ is @_DeferredImportProxy:
+        @temp_proxy = @local_ns[@_DeferredImportKey('bar', @temp_proxy)] = @local_ns.pop('bar')
     del @temp_proxy, @local_ns
-del @_DeferredImportKey, @_DeferredImportProxy
+del @_DeferredImportKey, @_DeferredImportProxy, @_actual_until_use
 """,
             id="avoids imports in non-defer_imports.until_use with block",
         ),
@@ -498,111 +470,48 @@ with defer_imports.until_use:
 import bar
 """,
             """\
+from defer_imports._ast_rewrite import _DeferredImportKey as @_DeferredImportKey, \
+_DeferredImportProxy as @_DeferredImportProxy, _actual_until_use as @_actual_until_use
 import defer_imports
-from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
-import defer_imports
-with defer_imports.until_use:
+with @_actual_until_use:
     @local_ns = locals()
     @temp_proxy = None
     import foo
-    if type(foo) is @_DeferredImportProxy:
-        @temp_proxy = @local_ns.pop('foo')
-        @local_ns[@_DeferredImportKey('foo', @temp_proxy)] = @temp_proxy
+    if foo.__class__ is @_DeferredImportProxy:
+        @temp_proxy = @local_ns[@_DeferredImportKey('foo', @temp_proxy)] = @local_ns.pop('foo')
     del @temp_proxy, @local_ns
-with defer_imports.until_use:
+with @_actual_until_use:
     @local_ns = locals()
     @temp_proxy = None
     import hello
-    if type(hello) is @_DeferredImportProxy:
-        @temp_proxy = @local_ns.pop('hello')
-        @local_ns[@_DeferredImportKey('hello', @temp_proxy)] = @temp_proxy
+    if hello.__class__ is @_DeferredImportProxy:
+        @temp_proxy = @local_ns[@_DeferredImportKey('hello', @temp_proxy)] = @local_ns.pop('hello')
     del @temp_proxy, @local_ns
-with defer_imports.until_use:
+with @_actual_until_use:
     @local_ns = locals()
     @temp_proxy = None
     import bar
-    if type(bar) is @_DeferredImportProxy:
-        @temp_proxy = @local_ns.pop('bar')
-        @local_ns[@_DeferredImportKey('bar', @temp_proxy)] = @temp_proxy
+    if bar.__class__ is @_DeferredImportProxy:
+        @temp_proxy = @local_ns[@_DeferredImportKey('bar', @temp_proxy)] = @local_ns.pop('bar')
     del @temp_proxy, @local_ns
-del @_DeferredImportKey, @_DeferredImportProxy
+del @_DeferredImportKey, @_DeferredImportProxy, @_actual_until_use
 """,
             id="still instruments imports in defer_imports.until_use with block",
         ),
         pytest.param(
-            """\
-try:
-    import foo
-except:
-    pass
-""",
-            """\
-import defer_imports
-from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
-try:
-    import foo
-except:
-    pass
-del @_DeferredImportKey, @_DeferredImportProxy
-""",
+            *["try:\n    import foo\nexcept:\n    pass\n"] * 2,
             id="escape hatch: try",
         ),
         pytest.param(
-            """\
-try:
-    raise Exception
-except:
-    import foo
-""",
-            """\
-import defer_imports
-from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
-try:
-    raise Exception
-except:
-    import foo
-del @_DeferredImportKey, @_DeferredImportProxy
-""",
+            *["try:\n    raise Exception\nexcept:\n    import foo\n"] * 2,
             id="escape hatch: except",
         ),
         pytest.param(
-            """\
-try:
-    print('hi')
-except:
-    print('error')
-else:
-    import foo
-""",
-            """\
-import defer_imports
-from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
-try:
-    print('hi')
-except:
-    print('error')
-else:
-    import foo
-del @_DeferredImportKey, @_DeferredImportProxy
-""",
+            *["try:\n    print('hi')\nexcept:\n    print('error')\nelse:\n    import foo\n"] * 2,
             id="escape hatch: else",
         ),
         pytest.param(
-            """\
-try:
-    pass
-finally:
-    import foo
-""",
-            """\
-import defer_imports
-from defer_imports import _DeferredImportKey as @_DeferredImportKey, _DeferredImportProxy as @_DeferredImportProxy
-try:
-    pass
-finally:
-    import foo
-del @_DeferredImportKey, @_DeferredImportProxy
-""",
+            *["try:\n    pass\nfinally:\n    import foo\n"] * 2,
             id="escape hatch: finally",
         ),
     ],
@@ -987,7 +896,7 @@ with defer_imports.until_use:
     assert expected_importlib_repr not in repr(vars(module))
 
     # Test that the nested proxies carry over to the resolved importlib.
-    module_importlib_vars = cast(dict[str, object], vars(module.importlib))
+    module_importlib_vars = cast("dict[str, object]", vars(module.importlib))
 
     assert expected_importlib_abc_repr in repr(module_importlib_vars)
     assert expected_importlib_util_repr in repr(module_importlib_vars)
@@ -1395,11 +1304,11 @@ with defer_imports.until_use:
         def run(self) -> None:  # pragma: no cover
             # This has minor modifications from threading.Thread.run() to catch the returned value or raised exception.
             try:
-                self.result = self._target(*self._args, **self._kwargs)  # pyright: ignore
+                self.result = self._target(*self._args, **self._kwargs)  # pyright: ignore  # noqa: PGH003
             except Exception as exc:  # noqa: BLE001
                 self.exc = exc
             finally:
-                del self._target, self._args, self._kwargs  # pyright: ignore
+                del self._target, self._args, self._kwargs  # pyright: ignore  # noqa: PGH003
 
     def access_module_attr() -> object:
         time.sleep(0.2)
@@ -1415,7 +1324,7 @@ with defer_imports.until_use:
     for thread in threads:
         thread.join()
         assert thread.exc is _Missing
-        assert callable(thread.result)  # pyright: ignore
+        assert callable(thread.result)  # pyright: ignore  # noqa: PGH003
 
 
 # endregion

@@ -1,12 +1,13 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["flit_core>=3.12,<4"]
+build-backend = "flit_core.buildapi"
 
 [project]
 name = "defer-imports"
 description = "Lazy imports with regular syntax in pure Python."
 requires-python = ">=3.9"
 license = "MIT"
+license-files = ["LICENSE*"]
 readme = { file = "README.rst", content-type = "text/x-rst" }
 authors = [{ name = "Sachaa-Thanasius", email = "sachaathanasius@gmail.com" }]
 classifiers = [
@@ -14,25 +15,13 @@ classifiers = [
     "Intended Audience :: Developers",
     "Natural Language :: English",
     "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
-    "Programming Language :: Python :: Implementation :: CPython",
-    "Programming Language :: Python :: Implementation :: PyPy",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Utilities",
     "Typing :: Typed",
 ]
 dynamic = ["version"]
-
-[project.optional-dependencies]
-bench = ["slothy==1.0.0"]
-test = ["pytest", "pytest-rerunfailures"]
-cov = ["defer-imports[test]", "coverage", "covdefaults"]
-dev = ["defer-imports[bench,cov]", "hatch", "pre-commit", "typing-extensions"]
 
 [project.urls]
 Homepage = "https://github.com/Sachaa-Thanasius/defer-imports"
@@ -40,20 +29,14 @@ Documentation = "https://github.com/Sachaa-Thanasius/defer-imports#readme"
 Issues = "https://github.com/Sachaa-Thanasius/defer-imports/issues"
 Source = "https://github.com/Sachaa-Thanasius/defer-imports"
 
-[tool.hatch.version]
-path = "src/defer_imports/__init__.py"
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/defer_imports"]
+[dependency-groups]
+dev = ["tox>=4.24.1"]
+test = ["pytest>=8", "pytest-reruntestfailures"]
+cov = ["coverage>=7", "covdefaults"]
+bench = ["slothy==1.0.0"]
 
 
 # -------- Benchmark config
-
-[tool.hatch.envs.bench]
-features = ["bench"]
-
-[[tool.hatch.envs.bench.matrix]]
-python = ["3.9", "3.10", "3.11", "3.12", "3.13"]
 
 [tool.hatch.envs.bench.scripts]
 stdlib = "python -m bench.bench_samples"
@@ -61,92 +44,97 @@ import-time = 'python -X importtime -c "import {args:defer_imports}"'
 simple-import-time = 'python -m timeit -n 1 -r 1 -- "import {args:defer_imports}"'
 
 
-# -------- Test config
-
-[tool.hatch.envs.hatch-test]
-features = ["cov"]
-
-[[tool.hatch.envs.hatch-test.matrix]]
-python = ["3.9", "3.10", "3.11", "3.12", "3.13", "pypy3.9", "pypy3.10"]
+# -------- Test config --------
 
 [tool.pytest.ini_options]
-pythonpath = "src"
 addopts = ["--import-mode=importlib", "--strict-markers", "--strict-config"]
-
-[tool.coverage.paths]
-defer_imports = ["src"]
 
 [tool.coverage.run]
 plugins = ["covdefaults"]
 source = ["defer_imports", "tests"]
+parallel = true
+
+[tool.coverage.paths]
+defer_imports = ["src", "*/site-packages"]
 
 [tool.coverage.report]
-fail_under = 90
-exclude_lines = ["^\\s*(?:el)?if TYPE_CHECKING:$"]
+exclude_lines = ["^\\s*(el)?if TYPE_CHECKING:$"]
 
 
-# -------- Linter config
+# -------- Linter config --------
 
 [tool.ruff]
+include = ["src/defer_imports/*.py"]
 line-length = 120
-target-version = "py39"
 
 [tool.ruff.lint]
 select = [
-    "F",
-    "E",
-    "I",
-    "UP",
-    "YTT",
+    "A",
     "ANN",
     "ASYNC",
-    "S",
-    "BLE",
-    # "FBT",
     "B",
-    "A",
-    "COM",
+    "BLE",
     "C4",
+    "COM",
     "DTZ",
-    "T10",
+    "E",
     "EM",
-    "ISC",
-    "G",
-    "INP",
-    "PIE",
-    "T20",
-    "PYI",
-    "PT",
-    "RSE",
-    "RET",
-    "SIM",
-    "TID",
-    "PTH",
     "ERA",
-    "PL",
-    "TRY",
-    "PERF",
+    "F",
     "FURB",
+    "G",
+    "I",
+    "ICN",
+    "INP",
+    "ISC",
+    "LOG",
+    "NPY",
+    "PD",
+    "PERF",
+    "PGH",
+    "PIE",
+    "PL",
+    "PT",
+    "PTH",
+    "PYI",
+    "RET",
+    "RSE",
     "RUF",
+    "S",
+    "SIM",
+    "SLOT",
+    "T10",
+    "T20",
+    "TC",
+    "TID",
+    "TRY",
+    "UP",
+    "W",
+    "YTT",
+    # "FBT",
 ]
 extend-ignore = [
     # ---- General
     "S101",    # Use of assert here is a known quantity for typing cases. All uses should be safe to optimize out.
     "SIM105",  # Suppressable exception. contextlib.suppress is a stylistic choice with overhead.
     "C90",     # McCabe complexity.
-    "ANN101",  # Type of Self for self is usually implicit and/or known by the type-checker.
-    "ANN102",  # Type of type[Self] for cls is usually implicit and/or known by the type-checker.
     "ANN204",  # Special method return types are usually implicit and/or known by type checker.
     "ANN401",  # Any is needed for some annotations.
     "UP038",   # isinstance performs better with tuples than unions.
     "PT001",   # pytest recommends against empty parentheses on pytest.fixture.
-    "PT004",   # Prepending a leading underscore for fixtures that return nothing isn't common practice.
+    "TC001",   # Don't eagerly put things in TYPE_CHECKING blocks.
+    "TC002",   # Don't eagerly put things in TYPE_CHECKING blocks.
+    "TC003",   # Don't eagerly put things in TYPE_CHECKING blocks.
     "PD011",   # Erroneous issue that triggers for any .values attribute access at all.
     "PLR2004", # "Magic number" depends on the use case.
     "RUF002",  # "Ambiguous character" depends on the use case.
     "RUF003",  # "Ambiguous character" depends on the use case.
+    "RUF022",  # __all__ ordering can be meaningful.
+    "RUF023",  # __slots__ ordering can be meaningful. 
 
     # ---- Recommended by Ruff when using Ruff format
+    "W191",
+    "W293",   # Not recommended, but ruff format handles it as well.
     "E111",
     "E114",
     "E117",
@@ -200,7 +188,7 @@ keep-runtime-typing = true
 ]
 
 
-# -------- Type-checker config
+# -------- Type-checker config --------
 
 [tool.pyright]
 include = ["src/defer_imports", "tests"]
@@ -208,10 +196,13 @@ pythonVersion = "3.9"
 pythonPlatform = "All"
 typeCheckingMode = "strict"
 
-reportPrivateUsage = "none"
-reportUnnecessaryIsInstance = "information"
+defineConstant = { "TYPE_CHECKING" = true } # Just in case.
+
+reportPrivateUsage = "information"                  # We're the library.
+reportUnnecessaryIsInstance = "information"         # Verify user input.
+reportUninitializedInstanceVariable = "information" # Occasionally nice as a checkup, but otherwise noisy.
 reportCallInDefaultInitializer = "warning"
-reportImportCycles = "information"
-reportPropertyTypeMismatch = "error"
+reportImportCycles = "information"                  # Occasionally not a false positive.
+reportPropertyTypeMismatch = "warning"
 reportShadowedImports = "error"
 reportUnnecessaryTypeIgnoreComment = "warning"
