@@ -116,7 +116,7 @@ def test_meta_path_finder_installation():
     ("before", "after"),
     [
         pytest.param(
-            """'''Module docstring here'''""",
+            '''"""Module docstring here"""''',
             '''"""Module docstring here"""\n''',
             id="only docstring stays as only element",
         ),
@@ -229,9 +229,7 @@ def test_instrumentation(before: str, after: str):
     ("before", "after"),
     [
         pytest.param(
-            """\
-import inspect
-""",
+            "import inspect",
             """\
 from defer_imports._ast_rewrite import _DeferredImportKey as @_DeferredImportKey, \
 _DeferredImportProxy as @_DeferredImportProxy, _actual_until_use as @_actual_until_use
@@ -804,51 +802,6 @@ with defer_imports.until_use:
     assert exc_info.value.text == 'print("Hello world")'
 
 
-def test_error_if_import_in_class(tmp_path: Path):
-    source = """\
-import defer_imports
-
-class Example:
-    with defer_imports.until_use:
-        from inspect import signature
-"""
-
-    # Boilerplate to dynamically create and load this module.
-    spec, module, module_path = create_sample_module(tmp_path, source)
-    assert spec.loader
-
-    with pytest.raises(SyntaxError) as exc_info:
-        spec.loader.exec_module(module)
-
-    assert exc_info.value.filename == str(module_path)
-    assert exc_info.value.lineno == 4
-    assert exc_info.value.offset == 5
-    assert exc_info.value.text == "    with defer_imports.until_use:\n        from inspect import signature"
-
-
-def test_error_if_import_in_function(tmp_path: Path):
-    source = """\
-import defer_imports
-
-def test():
-    with defer_imports.until_use:
-        import inspect
-
-    return inspect.signature(test)
-"""
-
-    spec, module, module_path = create_sample_module(tmp_path, source)
-    assert spec.loader
-
-    with pytest.raises(SyntaxError) as exc_info:
-        spec.loader.exec_module(module)
-
-    assert exc_info.value.filename == str(module_path)
-    assert exc_info.value.lineno == 4
-    assert exc_info.value.offset == 5
-    assert exc_info.value.text == "    with defer_imports.until_use:\n        import inspect"
-
-
 def test_error_if_wildcard_import(tmp_path: Path):
     source = """\
 import defer_imports
@@ -1201,7 +1154,7 @@ mock_B = patcher.start()
 
 
 @pytest.mark.skipif(sys.version_info < (3, 12), reason="type statements are only valid in 3.12+")
-def test_type_statement_312(tmp_path: Path):
+def test_3_12_type_statement(tmp_path: Path):
     """Test that a proxy within a type statement doesn't resolve until accessed via .__value__.
 
     The package has the following structure:
@@ -1221,7 +1174,8 @@ with defer_imports.until_use:
     from .exp import Expensive
 
 type ManyExpensive = tuple[Expensive, ...]
-"""
+""",
+        encoding="utf-8",
     )
     type_stmt_pkg_path.joinpath("exp.py").write_text("class Expensive: ...", encoding="utf-8")
 
@@ -1275,8 +1229,8 @@ def test_thread_safety(tmp_path: Path):
         should be resolved before this happens, and is even guarded with a RLock and a boolean to prevent this.
     -   It seemingly only happens on pypy.
     -   The reproduction rate locally is ~1/100 when run across pypy3.9 and pypy3.10, 50 times each.
-        -   Add 'pytest.mark.parametrize("q", range(50))' to the test for the repetitions.
-        -   Run "hatch test -py pypy3.9,pypy3.10 -- tests/test_deferred.py::test_thread_safety".
+        -   Add ``pytest.mark.parametrize("q", range(50))`` to the test for the repetitions.
+        -   Run ``hatch test -py pypy3.9,pypy3.10 -- tests/test_deferred.py::test_thread_safety``.
     """
 
     source = """\

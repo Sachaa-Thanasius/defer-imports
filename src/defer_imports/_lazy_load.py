@@ -1,4 +1,4 @@
-# A substantial portion of the code and comments below is adapted from
+# Some of the code and comments below is adapted from
 # https://github.com/python/cpython/blob/49234c065cf2b1ea32c5a3976d834b1d07b9b831/Lib/importlib/util.py
 # and https://github.com/python/cpython/blob/49234c065cf2b1ea32c5a3976d834b1d07b9b831/Lib/importlib/_bootstrap.py
 # with the original copyright being:
@@ -86,8 +86,8 @@ class _LazyModuleType(types.ModuleType):
         # This does mean a user can get __spec__ from a lazy module and modify it without causing a load.
         # Beware: the consequences are unknown.
         #
-        # Extra notes
-        # -----------
+        # Extra
+        # -----
         # I would further restrict this to only work when importlib internals request __spec__, but I don't know how.
         # I attempted the following:
         #
@@ -337,7 +337,7 @@ class _LazyFinder:
 
 
 #: A lock for preventing our code from data-racing itself when modifying sys.meta_path.
-_meta_path_lock = threading.RLock()
+_meta_path_lock = threading.Lock()
 
 
 class _LazyFinderContext:

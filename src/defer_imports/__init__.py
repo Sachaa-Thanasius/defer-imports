@@ -6,9 +6,9 @@ __all__ = ("until_use",)
 
 
 class _DummyContext:
-    """A placeholder context manager that does nothing on its own. Must be used as ``with defer_imports.until_use: ...``.
+    """A placeholder context manager that does nothing on its own.
 
-    This serves as a marker that will be replaced by `defer_imports` machinery, if that is active, at import time.
+    Should not be manually constructed: use through `defer_imports.until_use`.
     """
 
     def __enter__(self, /) -> None:
