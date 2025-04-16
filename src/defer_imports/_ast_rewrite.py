@@ -77,9 +77,7 @@ else:  # pragma: <3.12 cover
 
 # This allows _increment_location to be typed better.
 if TYPE_CHECKING:
-    from typing import TypeVar
-
-    _AST = TypeVar("_AST", bound=ast.AST)
+    _AST = t.TypeVar("_AST", bound=ast.AST)
 else:
     _AST: TypeAlias = "ast.AST"
 
@@ -306,6 +304,7 @@ class _DeferredInstrumenter:
 
     def visit(self, node: ast.AST) -> t.Any:
         """Visit a node."""
+
         method = f"visit_{node.__class__.__name__}"
         visitor = getattr(self, method, self.generic_visit)
         return visitor(node)
@@ -393,17 +392,10 @@ class _DeferredInstrumenter:
             orelse=[],
         )
 
-    def _substitute_import_keys(self, import_nodes: list[ast.stmt]) -> list[ast.stmt]:
-        """Instrument a list of imports.
+    def _validate_until_use_body(self, nodes: list[ast.stmt]) -> TypeGuard[list[t.Union[ast.Import, ast.ImportFrom]]]:
+        """Validate that the statements within a `defer_imports.until_use` block are instrumentable."""
 
-        Raises
-        ------
-        SyntaxError
-            If any of the given nodes are not imports or are wildcard imports.
-        """
-
-        # Validate imports as instrumentable.
-        for node in import_nodes:
+        for node in nodes:
             if not isinstance(node, (ast.Import, ast.ImportFrom)):
                 msg = "with defer_imports.until_use blocks must only contain import statements"
                 raise SyntaxError(msg, self._get_node_location(node))  # noqa: TRY004 # Syntax error displays better.
@@ -412,30 +404,38 @@ class _DeferredInstrumenter:
                 msg = "import * not allowed in with defer_imports.until_use blocks"
                 raise SyntaxError(msg, self._get_node_location(node))
 
-        # Instrument the imports.
-        # NOTE: We purposefully avoid modifying the list in place to avoid potential circular link issues in
-        # _wrap_import_stmts.
-        new_nodes = list(import_nodes)
-        for i in reversed(range(len(import_nodes))):
-            node = import_nodes[i]
-            assert isinstance(node, (ast.Import, ast.ImportFrom))
+        return True
 
-            for alias in node.names:
-                new_nodes.insert(i + 1, self._create_import_name_replacement(alias.asname or alias.name))
+    def _substitute_import_keys(self, import_nodes: list[t.Union[ast.Import, ast.ImportFrom]]) -> list[ast.stmt]:
+        """Instrument a *non-empty* list of imports.
+
+        Raises
+        ------
+        SyntaxError
+            If any of the given nodes are not imports or are wildcard imports.
+        """
 
         self.did_any_instrumentation = True
 
-        # Create a reference to locals() to avoid calling locals() repeatedly.
-        local_ns = ast.Assign(
-            targets=[ast.Name(_LOCAL_NS_NAME, ctx=ast.Store())],
-            value=ast.Call(func=ast.Name("locals", ctx=ast.Load()), args=[], keywords=[]),
+        new_nodes: list[ast.stmt] = []
+
+        # Start with some helper variables.
+        # A reference to locals() to avoid calling locals() repeatedly.
+        new_nodes.append(
+            ast.Assign(
+                targets=[ast.Name(_LOCAL_NS_NAME, ctx=ast.Store())],
+                value=ast.Call(func=ast.Name("locals", ctx=ast.Load()), args=[], keywords=[]),
+            )
         )
-        new_nodes.insert(0, local_ns)
+        # A reference to the current proxy being "fixed".
+        new_nodes.append(ast.Assign([ast.Name(_TEMP_PROXY_NAME, ctx=ast.Store())], ast.Constant(None)))
 
-        # Create a reference to the current proxy being "fixed".
-        new_nodes.insert(1, ast.Assign([ast.Name(_TEMP_PROXY_NAME, ctx=ast.Store())], ast.Constant(None)))
+        # Add the imports + namespace adjustments.
+        for node in import_nodes:
+            new_nodes.append(node)
+            new_nodes.extend(self._create_import_name_replacement(alias.asname or alias.name) for alias in node.names)
 
-        # Clean up helper references.
+        # Clean up the helper variables.
         new_nodes.append(ast.Delete([ast.Name(name, ctx=ast.Del()) for name in (_TEMP_PROXY_NAME, _LOCAL_NS_NAME)]))
 
         return new_nodes
@@ -456,10 +456,11 @@ class _DeferredInstrumenter:
             return self._visit_eager_import_block(node)
 
         # Replace the dummy context manager with the one that will actually replace __import__.
-        node.items[0].context_expr = ast.copy_location(
-            ast.Name(_ACTUAL_CTX_NAME, ctx=ast.Load()),
-            node.items[0].context_expr,
-        )
+        new_ctx_expr = ast.copy_location(ast.Name(_ACTUAL_CTX_NAME, ctx=ast.Load()), node.items[0].context_expr)
+        node.items[0].context_expr = new_ctx_expr
+
+        # TODO: Assert can be optimized out. Find a different way of making validating + typeguard work.
+        assert self._validate_until_use_body(node.body)
         node.body = self._substitute_import_keys(node.body)
         return ast.fix_missing_locations(node)
 
@@ -493,18 +494,16 @@ class _DeferredInstrumenter:
             else:
                 break
 
-        # Then, add necessary defer_imports imports.
+        # Then, add necessary defer_imports import.
         lineno = position + 1
         cumm_col_offset = len(f"from {__spec__.name} import ")
         internals_aliases: list[ast.alias] = []
 
         for name, asname in zip(_INTERNALS_NAMES, _INTERNALS_ASNAMES):
             new_alias = ast.alias(name, asname, lineno=lineno, col_offset=cumm_col_offset, end_lineno=lineno)
-
             cumm_col_offset += len(name) + 4 + len(asname)  # Account for " as " with 4.
             new_alias.end_col_offset = cumm_col_offset
             cumm_col_offset += 2  # Account for ", ".
-
             internals_aliases.append(new_alias)
 
         cumm_col_offset -= 2  # Discard nonexistent final ", ".
@@ -520,8 +519,8 @@ class _DeferredInstrumenter:
         )
         node.body.insert(position, internals_import)
 
-        for i in range(position + 1, len(node.body)):
-            ast.increment_lineno(node.body[i])
+        for child in node.body[position + 1 :]:
+            ast.increment_lineno(child)
 
         # Finally, clean up the namespace.
         lineno = node.body[-1].lineno
@@ -530,12 +529,10 @@ class _DeferredInstrumenter:
 
         for asname in _INTERNALS_ASNAMES:
             del_target = ast.Name(asname, ctx=ast.Del(), lineno=lineno, col_offset=cumm_col_offset, end_lineno=lineno)
-
             cumm_col_offset += len(asname)
             del_target.end_col_offset = cumm_col_offset
-            del_targets.append(del_target)
-
             cumm_col_offset += 2  # Account for ", ".
+            del_targets.append(del_target)
 
         cumm_col_offset -= 2  # Discard nonexistent final ", ".
 
@@ -544,12 +541,6 @@ class _DeferredInstrumenter:
         )
 
         return node
-
-    @staticmethod
-    def _is_non_wildcard_import(obj: object) -> TypeGuard[t.Union[ast.Import, ast.ImportFrom]]:
-        """Check if a given object is an import AST without wildcards."""
-
-        return isinstance(obj, (ast.Import, ast.ImportFrom)) and obj.names[0].name != "*"
 
     @staticmethod
     def _is_defer_imports_import(node: t.Union[ast.Import, ast.ImportFrom]) -> bool:
@@ -562,36 +553,28 @@ class _DeferredInstrumenter:
         else:
             return node.module is not None and node.module.partition(".")[0] == "defer_imports"
 
-    def _is_import_to_instrument(self, value: ast.AST) -> bool:
+    def _is_import_to_instrument(self, value: object) -> TypeGuard[t.Union[ast.Import, ast.ImportFrom]]:
         return (
             # Only for import nodes without wildcards.
-            self._is_non_wildcard_import(value)
+            isinstance(value, (ast.Import, ast.ImportFrom))
+            and value.names[0].name != "*"
             # Only outside of escape hatch blocks.
             and (self.escape_hatch_depth == 0 and not self._is_defer_imports_import(value))
         )
 
-    def _wrap_import_stmts(self, nodes: list[ast.stmt], start: int) -> ast.With:
-        """Wrap consecutive import nodes within a list of statements using a "defer_imports.until_use" block and
+    def _wrap_import_stmts(self, nodes: list[t.Union[ast.Import, ast.ImportFrom]]) -> ast.With:
+        """Wrap consecutive import nodes within a list of statements using a `defer_imports.until_use` block and
         instrument them.
 
         The first node must be an import node.
         """
 
-        imports_range: list[int] = []
-        for i in range(start, len(nodes)):
-            if not self._is_non_wildcard_import(nodes[i]):
-                break
-            imports_range.append(i)
-
-        imports_slice = slice(imports_range[0], imports_range[-1] + 1)
-        import_nodes = nodes[imports_slice]
-
-        lineno = import_nodes[0].lineno
-        instrumented_nodes = [_increment_location(node, 0, 4) for node in self._substitute_import_keys(import_nodes)]
-
+        lineno = nodes[0].lineno
         end_col_offset = 5 + len(_ACTUAL_CTX_NAME)  # Account for "with ".
 
-        wrapper_with = ast.With(
+        instrumented_nodes = [_increment_location(node, 0, 4) for node in self._substitute_import_keys(nodes)]
+
+        return ast.With(
             [
                 ast.withitem(
                     ast.Name(
@@ -611,33 +594,39 @@ class _DeferredInstrumenter:
             end_col_offset=end_col_offset + 1,  # Account for ":".
         )
 
-        nodes[imports_slice] = [wrapper_with]
-        return wrapper_with
-
-    def generic_visit(self, node: ast.AST) -> ast.AST:
+    def generic_visit(self, node: ast.AST) -> ast.AST:  # noqa: PLR0912
         """Called if no explicit visitor function exists for a node.
 
-        In addition to regular functionality, conditionally intercept global sequences of import statements to wrap them
-        in ``with defer_imports.until_use`` blocks.
+        This differs from the regular generic_visit by conditionally intercepting global sequences of import statements
+        to wrap them in ``with defer_imports.until_use`` blocks.
         """
 
         for field, old_value in ast.iter_fields(node):
             if isinstance(old_value, list):
                 new_values: list[t.Any] = []
+                start_idx = 0
 
-                # NOTE: The enumerate and first if block below are the main patch to the original generic_visit code.
-                for i, value in enumerate(old_value):  # pyright: ignore [reportUnknownArgumentType, reportUnknownVariableType]
-                    # Only when module-level instrumentation is enabled.
-                    if self.module_level and self._is_import_to_instrument(value):  # pyright: ignore [reportUnknownArgumentType]
-                        value = self._wrap_import_stmts(old_value, i)  # noqa: PLW2901 # pyright: ignore [reportUnknownArgumentType]
-                    elif isinstance(value, ast.AST):
+                for value in old_value:  # pyright: ignore [reportUnknownVariableType]
+                    if isinstance(value, ast.AST):
+                        if self.module_level:
+                            if self._is_import_to_instrument(value):
+                                start_idx += 1
+                            elif start_idx > 0:
+                                new_values[-start_idx:] = [self._wrap_import_stmts(new_values[-start_idx:])]
+                                start_idx = 0
+
                         value = self.visit(value)  # noqa: PLW2901
+
                         if value is None:
                             continue
                         if not isinstance(value, ast.AST):
                             new_values.extend(value)
                             continue
+
                     new_values.append(value)
+
+                if self.module_level and (start_idx > 0):
+                    new_values[-start_idx:] = [self._wrap_import_stmts(new_values[-start_idx:])]
 
                 old_value[:] = new_values
 
