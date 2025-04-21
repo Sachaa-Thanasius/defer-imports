@@ -20,7 +20,12 @@ from typing import Any, cast
 import pytest
 
 from defer_imports._ast_rewrite import (
+    _ACTUAL_CTX_NAME,
     _BYTECODE_HEADER,
+    _KEY_CLS_NAME,
+    _LOCAL_NS_NAME,
+    _PROXY_CLS_NAME,
+    _TEMP_PROXY_NAME,
     _DeferredFileLoader,
     _DeferredInstrumenter,
     _DeferredPathFinder,
@@ -33,11 +38,39 @@ from defer_imports._ast_rewrite import (
 # ============================================================================
 
 
+MODULE_TEMPLATE = f"""\
+from defer_imports._ast_rewrite import _DeferredImportKey as {_KEY_CLS_NAME}, \
+_DeferredImportProxy as {_PROXY_CLS_NAME}, _actual_until_use as {_ACTUAL_CTX_NAME}
+{{}}
+del {_KEY_CLS_NAME}, {_PROXY_CLS_NAME}, {_ACTUAL_CTX_NAME}
+""".rstrip()
+
+
+IMPORT_TEMPLATE = f"""\
+with {_ACTUAL_CTX_NAME}:
+    {_LOCAL_NS_NAME} = locals()
+    {_TEMP_PROXY_NAME} = None
+{{}}
+    del {_TEMP_PROXY_NAME}, {_LOCAL_NS_NAME}
+""".rstrip()
+
+
+IF_TEMPLATE = f"""\
+    if {{0}}.__class__ is {_PROXY_CLS_NAME}:
+        {_TEMP_PROXY_NAME} = {_LOCAL_NS_NAME}[{_KEY_CLS_NAME}({{0!r}}, {_TEMP_PROXY_NAME})] = {_LOCAL_NS_NAME}.pop({{0!r}})
+""".rstrip()
+
+
+if_template = IF_TEMPLATE.format
+import_template = IMPORT_TEMPLATE.format
+module_template = MODULE_TEMPLATE.format
+
+
 def create_sample_module(
     path: Path,
     source: str,
     loader_type: type = _DeferredFileLoader,
-    defer_module_level: bool = False,
+    defer_whole_module: bool = False,
 ):
     """Create a sample module based on the given attributes."""
 
@@ -47,7 +80,9 @@ def create_sample_module(
     module_path.write_text(source, encoding="utf-8")
 
     loader = loader_type(module_name, str(module_path))
-    loader.defer_module_level = defer_module_level
+
+    # spec_from_file_location and module_from_spec won't automatically work with loader_state.
+    loader.defer_whole_module = defer_whole_module
 
     spec = importlib.util.spec_from_file_location(module_name, module_path, loader=loader)
     assert spec
@@ -113,16 +148,16 @@ def test_meta_path_finder_installation():
 
 
 @pytest.mark.parametrize(
-    ("before", "after"),
+    ("source", "expected_rewrite"),
     [
         pytest.param(
             '''"""Module docstring here"""''',
-            '''"""Module docstring here"""\n''',
+            '''"""Module docstring here"""''',
             id="only docstring stays as only element",
         ),
         pytest.param(
             """from __future__ import annotations""",
-            """from __future__ import annotations\n""",
+            """from __future__ import annotations""",
             id="only __future__ import stays as only element",
         ),
         pytest.param(
@@ -139,7 +174,7 @@ from contextlib import nullcontext
 import defer_imports
 with defer_imports.until_use, nullcontext():
     import inspect
-""",
+""".rstrip(),
             id="does nothing if used with another context manager",
         ),
         pytest.param(
@@ -149,20 +184,33 @@ import defer_imports
 with defer_imports.until_use:
     import inspect
 """,
-            """\
-from defer_imports._ast_rewrite import _DeferredImportKey as @_DeferredImportKey, \
-_DeferredImportProxy as @_DeferredImportProxy, _actual_until_use as @_actual_until_use
-import defer_imports
-with @_actual_until_use:
-    @local_ns = locals()
-    @temp_proxy = None
-    import inspect
-    if inspect.__class__ is @_DeferredImportProxy:
-        @temp_proxy = @local_ns[@_DeferredImportKey('inspect', @temp_proxy)] = @local_ns.pop('inspect')
-    del @temp_proxy, @local_ns
-del @_DeferredImportKey, @_DeferredImportProxy, @_actual_until_use
-""",
+            module_template(
+                "import defer_imports\n" + import_template("    import inspect\n" + if_template("inspect"))
+            ),
             id="regular import",
+        ),
+        pytest.param(
+            """\
+import defer_imports
+
+with defer_imports.until_use:
+    import inspect as i
+""",
+            module_template("import defer_imports\n" + import_template("    import inspect as i\n" + if_template("i"))),
+            id="regular import with rename 1",
+        ),
+        pytest.param(
+            """\
+import defer_imports
+
+with defer_imports.until_use:
+    import sys, os as so
+""",
+            module_template(
+                "import defer_imports\n"
+                + import_template("\n".join(("    import sys, os as so", if_template("sys"), if_template("so"))))
+            ),
+            id="regular import with rename 2",
         ),
         pytest.param(
             """\
@@ -172,22 +220,19 @@ with defer_imports.until_use:
     import importlib
     import importlib.abc
 """,
-            """\
-from defer_imports._ast_rewrite import _DeferredImportKey as @_DeferredImportKey, \
-_DeferredImportProxy as @_DeferredImportProxy, _actual_until_use as @_actual_until_use
-import defer_imports
-with @_actual_until_use:
-    @local_ns = locals()
-    @temp_proxy = None
-    import importlib
-    if importlib.__class__ is @_DeferredImportProxy:
-        @temp_proxy = @local_ns[@_DeferredImportKey('importlib', @temp_proxy)] = @local_ns.pop('importlib')
-    import importlib.abc
-    if importlib.__class__ is @_DeferredImportProxy:
-        @temp_proxy = @local_ns[@_DeferredImportKey('importlib', @temp_proxy)] = @local_ns.pop('importlib')
-    del @temp_proxy, @local_ns
-del @_DeferredImportKey, @_DeferredImportProxy, @_actual_until_use
-""",
+            module_template(
+                "import defer_imports\n"
+                + import_template(
+                    "\n".join(
+                        (
+                            "    import importlib",
+                            if_template("importlib"),
+                            "    import importlib.abc",
+                            if_template("importlib"),
+                        )
+                    )
+                )
+            ),
             id="mixed imports",
         ),
         pytest.param(
@@ -197,77 +242,45 @@ import defer_imports
 with defer_imports.until_use:
     from . import a
 """,
-            """\
-from defer_imports._ast_rewrite import _DeferredImportKey as @_DeferredImportKey, \
-_DeferredImportProxy as @_DeferredImportProxy, _actual_until_use as @_actual_until_use
-import defer_imports
-with @_actual_until_use:
-    @local_ns = locals()
-    @temp_proxy = None
-    from . import a
-    if a.__class__ is @_DeferredImportProxy:
-        @temp_proxy = @local_ns[@_DeferredImportKey('a', @temp_proxy)] = @local_ns.pop('a')
-    del @temp_proxy, @local_ns
-del @_DeferredImportKey, @_DeferredImportProxy, @_actual_until_use
-""",
+            module_template("import defer_imports\n" + import_template("    from . import a\n" + if_template("a"))),
             id="relative import",
         ),
     ],
 )
-def test_instrumentation(before: str, after: str):
+def test_instrumentation(source: str, expected_rewrite: str):
     """Test what code is generated by the instrumentation side of defer_imports."""
 
-    filename = "<unknown>"
-    orig_tree = ast.parse(before, filename, "exec")
-    transformer = _DeferredInstrumenter(before, filename)
-    new_tree = ast.fix_missing_locations(transformer.visit(orig_tree))
+    transformer = _DeferredInstrumenter(source)
+    new_tree = transformer.visit(ast.parse(source))
+    actual_rewrite = ast.unparse(new_tree)
 
-    assert f"{ast.unparse(new_tree)}\n" == after
+    assert actual_rewrite == expected_rewrite
 
 
 @pytest.mark.parametrize(
-    ("before", "after"),
+    ("source", "expected_rewrite"),
     [
         pytest.param(
             "import inspect",
-            """\
-from defer_imports._ast_rewrite import _DeferredImportKey as @_DeferredImportKey, \
-_DeferredImportProxy as @_DeferredImportProxy, _actual_until_use as @_actual_until_use
-with @_actual_until_use:
-    @local_ns = locals()
-    @temp_proxy = None
-    import inspect
-    if inspect.__class__ is @_DeferredImportProxy:
-        @temp_proxy = @local_ns[@_DeferredImportKey('inspect', @temp_proxy)] = @local_ns.pop('inspect')
-    del @temp_proxy, @local_ns
-del @_DeferredImportKey, @_DeferredImportProxy, @_actual_until_use
-""",
+            module_template(import_template("    import inspect\n" + if_template("inspect"))),
             id="regular import",
         ),
         pytest.param(
-            """\
-import hello
-import world
-import foo
-""",
-            """\
-from defer_imports._ast_rewrite import _DeferredImportKey as @_DeferredImportKey, \
-_DeferredImportProxy as @_DeferredImportProxy, _actual_until_use as @_actual_until_use
-with @_actual_until_use:
-    @local_ns = locals()
-    @temp_proxy = None
-    import hello
-    if hello.__class__ is @_DeferredImportProxy:
-        @temp_proxy = @local_ns[@_DeferredImportKey('hello', @temp_proxy)] = @local_ns.pop('hello')
-    import world
-    if world.__class__ is @_DeferredImportProxy:
-        @temp_proxy = @local_ns[@_DeferredImportKey('world', @temp_proxy)] = @local_ns.pop('world')
-    import foo
-    if foo.__class__ is @_DeferredImportProxy:
-        @temp_proxy = @local_ns[@_DeferredImportKey('foo', @temp_proxy)] = @local_ns.pop('foo')
-    del @temp_proxy, @local_ns
-del @_DeferredImportKey, @_DeferredImportProxy, @_actual_until_use
-""",
+            "import hello\nimport world\nimport foo\n",
+            module_template(
+                import_template(
+                    "\n".join(
+                        (
+                            "    import hello",
+                            if_template("hello"),
+                            "    import world",
+                            if_template("world"),
+                            "    import foo",
+                            if_template("foo"),
+                        )
+                    )
+                )
+            ),
             id="multiple imports consecutively",
         ),
         pytest.param(
@@ -279,29 +292,19 @@ print("hello")
 
 import foo
 """,
-            """\
-from defer_imports._ast_rewrite import _DeferredImportKey as @_DeferredImportKey, \
-_DeferredImportProxy as @_DeferredImportProxy, _actual_until_use as @_actual_until_use
-with @_actual_until_use:
-    @local_ns = locals()
-    @temp_proxy = None
-    import hello
-    if hello.__class__ is @_DeferredImportProxy:
-        @temp_proxy = @local_ns[@_DeferredImportKey('hello', @temp_proxy)] = @local_ns.pop('hello')
-    import world
-    if world.__class__ is @_DeferredImportProxy:
-        @temp_proxy = @local_ns[@_DeferredImportKey('world', @temp_proxy)] = @local_ns.pop('world')
-    del @temp_proxy, @local_ns
-print('hello')
-with @_actual_until_use:
-    @local_ns = locals()
-    @temp_proxy = None
-    import foo
-    if foo.__class__ is @_DeferredImportProxy:
-        @temp_proxy = @local_ns[@_DeferredImportKey('foo', @temp_proxy)] = @local_ns.pop('foo')
-    del @temp_proxy, @local_ns
-del @_DeferredImportKey, @_DeferredImportProxy, @_actual_until_use
-""",
+            module_template(
+                "\n".join(
+                    (
+                        import_template(
+                            "\n".join(
+                                ("    import hello", if_template("hello"), "    import world", if_template("world"))
+                            )
+                        ),
+                        "print('hello')",
+                        import_template("\n".join(("    import foo", if_template("foo")))),
+                    )
+                )
+            ),
             id="multiple imports separated by statement 1",
         ),
         pytest.param(
@@ -314,31 +317,20 @@ def do_the_thing(a: int) -> int:
 
 import foo
 """,
-            """\
-from defer_imports._ast_rewrite import _DeferredImportKey as @_DeferredImportKey, \
-_DeferredImportProxy as @_DeferredImportProxy, _actual_until_use as @_actual_until_use
-with @_actual_until_use:
-    @local_ns = locals()
-    @temp_proxy = None
-    import hello
-    if hello.__class__ is @_DeferredImportProxy:
-        @temp_proxy = @local_ns[@_DeferredImportKey('hello', @temp_proxy)] = @local_ns.pop('hello')
-    import world
-    if world.__class__ is @_DeferredImportProxy:
-        @temp_proxy = @local_ns[@_DeferredImportKey('world', @temp_proxy)] = @local_ns.pop('world')
-    del @temp_proxy, @local_ns
-
-def do_the_thing(a: int) -> int:
-    return a
-with @_actual_until_use:
-    @local_ns = locals()
-    @temp_proxy = None
-    import foo
-    if foo.__class__ is @_DeferredImportProxy:
-        @temp_proxy = @local_ns[@_DeferredImportKey('foo', @temp_proxy)] = @local_ns.pop('foo')
-    del @temp_proxy, @local_ns
-del @_DeferredImportKey, @_DeferredImportProxy, @_actual_until_use
-""",
+            module_template(
+                "\n".join(
+                    (
+                        import_template(
+                            "\n".join(
+                                ("    import hello", if_template("hello"), "    import world", if_template("world"))
+                            )
+                        ),
+                        "def do_the_thing(a: int) -> int:",
+                        "    return a",
+                        import_template("\n".join(("    import foo", if_template("foo")))),
+                    )
+                )
+            ),
             id="multiple imports separated by statement 2",
         ),
         pytest.param(
@@ -349,22 +341,16 @@ def do_the_thing(a: int) -> int:
     import world
     return a
 """,
-            """\
-from defer_imports._ast_rewrite import _DeferredImportKey as @_DeferredImportKey, \
-_DeferredImportProxy as @_DeferredImportProxy, _actual_until_use as @_actual_until_use
-with @_actual_until_use:
-    @local_ns = locals()
-    @temp_proxy = None
-    import hello
-    if hello.__class__ is @_DeferredImportProxy:
-        @temp_proxy = @local_ns[@_DeferredImportKey('hello', @temp_proxy)] = @local_ns.pop('hello')
-    del @temp_proxy, @local_ns
-
-def do_the_thing(a: int) -> int:
-    import world
-    return a
-del @_DeferredImportKey, @_DeferredImportProxy, @_actual_until_use
-""",
+            module_template(
+                "\n".join(
+                    (
+                        import_template("    import hello\n" + if_template("hello")),
+                        "def do_the_thing(a: int) -> int:",
+                        "    import world",
+                        "    return a",
+                    )
+                )
+            ),
             id="nothing done for imports within function",
         ),
         pytest.param(
@@ -373,26 +359,15 @@ import hello
 from world import *
 import foo
 """,
-            """\
-from defer_imports._ast_rewrite import _DeferredImportKey as @_DeferredImportKey, \
-_DeferredImportProxy as @_DeferredImportProxy, _actual_until_use as @_actual_until_use
-with @_actual_until_use:
-    @local_ns = locals()
-    @temp_proxy = None
-    import hello
-    if hello.__class__ is @_DeferredImportProxy:
-        @temp_proxy = @local_ns[@_DeferredImportKey('hello', @temp_proxy)] = @local_ns.pop('hello')
-    del @temp_proxy, @local_ns
-from world import *
-with @_actual_until_use:
-    @local_ns = locals()
-    @temp_proxy = None
-    import foo
-    if foo.__class__ is @_DeferredImportProxy:
-        @temp_proxy = @local_ns[@_DeferredImportKey('foo', @temp_proxy)] = @local_ns.pop('foo')
-    del @temp_proxy, @local_ns
-del @_DeferredImportKey, @_DeferredImportProxy, @_actual_until_use
-""",
+            module_template(
+                "\n".join(
+                    (
+                        import_template("    import hello\n" + if_template("hello")),
+                        "from world import *",
+                        import_template("    import foo\n" + if_template("foo")),
+                    )
+                )
+            ),
             id="avoids doing anything with wildcard imports",
         ),
         pytest.param(
@@ -404,29 +379,18 @@ finally:
     pass
 import bar
 """,
-            """\
-from defer_imports._ast_rewrite import _DeferredImportKey as @_DeferredImportKey, \
-_DeferredImportProxy as @_DeferredImportProxy, _actual_until_use as @_actual_until_use
-with @_actual_until_use:
-    @local_ns = locals()
-    @temp_proxy = None
-    import foo
-    if foo.__class__ is @_DeferredImportProxy:
-        @temp_proxy = @local_ns[@_DeferredImportKey('foo', @temp_proxy)] = @local_ns.pop('foo')
-    del @temp_proxy, @local_ns
-try:
-    import hello
-finally:
-    pass
-with @_actual_until_use:
-    @local_ns = locals()
-    @temp_proxy = None
-    import bar
-    if bar.__class__ is @_DeferredImportProxy:
-        @temp_proxy = @local_ns[@_DeferredImportKey('bar', @temp_proxy)] = @local_ns.pop('bar')
-    del @temp_proxy, @local_ns
-del @_DeferredImportKey, @_DeferredImportProxy, @_actual_until_use
-""",
+            module_template(
+                "\n".join(
+                    (
+                        import_template("    import foo\n" + if_template("foo")),
+                        "try:",
+                        "    import hello",
+                        "finally:",
+                        "    pass",
+                        import_template("    import bar\n" + if_template("bar")),
+                    )
+                )
+            ),
             id="avoids imports in try-finally",
         ),
         pytest.param(
@@ -436,27 +400,16 @@ with nullcontext():
     import hello
 import bar
 """,
-            """\
-from defer_imports._ast_rewrite import _DeferredImportKey as @_DeferredImportKey, \
-_DeferredImportProxy as @_DeferredImportProxy, _actual_until_use as @_actual_until_use
-with @_actual_until_use:
-    @local_ns = locals()
-    @temp_proxy = None
-    import foo
-    if foo.__class__ is @_DeferredImportProxy:
-        @temp_proxy = @local_ns[@_DeferredImportKey('foo', @temp_proxy)] = @local_ns.pop('foo')
-    del @temp_proxy, @local_ns
-with nullcontext():
-    import hello
-with @_actual_until_use:
-    @local_ns = locals()
-    @temp_proxy = None
-    import bar
-    if bar.__class__ is @_DeferredImportProxy:
-        @temp_proxy = @local_ns[@_DeferredImportKey('bar', @temp_proxy)] = @local_ns.pop('bar')
-    del @temp_proxy, @local_ns
-del @_DeferredImportKey, @_DeferredImportProxy, @_actual_until_use
-""",
+            module_template(
+                "\n".join(
+                    (
+                        import_template("    import foo\n" + if_template("foo")),
+                        "with nullcontext():",
+                        "    import hello",
+                        import_template("    import bar\n" + if_template("bar")),
+                    )
+                )
+            ),
             id="avoids imports in non-defer_imports.until_use with block",
         ),
         pytest.param(
@@ -467,62 +420,56 @@ with defer_imports.until_use:
     import hello
 import bar
 """,
-            """\
-from defer_imports._ast_rewrite import _DeferredImportKey as @_DeferredImportKey, \
-_DeferredImportProxy as @_DeferredImportProxy, _actual_until_use as @_actual_until_use
-import defer_imports
-with @_actual_until_use:
-    @local_ns = locals()
-    @temp_proxy = None
-    import foo
-    if foo.__class__ is @_DeferredImportProxy:
-        @temp_proxy = @local_ns[@_DeferredImportKey('foo', @temp_proxy)] = @local_ns.pop('foo')
-    del @temp_proxy, @local_ns
-with @_actual_until_use:
-    @local_ns = locals()
-    @temp_proxy = None
-    import hello
-    if hello.__class__ is @_DeferredImportProxy:
-        @temp_proxy = @local_ns[@_DeferredImportKey('hello', @temp_proxy)] = @local_ns.pop('hello')
-    del @temp_proxy, @local_ns
-with @_actual_until_use:
-    @local_ns = locals()
-    @temp_proxy = None
-    import bar
-    if bar.__class__ is @_DeferredImportProxy:
-        @temp_proxy = @local_ns[@_DeferredImportKey('bar', @temp_proxy)] = @local_ns.pop('bar')
-    del @temp_proxy, @local_ns
-del @_DeferredImportKey, @_DeferredImportProxy, @_actual_until_use
-""",
+            module_template(
+                "\n".join(
+                    (
+                        import_template(
+                            "\n".join(
+                                (
+                                    "    import defer_imports",
+                                    if_template("defer_imports"),
+                                    "    import foo",
+                                    if_template("foo"),
+                                )
+                            )
+                        ),
+                        import_template("    import hello\n" + if_template("hello")),
+                        import_template("    import bar\n" + if_template("bar")),
+                    )
+                )
+            ),
             id="still instruments imports in defer_imports.until_use with block",
         ),
         pytest.param(
-            *["try:\n    import foo\nexcept:\n    pass\n"] * 2,
+            *["try:\n    import foo\nexcept:\n    pass"] * 2,
             id="escape hatch: try",
         ),
         pytest.param(
-            *["try:\n    raise Exception\nexcept:\n    import foo\n"] * 2,
+            *["try:\n    raise Exception\nexcept:\n    import foo"] * 2,
             id="escape hatch: except",
         ),
         pytest.param(
-            *["try:\n    print('hi')\nexcept:\n    print('error')\nelse:\n    import foo\n"] * 2,
+            *["try:\n    print('hi')\nexcept:\n    print('error')\nelse:\n    import foo"] * 2,
             id="escape hatch: else",
         ),
         pytest.param(
-            *["try:\n    pass\nfinally:\n    import foo\n"] * 2,
+            *["try:\n    pass\nfinally:\n    import foo"] * 2,
             id="escape hatch: finally",
         ),
     ],
 )
-def test_module_instrumentation(before: str, after: str):
+def test_module_instrumentation(source: str, expected_rewrite: str):
     """Test what code is generated by the instrumentation side of defer_imports if applied at a module level."""
 
-    filename = "<unknown>"
-    orig_tree = ast.parse(before, filename, "exec")
-    transformer = _DeferredInstrumenter(before, filename, module_level=True)
-    new_tree = ast.fix_missing_locations(transformer.visit(orig_tree))
+    transformer = _DeferredInstrumenter(source, module_level=True)
+    new_tree = transformer.visit(ast.parse(source))
+    actual_rewrite = ast.unparse(new_tree)
 
-    assert f"{ast.unparse(new_tree)}\n" == after
+    # We shouldn't depend on ast.unparse() making whitespace exactly as we want it.
+    actual_no_ws = "\n".join([line for line in actual_rewrite.splitlines() if line.strip()])
+    expected_no_ws = "\n".join([line for line in expected_rewrite.splitlines() if line.strip()])
+
+    assert actual_no_ws == expected_no_ws
 
 
 # endregion
@@ -1035,7 +982,8 @@ from .y import Y1
 
 def X2():
     return Y1()
-"""
+""",
+        encoding="utf-8",
     )
 
     circular_pkg_path.joinpath("y.py").write_text(

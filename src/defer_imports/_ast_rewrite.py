@@ -42,19 +42,13 @@ TYPE_CHECKING = False
 
 
 if TYPE_CHECKING:
-    from typing_extensions import TypeAlias, TypeGuard
+    from typing_extensions import TypeAlias
 elif sys.version_info >= (3, 10):  # pragma: >=3.10 cover
     TypeAlias: t.TypeAlias = "t.TypeAlias"
-    TypeGuard: t.TypeAlias = "t.TypeGuard"
 else:  # pragma: <3.10 cover
 
     class TypeAlias:
         """Placeholder for typing.TypeAlias."""
-
-    class TypeGuard:
-        """Placeholder for typing.TypeGuard."""
-
-        __class_getitem__ = classmethod(types.GenericAlias)
 
 
 if TYPE_CHECKING:
@@ -73,13 +67,6 @@ elif TYPE_CHECKING:
     from typing_extensions import Buffer as ReadableBuffer
 else:  # pragma: <3.12 cover
     ReadableBuffer: TypeAlias = "t.Union[bytes, bytearray, memoryview]"
-
-
-# This allows _increment_location to be typed better.
-if TYPE_CHECKING:
-    _AST = t.TypeVar("_AST", bound=ast.AST)
-else:
-    _AST: TypeAlias = "ast.AST"
 
 
 # endregion
@@ -206,69 +193,34 @@ def _decode_source(source_bytes: ReadableBuffer) -> str:  # pragma: no cover
 _ModulePath: TypeAlias = "t.Union[str, os.PathLike[str], ReadableBuffer]"
 _SourceData: TypeAlias = "t.Union[ReadableBuffer, str]"
 _LoaderInit: TypeAlias = "t.Callable[[str, str], importlib.abc.Loader]"
+_ASTLocation: TypeAlias = "dict[t.Literal['lineno', 'col_offset', 'end_lineno', 'end_col_offset'], int]"
 
 
 _BYTECODE_HEADER = f"defer_imports{__version__}".encode()
 """Custom header for defer_imports-instrumented bytecode files. Differs for every version."""
 
-_INTERNALS_NAMES: t.Final = ("_DeferredImportKey", "_DeferredImportProxy", "_actual_until_use")
-_INTERNALS_ASNAMES: t.Final[tuple[str, str, str]] = tuple(f"@{name}" for name in _INTERNALS_NAMES)  # pyright: ignore [reportAssignmentType]
+
+# We make our generated variables more hygienic by prefixing their names with "_@di_".
+# This has a few positives:
+# 1. The variables can't be accidentally accessed by regular user code (that doesn't programmatically access namespaces
+#    via locals/globals/vars), since "@" isn't a valid symbol in identifiers. pytest does something similar.
+# 2. The variables are somewhat namespaced with "di" in case other generated code is added by third parties.
+#    pytest does something similiar.
+# 3. The variables start with an underscore so that code that programmatically accesses the global namespace
+#    during module execution, but avoids symbols starting with an underscore, won't pick it up.
+#     - An example of a common pattern that meets this criteria:
+#       __all__ = [name for name in globals() if name[:1] != "_"]  # noqa: ERA001
+_HYGIENE_PREFIX = "_@di_"
+
+_INTERNALS_NAMES = ("_DeferredImportKey", "_DeferredImportProxy", "_actual_until_use")
+_INTERNALS_ASNAMES = tuple(f"{_HYGIENE_PREFIX}{name}" for name in _INTERNALS_NAMES)
 _KEY_CLS_NAME, _PROXY_CLS_NAME, _ACTUAL_CTX_NAME = _INTERNALS_ASNAMES
-_TEMP_PROXY_NAME: t.Final = "@temp_proxy"
-_LOCAL_NS_NAME: t.Final = "@local_ns"
-
-
-def _increment_location(node: _AST, line_n: int = 1, col_n: int = 0) -> _AST:
-    """Increment the location values of each node in a tree, starting at `node`.
-
-    This is useful to "move code" to a different location in a file.
-
-    Parameters
-    ----------
-    node: _AST
-        The tree to alter the location of.
-    line_n: int, default=1
-        How much to increment the line number and end line number of each node. Defaults to 1.
-    col_n: int, default=0
-        How much to increment the column offset and end column offset of each node. Defaults to 0.
-
-    Returns
-    -------
-    _AST
-        The tree starting from the original given node.
-
-    Notes
-    -----
-    The implementation is partially adapted from `ast.increment_lineno`.
-    """
-
-    for child in ast.walk(node):
-        # TypeIgnore is a special case where lineno is not an attribute
-        # but rather a field of the node itself.
-        if isinstance(child, ast.TypeIgnore):
-            child.lineno = getattr(child, "lineno", 0) + line_n
-            continue
-
-        if "lineno" in child._attributes:
-            child.lineno = getattr(child, "lineno", 0) + line_n  # pyright: ignore [reportAttributeAccessIssue]
-
-        if "end_lineno" in child._attributes and (end_lineno := getattr(child, "end_lineno", 0)) is not None:
-            child.end_lineno = end_lineno + line_n  # pyright: ignore [reportAttributeAccessIssue]
-
-        if "col_offset" in child._attributes:
-            child.col_offset = getattr(child, "col_offset", 0) + col_n  # pyright: ignore [reportAttributeAccessIssue]
-
-        if (
-            "end_col_offset" in child._attributes
-            and (end_col_offset := getattr(child, "end_col_offset", 0)) is not None
-        ):
-            child.end_col_offset = end_col_offset + col_n  # pyright: ignore [reportAttributeAccessIssue]
-
-    return node
+_TEMP_PROXY_NAME = f"{_HYGIENE_PREFIX}temp_proxy"
+_LOCAL_NS_NAME = f"{_HYGIENE_PREFIX}local_ns"
 
 
 def _is_until_use_node(node: ast.With) -> bool:
-    """Check if the node matches ``with defer_imports.until_use``."""
+    """Check if the node matches ``with defer_imports.until_use: ...``."""
 
     return len(node.items) == 1 and (
         isinstance(node.items[0].context_expr, ast.Attribute)
@@ -278,9 +230,6 @@ def _is_until_use_node(node: ast.With) -> bool:
     )
 
 
-# TODO: Make the variable names that this uses more "hygienic".
-# Maybe add a prefix similar to pytest with "@py_", e.g. "@di_" instead of just "@"?
-# TODO: Finish making this accurately create/update node location information.
 class _DeferredInstrumenter:
     """AST transformer that instruments imports within ``with defer_imports.until_use: ...`` blocks.
 
@@ -294,10 +243,10 @@ class _DeferredInstrumenter:
 
     # PYUPDATE: Ensure visit and generic_visit are consistent with upstream, aside from our customizations.
 
-    def __init__(self, data: _SourceData, filepath: _ModulePath = "<unknown>", *, module_level: bool = False) -> None:
-        self.data: _SourceData = data
+    def __init__(self, source: _SourceData, filepath: _ModulePath = "<unknown>", *, module_level: bool = False) -> None:
+        self.source: _SourceData = source
         self.filepath: _ModulePath = filepath
-        self.module_level: bool = module_level
+        self.rewrite_whole_module: bool = module_level
 
         self.escape_hatch_depth: int = 0
         self.did_any_instrumentation: bool = False
@@ -330,18 +279,14 @@ class _DeferredInstrumenter:
         visit_TryStar = _visit_eager_import_block
 
     def _get_node_location(self, node: ast.stmt):  # noqa: ANN202 # Version-dependent and too verbose.
-        """Get the location context for a node.
-
-        Notes
-        -----
-        The return value is meant to serve as the details argument for SyntaxError [1]_.
+        """Get a node's location context in a form compatible with `SyntaxError`'s details argument [1].
 
         References
         ----------
         .. [1] https://docs.python.org/3.14/library/exceptions.html#SyntaxError
         """
 
-        source = self.data if isinstance(self.data, str) else _decode_source(self.data)
+        source = self.source if isinstance(self.source, str) else _decode_source(self.source)
         text = ast.get_source_segment(source, node, padded=True)
         context = (str(self.filepath), node.lineno, node.col_offset + 1, text)
         if sys.version_info >= (3, 10):  # pragma: >=3.10 cover
@@ -350,10 +295,10 @@ class _DeferredInstrumenter:
         return context
 
     @staticmethod
-    def _create_import_name_replacement(name: str) -> ast.If:
+    def _create_import_name_replacement(name: str, lineno: int) -> ast.If:
         """Create an AST for changing the name of a variable in locals if the variable is a defer_imports proxy.
 
-        The resulting node is roughly equivalent to the following::
+        The resulting node is roughly equivalent to the following code if unparsed::
 
             if {name}.__class__ is _DeferredImportProxy:
                 temp_proxy = local_ns[_DeferredImportKey("{name}", temp_proxy)] = local_ns.pop("{name}")
@@ -362,37 +307,53 @@ class _DeferredInstrumenter:
         if "." in name:
             name = name.partition(".")[0]
 
+        loc_info: _ASTLocation = {"lineno": lineno, "col_offset": 0, "end_lineno": lineno, "end_col_offset": 0}
+
         return ast.If(
             test=ast.Compare(
-                left=ast.Attribute(value=ast.Name(name, ctx=ast.Load()), attr="__class__", ctx=ast.Load()),
+                left=ast.Attribute(ast.Name(name, ctx=ast.Load(), **loc_info), "__class__", ctx=ast.Load(), **loc_info),
                 ops=[ast.Is()],
-                comparators=[ast.Name(_PROXY_CLS_NAME, ctx=ast.Load())],
+                comparators=[ast.Name(_PROXY_CLS_NAME, ctx=ast.Load(), **loc_info)],
+                **loc_info,
             ),
             body=[
                 ast.Assign(
                     targets=[
-                        ast.Name(_TEMP_PROXY_NAME, ctx=ast.Store()),
+                        ast.Name(_TEMP_PROXY_NAME, ctx=ast.Store(), **loc_info),
                         ast.Subscript(
-                            value=ast.Name(_LOCAL_NS_NAME, ctx=ast.Load()),
+                            value=ast.Name(_LOCAL_NS_NAME, ctx=ast.Load(), **loc_info),
                             slice=ast.Call(
-                                func=ast.Name(_KEY_CLS_NAME, ctx=ast.Load()),
-                                args=[ast.Constant(name), ast.Name(_TEMP_PROXY_NAME, ctx=ast.Load())],
+                                func=ast.Name(_KEY_CLS_NAME, ctx=ast.Load(), **loc_info),
+                                args=[
+                                    ast.Constant(name, **loc_info),
+                                    ast.Name(_TEMP_PROXY_NAME, ctx=ast.Load(), **loc_info),
+                                ],
                                 keywords=[],
+                                **loc_info,
                             ),
                             ctx=ast.Store(),
+                            **loc_info,
                         ),
                     ],
                     value=ast.Call(
-                        func=ast.Attribute(value=ast.Name(_LOCAL_NS_NAME, ctx=ast.Load()), attr="pop", ctx=ast.Load()),
-                        args=[ast.Constant(name)],
+                        func=ast.Attribute(
+                            value=ast.Name(_LOCAL_NS_NAME, ctx=ast.Load(), **loc_info),
+                            attr="pop",
+                            ctx=ast.Load(),
+                            **loc_info,
+                        ),
+                        args=[ast.Constant(name, **loc_info)],
                         keywords=[],
+                        **loc_info,
                     ),
+                    **loc_info,
                 )
             ],
             orelse=[],
+            **loc_info,
         )
 
-    def _validate_until_use_body(self, nodes: list[ast.stmt]) -> TypeGuard[list[t.Union[ast.Import, ast.ImportFrom]]]:
+    def _validate_until_use_body(self, nodes: list[ast.stmt]) -> list[t.Union[ast.Import, ast.ImportFrom]]:
         """Validate that the statements within a `defer_imports.until_use` block are instrumentable."""
 
         for node in nodes:
@@ -404,7 +365,7 @@ class _DeferredInstrumenter:
                 msg = "import * not allowed in with defer_imports.until_use blocks"
                 raise SyntaxError(msg, self._get_node_location(node))
 
-        return True
+        return nodes  # pyright: ignore [reportReturnType]
 
     def _substitute_import_keys(self, import_nodes: list[t.Union[ast.Import, ast.ImportFrom]]) -> list[ast.stmt]:
         """Instrument a *non-empty* list of imports.
@@ -417,26 +378,39 @@ class _DeferredInstrumenter:
 
         self.did_any_instrumentation = True
 
-        new_nodes: list[ast.stmt] = []
+        lineno = import_nodes[0].lineno
+        loc_info: _ASTLocation = {"lineno": lineno, "col_offset": 0, "end_lineno": lineno, "end_col_offset": 0}
 
         # Start with some helper variables.
-        # A reference to locals() to avoid calling locals() repeatedly.
-        new_nodes.append(
+        new_nodes: list[ast.stmt] = [
+            # A reference to locals() to avoid calling locals() repeatedly.
             ast.Assign(
-                targets=[ast.Name(_LOCAL_NS_NAME, ctx=ast.Store())],
-                value=ast.Call(func=ast.Name("locals", ctx=ast.Load()), args=[], keywords=[]),
-            )
-        )
-        # A reference to the current proxy being "fixed".
-        new_nodes.append(ast.Assign([ast.Name(_TEMP_PROXY_NAME, ctx=ast.Store())], ast.Constant(None)))
+                targets=[ast.Name(_LOCAL_NS_NAME, ctx=ast.Store(), **loc_info)],
+                value=ast.Call(func=ast.Name("locals", ctx=ast.Load(), **loc_info), args=[], keywords=[], **loc_info),
+                **loc_info,
+            ),
+            # A reference to the current proxy being "fixed".
+            ast.Assign(
+                targets=[ast.Name(_TEMP_PROXY_NAME, ctx=ast.Store(), **loc_info)],
+                value=ast.Constant(None, **loc_info),
+                **loc_info,
+            ),
+        ]
 
         # Add the imports + namespace adjustments.
         for node in import_nodes:
             new_nodes.append(node)
-            new_nodes.extend(self._create_import_name_replacement(alias.asname or alias.name) for alias in node.names)
+            new_nodes.extend(
+                self._create_import_name_replacement(alias.asname or alias.name, node.lineno) for alias in node.names
+            )
 
-        # Clean up the helper variables.
-        new_nodes.append(ast.Delete([ast.Name(name, ctx=ast.Del()) for name in (_TEMP_PROXY_NAME, _LOCAL_NS_NAME)]))
+        # Clean up the helper variables via deletion.
+        new_nodes.append(
+            ast.Delete(
+                targets=[ast.Name(name, ctx=ast.Del(), **loc_info) for name in (_TEMP_PROXY_NAME, _LOCAL_NS_NAME)],
+                **loc_info,
+            )
+        )
 
         return new_nodes
 
@@ -459,10 +433,8 @@ class _DeferredInstrumenter:
         new_ctx_expr = ast.copy_location(ast.Name(_ACTUAL_CTX_NAME, ctx=ast.Load()), node.items[0].context_expr)
         node.items[0].context_expr = new_ctx_expr
 
-        # TODO: Assert can be optimized out. Find a different way of making validating + typeguard work.
-        assert self._validate_until_use_body(node.body)
-        node.body = self._substitute_import_keys(node.body)
-        return ast.fix_missing_locations(node)
+        node.body = self._substitute_import_keys(self._validate_until_use_body(node.body))
+        return node
 
     def visit_Module(self, node: ast.Module) -> ast.AST:
         """Insert imports and cleanup necessary to make `defer_imports.until_use` work properly.
@@ -478,8 +450,8 @@ class _DeferredInstrumenter:
             return node
 
         # First, get past the module docstring and __future__ imports.
+        # Inserting anything before those prevents them from having their intended effects.
         expect_docstring = True
-
         position = 0
         for position, sub in enumerate(node.body):  # noqa: B007
             if (
@@ -496,103 +468,24 @@ class _DeferredInstrumenter:
 
         # Then, add necessary defer_imports import.
         lineno = position + 1
-        cumm_col_offset = len(f"from {__spec__.name} import ")
-        internals_aliases: list[ast.alias] = []
+        loc_info: _ASTLocation = {"lineno": lineno, "col_offset": 0, "end_lineno": lineno, "end_col_offset": 0}
+        aliases = [ast.alias(name, asname, **loc_info) for name, asname in zip(_INTERNALS_NAMES, _INTERNALS_ASNAMES)]
+        node.body.insert(position, ast.ImportFrom(module=__spec__.name, names=aliases, level=0, **loc_info))
 
-        for name, asname in zip(_INTERNALS_NAMES, _INTERNALS_ASNAMES):
-            new_alias = ast.alias(name, asname, lineno=lineno, col_offset=cumm_col_offset, end_lineno=lineno)
-            cumm_col_offset += len(name) + 4 + len(asname)  # Account for " as " with 4.
-            new_alias.end_col_offset = cumm_col_offset
-            cumm_col_offset += 2  # Account for ", ".
-            internals_aliases.append(new_alias)
-
-        cumm_col_offset -= 2  # Discard nonexistent final ", ".
-
-        internals_import = ast.ImportFrom(
-            __spec__.name,
-            internals_aliases,
-            0,
-            lineno=lineno,
-            col_offset=0,
-            end_lineno=lineno,
-            end_col_offset=cumm_col_offset,
-        )
-        node.body.insert(position, internals_import)
-
-        for child in node.body[position + 1 :]:
-            ast.increment_lineno(child)
-
-        # Finally, clean up the namespace.
-        lineno = node.body[-1].lineno
-        cumm_col_offset = 4  # Account for "del ".
-        del_targets: list[ast.expr] = []
-
-        for asname in _INTERNALS_ASNAMES:
-            del_target = ast.Name(asname, ctx=ast.Del(), lineno=lineno, col_offset=cumm_col_offset, end_lineno=lineno)
-            cumm_col_offset += len(asname)
-            del_target.end_col_offset = cumm_col_offset
-            cumm_col_offset += 2  # Account for ", ".
-            del_targets.append(del_target)
-
-        cumm_col_offset -= 2  # Discard nonexistent final ", ".
-
-        node.body.append(
-            ast.Delete(del_targets, lineno=lineno, col_offset=0, end_lineno=lineno, end_col_offset=cumm_col_offset)
-        )
+        # Finally, clean up the namespace via deletion.
+        loc_info["lineno"] = loc_info["end_lineno"] = node.body[-1].lineno
+        names: list[ast.expr] = [ast.Name(asname, ctx=ast.Del(), **loc_info) for asname in _INTERNALS_ASNAMES]
+        node.body.append(ast.Delete(targets=names, **loc_info))
 
         return node
 
-    @staticmethod
-    def _is_defer_imports_import(node: t.Union[ast.Import, ast.ImportFrom]) -> bool:
-        """Check if the given import node imports from `defer_imports`."""
-
-        # TODO: Is this actually needed?
-
-        if isinstance(node, ast.Import):
-            return any(alias.name.partition(".")[0] == "defer_imports" for alias in node.names)
-        else:
-            return node.module is not None and node.module.partition(".")[0] == "defer_imports"
-
-    def _is_import_to_instrument(self, value: object) -> TypeGuard[t.Union[ast.Import, ast.ImportFrom]]:
-        return (
-            # Only for import nodes without wildcards.
-            isinstance(value, (ast.Import, ast.ImportFrom))
-            and value.names[0].name != "*"
-            # Only outside of escape hatch blocks.
-            and (self.escape_hatch_depth == 0 and not self._is_defer_imports_import(value))
-        )
-
     def _wrap_import_stmts(self, nodes: list[t.Union[ast.Import, ast.ImportFrom]]) -> ast.With:
-        """Wrap consecutive import nodes within a list of statements using a `defer_imports.until_use` block and
-        instrument them.
-
-        The first node must be an import node.
-        """
+        """Wrap a list of import nodes with a `defer_imports.until_use` block and instrument them."""
 
         lineno = nodes[0].lineno
-        end_col_offset = 5 + len(_ACTUAL_CTX_NAME)  # Account for "with ".
-
-        instrumented_nodes = [_increment_location(node, 0, 4) for node in self._substitute_import_keys(nodes)]
-
-        return ast.With(
-            [
-                ast.withitem(
-                    ast.Name(
-                        _ACTUAL_CTX_NAME,
-                        ast.Load(),
-                        lineno=lineno,
-                        col_offset=5,  # Account for "with ".
-                        end_lineno=lineno,
-                        end_col_offset=end_col_offset,
-                    )
-                )
-            ],
-            instrumented_nodes,
-            lineno=lineno,
-            col_offset=0,
-            end_lineno=lineno,
-            end_col_offset=end_col_offset + 1,  # Account for ":".
-        )
+        loc_info: _ASTLocation = {"lineno": lineno, "col_offset": 0, "end_lineno": lineno, "end_col_offset": 0}
+        with_items = [ast.withitem(ast.Name(_ACTUAL_CTX_NAME, ctx=ast.Load(), **loc_info))]
+        return ast.With(items=with_items, body=self._substitute_import_keys(nodes), **loc_info)
 
     def generic_visit(self, node: ast.AST) -> ast.AST:  # noqa: PLR0912
         """Called if no explicit visitor function exists for a node.
@@ -608,8 +501,14 @@ class _DeferredInstrumenter:
 
                 for value in old_value:  # pyright: ignore [reportUnknownVariableType]
                     if isinstance(value, ast.AST):
-                        if self.module_level:
-                            if self._is_import_to_instrument(value):
+                        if self.rewrite_whole_module:
+                            if (
+                                # Only for import nodes without wildcards.
+                                isinstance(value, (ast.Import, ast.ImportFrom))
+                                and value.names[0].name != "*"
+                                # Only outside of escape hatch blocks.
+                                and (self.escape_hatch_depth == 0)
+                            ):
                                 start_idx += 1
                             elif start_idx > 0:
                                 new_values[-start_idx:] = [self._wrap_import_stmts(new_values[-start_idx:])]
@@ -625,7 +524,7 @@ class _DeferredInstrumenter:
 
                     new_values.append(value)
 
-                if self.module_level and (start_idx > 0):
+                if self.rewrite_whole_module and (start_idx > 0):
                     new_values[-start_idx:] = [self._wrap_import_stmts(new_values[-start_idx:])]
 
                 old_value[:] = new_values
@@ -645,7 +544,7 @@ class _DeferredFileLoader(SourceFileLoader):
 
     def __init__(self, *args: t.Any, **kwargs: t.Any) -> None:
         super().__init__(*args, **kwargs)
-        self.defer_module_level: bool = False
+        self.defer_whole_module: bool = False
 
     def get_data(self, path: str) -> bytes:
         """Return the data from `path` as raw bytes.
@@ -656,11 +555,10 @@ class _DeferredFileLoader(SourceFileLoader):
         ------
         OSError
             If the path points to a bytecode file with an invalid `defer_imports`-specific header.
+            `importlib.machinery.SourceLoader.get_code()` expects this error from this function.
 
         Notes
         -----
-        `importlib._boostrap_external.SourceLoader.get_code` expects this method to potentially raise `OSError` [1]_.
-
         Another option is to monkeypatch `importlib.util.cache_from_source`, as beartype [2]_ and typeguard do, but that
         seems excessive for this use case.
 
@@ -724,10 +622,10 @@ class _DeferredFileLoader(SourceFileLoader):
 
         if data:
             orig_tree = ast.parse(data, path, "exec")
-            if self.defer_module_level or any(
+            if self.defer_whole_module or any(
                 (isinstance(node, ast.With) and _is_until_use_node(node)) for node in ast.walk(orig_tree)
             ):
-                instrumenter = _DeferredInstrumenter(data, path, module_level=self.defer_module_level)
+                instrumenter = _DeferredInstrumenter(data, path, module_level=self.defer_whole_module)
                 new_tree = instrumenter.visit(orig_tree)
                 return super().source_to_code(new_tree, path, _optimize=_optimize)  # pyright: ignore # noqa: PGH003
 
@@ -737,7 +635,7 @@ class _DeferredFileLoader(SourceFileLoader):
         """Execute the module (while setting and maintaining relevant state)."""
 
         if (spec := module.__spec__) is not None and spec.loader_state is not None:
-            self.defer_module_level = spec.loader_state["defer_module_level"]
+            self.defer_whole_module = spec.loader_state["defer_whole_module"]
 
         return super().exec_module(module)
 
@@ -782,12 +680,7 @@ class _DeferredPathFinder(PathFinder):
     ) -> t.Optional[ModuleSpec]:
         """Try to find a spec for `fullname` on sys.path or `path`.
 
-        If a spec is found, its loader is overriden and some deferral-related state is attached.
-
-        Notes
-        -----
-        This utilizes `ModuleSpec.loader_state` to pass the deferral configuration to the loader. loader_state is
-        under-documented [1]_, but it is meant to be used for this kind of thing [2]_.
+        If a spec is found, its loader is overriden and some state is passed on via `ModuleSpec.loader_state` [1]_ [2]_.
 
         References
         ----------
@@ -803,14 +696,14 @@ class _DeferredPathFinder(PathFinder):
             config = _current_defer_config.get(None)
 
             if config is not None:
-                defer_module_level = cls._get_instrumentation_level(fullname, config)
+                defer_whole_module = cls._get_instrumentation_level(fullname, config)
                 loader_class = cls._get_loader_class(config)
             else:
-                defer_module_level = False
+                defer_whole_module = False
                 loader_class = _DeferredFileLoader
 
             spec.loader = loader_class(spec.loader.name, spec.loader.path)
-            spec.loader_state = {"defer_module_level": defer_module_level}
+            spec.loader_state = {"defer_whole_module": defer_whole_module}
 
         return spec
 
@@ -917,7 +810,7 @@ def install_import_hook(
         same priority as `module_names`. If no module names are given, this has no effect.
     loader_class: _LoaderInit, optional
         An import loader class for `defer_imports` to use instead of the default machinery. If supplied, it is assumed to
-        have an initialization signature matching ``(fullname: str, path: str) -> None``.
+        have an initialization signature matching ``(fullname: str, path: str) -> Loader``.
 
     Returns
     -------
@@ -1102,14 +995,16 @@ class _DeferredImportKey(str):
 
 def _deferred___import__(
     name: str,
-    globals: t.MutableMapping[str, t.Any],
-    locals: t.MutableMapping[str, t.Any],
-    fromlist: t.Optional[t.Sequence[str]] = None,
+    globals: t.Optional[t.MutableMapping[str, t.Any]] = None,
+    locals: t.Optional[t.MutableMapping[str, t.Any]] = None,
+    fromlist: t.Optional[t.Sequence[str]] = (),
     level: int = 0,
 ) -> t.Any:
     """An limited replacement for `__import__` that supports deferred imports by returning proxies."""
 
     fromlist = fromlist or ()
+    globals = globals if (globals is not None) else {}  # noqa: A001
+    locals = locals if (locals is not None) else {}  # noqa: A001
 
     package = _calc___package__(globals) if (level != 0) else None
     _sanity_check(name, package, level)

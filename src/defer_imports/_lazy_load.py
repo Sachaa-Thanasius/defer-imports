@@ -78,13 +78,12 @@ class _LazyModuleType(types.ModuleType):
 
         __spec__: ModuleSpec = object.__getattribute__(self, "__spec__")
 
-        # NOTE: We want to avoid the importlib machinery unnecessarily causing a load
-        # when it checks a lazy module in sys.modules to see if it is initialized
-        # (The relevant code is in importlib._bootstrap._find_and_load()). Since the machinery determines that
-        # via an attribute on module.__spec__, return the spec without loading.
+        # NOTE: We want to avoid the importlib machinery unnecessarily causing a load when it checks a lazy module in
+        # sys.modules to see if it is initialized (the relevant code is in importlib._bootstrap._find_and_load()).
+        # Since the machinery determines that via an attribute on module.__spec__, return the spec without loading.
         #
-        # This does mean a user can get __spec__ from a lazy module and modify it without causing a load.
-        # Beware: the consequences are unknown.
+        # This does make our lazy module a leak abstraction: a user can get __spec__ from a lazy module and modify it
+        # without causing a load. However, it's the best we can do at the moment.
         #
         # Extra
         # -----

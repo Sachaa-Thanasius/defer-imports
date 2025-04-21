@@ -199,7 +199,7 @@ typeCheckingMode = "strict"
 
 defineConstant = { "TYPE_CHECKING" = true } # Just in case.
 
-reportPrivateUsage = "information"                  # We're the library.
+reportPrivateUsage = "none"                         # We're the library.
 reportUnnecessaryIsInstance = "information"         # Verify user input.
 reportUninitializedInstanceVariable = "information" # Occasionally nice as a checkup, but otherwise noisy.
 reportCallInDefaultInitializer = "warning"
