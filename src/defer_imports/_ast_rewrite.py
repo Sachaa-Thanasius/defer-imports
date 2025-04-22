@@ -1,5 +1,6 @@
 # Some of the code and comments below is adapted from
 # https://github.com/python/cpython/blob/49234c065cf2b1ea32c5a3976d834b1d07b9b831/Lib/importlib/_bootstrap.py
+# and https://github.com/python/cpython/blob/49234c065cf2b1ea32c5a3976d834b1d07b9b831/Lib/importlib/_bootstrap_external.py
 # with the original copyright being:
 # Copyright (c) 2001 Python Software Foundation; All Rights Reserved
 #
@@ -12,11 +13,10 @@ from __future__ import annotations
 import builtins
 import contextvars
 import io
-import os  # noqa: F401 # Used in type alias.
+import os  # noqa: F401 # Used in a type alias.
 import sys
-import threading
 import types
-from importlib.machinery import BYTECODE_SUFFIXES, ModuleSpec, PathFinder, SourceFileLoader
+from importlib.machinery import BYTECODE_SUFFIXES, SOURCE_SUFFIXES, FileFinder, ModuleSpec, SourceFileLoader
 
 from . import __version__, _lazy_load
 
@@ -24,7 +24,8 @@ from . import __version__, _lazy_load
 # PYUPDATE: py3.14 - importlib.abc might be cheap enough to eagerly import.
 with _lazy_load.until_module_use:
     import ast
-    import importlib.abc  # noqa: F401 # Used in type alias.
+    import importlib.abc  # noqa: F401 # Used in a type alias.
+    import threading
     import tokenize
     import typing as t
     import warnings
@@ -75,8 +76,9 @@ else:  # pragma: <3.12 cover
 # ============================================================================
 # region -------- Vendored helpers --------
 #
-# These are adapted from importlib._bootstrap and importlib.util to avoid
-# depending on private APIs and allow changes.
+# These are adapted from importlib._bootstrap and
+# importlib._bootstrap_external to avoid depending on private APIs and allow
+# changes.
 #
 # PYUPDATE: Ensure these are consistent with upstream, aside from our
 # customizations.
@@ -150,9 +152,9 @@ def _calc___package__(globals: t.MutableMapping[str, t.Any]) -> t.Optional[str]:
         return package
 
 
-# Adapted from importlib.util.
+# Adapted from importlib._bootstrap_external.
 # Changes:
-# - Don't import tokenize inline, since that could cause issues while our module spec finder is on sys.meta_path.
+# - Don't import tokenize inline.
 # - Rearrange slightly to allow cleaner usage of type-checker directives.
 #
 #     - An aside about the function's typing:
@@ -184,9 +186,7 @@ def _decode_source(source_bytes: ReadableBuffer) -> str:  # pragma: no cover
 
 
 # ============================================================================
-# region -------- Compile-time magic --------
-#
-# The AST transformer, import hook machinery, and import hook API.
+# region -------- AST transformer --------
 # ============================================================================
 
 
@@ -200,16 +200,18 @@ _BYTECODE_HEADER = f"defer_imports{__version__}".encode()
 """Custom header for defer_imports-instrumented bytecode files. Differs for every version."""
 
 
-# We make our generated variables more hygienic by prefixing their names with "_@di_".
-# This has a few positives:
+# NOTE: We make our generated variables more hygienic by prefixing their names with "_@di_".
+# This has a few benefits:
+#
 # 1. The variables can't be accidentally accessed by regular user code (that doesn't programmatically access namespaces
 #    via locals/globals/vars), since "@" isn't a valid symbol in identifiers. pytest does something similar.
 # 2. The variables are somewhat namespaced with "di" in case other generated code is added by third parties.
 #    pytest does something similiar.
 # 3. The variables start with an underscore so that code that programmatically accesses the global namespace
 #    during module execution, but avoids symbols starting with an underscore, won't pick it up.
-#     - An example of a common pattern that meets this criteria:
+#     - An example of a common pattern in the standard library that meets this criteria:
 #       __all__ = [name for name in globals() if name[:1] != "_"]  # noqa: ERA001
+#    TODO: Do we actually want to do this one? Surely it's bound to backfire in converse use cases.
 _HYGIENE_PREFIX = "_@di_"
 
 _INTERNALS_NAMES = ("_DeferredImportKey", "_DeferredImportProxy", "_actual_until_use")
@@ -237,8 +239,7 @@ class _DeferredInstrumenter:
 
     Notes
     -----
-    The transformer doesn't subclass `ast.NodeTransformer` but instead vendors its logic to avoid the upfront import
-    cost of `ast`.
+    This doesn't subclass `ast.NodeTransformer` but instead vendors its logic to avoid the upfront import cost of `ast`.
     """
 
     # PYUPDATE: Ensure visit and generic_visit are consistent with upstream, aside from our customizations.
@@ -257,6 +258,65 @@ class _DeferredInstrumenter:
         method = f"visit_{node.__class__.__name__}"
         visitor = getattr(self, method, self.generic_visit)
         return visitor(node)
+
+    def _wrap_import_stmts(self, nodes: list[t.Union[ast.Import, ast.ImportFrom]]) -> ast.With:
+        """Wrap a list of import nodes with a `defer_imports.until_use` block and instrument them."""
+
+        lineno = nodes[0].lineno
+        loc_info: _ASTLocation = {"lineno": lineno, "col_offset": 0, "end_lineno": lineno, "end_col_offset": 0}
+        with_items = [ast.withitem(ast.Name(_ACTUAL_CTX_NAME, ctx=ast.Load(), **loc_info))]
+        return ast.With(items=with_items, body=self._substitute_import_keys(nodes), **loc_info)
+
+    def generic_visit(self, node: ast.AST) -> ast.AST:  # noqa: PLR0912
+        """Called if no explicit visitor function exists for a node.
+
+        This differs from the regular generic_visit by conditionally intercepting global sequences of import statements
+        to wrap them in ``with defer_imports.until_use`` blocks.
+        """
+
+        for field, old_value in ast.iter_fields(node):
+            if isinstance(old_value, list):
+                new_values: list[t.Any] = []
+                start_idx = 0
+
+                for value in old_value:  # pyright: ignore [reportUnknownVariableType]
+                    if isinstance(value, ast.AST):
+                        if self.rewrite_whole_module:
+                            if (
+                                # Only for import nodes without wildcards.
+                                isinstance(value, (ast.Import, ast.ImportFrom))
+                                and value.names[0].name != "*"
+                                # Only outside of escape hatch blocks.
+                                and (self.escape_hatch_depth == 0)
+                            ):
+                                start_idx += 1
+                            elif start_idx > 0:
+                                new_values[-start_idx:] = [self._wrap_import_stmts(new_values[-start_idx:])]
+                                start_idx = 0
+
+                        value = self.visit(value)  # noqa: PLW2901
+
+                        if value is None:
+                            continue
+                        if not isinstance(value, ast.AST):
+                            new_values.extend(value)
+                            continue
+
+                    new_values.append(value)
+
+                if self.rewrite_whole_module and (start_idx > 0):
+                    new_values[-start_idx:] = [self._wrap_import_stmts(new_values[-start_idx:])]
+
+                old_value[:] = new_values
+
+            elif isinstance(old_value, ast.AST):
+                new_node = self.visit(old_value)
+                if new_node is None:
+                    delattr(node, field)
+                else:
+                    setattr(node, field, new_node)
+
+        return node
 
     def _visit_scope(self, node: ast.AST) -> ast.AST:
         """Avoid visiting non-global scopes."""
@@ -479,64 +539,16 @@ class _DeferredInstrumenter:
 
         return node
 
-    def _wrap_import_stmts(self, nodes: list[t.Union[ast.Import, ast.ImportFrom]]) -> ast.With:
-        """Wrap a list of import nodes with a `defer_imports.until_use` block and instrument them."""
 
-        lineno = nodes[0].lineno
-        loc_info: _ASTLocation = {"lineno": lineno, "col_offset": 0, "end_lineno": lineno, "end_col_offset": 0}
-        with_items = [ast.withitem(ast.Name(_ACTUAL_CTX_NAME, ctx=ast.Load(), **loc_info))]
-        return ast.With(items=with_items, body=self._substitute_import_keys(nodes), **loc_info)
+# endregion
 
-    def generic_visit(self, node: ast.AST) -> ast.AST:  # noqa: PLR0912
-        """Called if no explicit visitor function exists for a node.
 
-        This differs from the regular generic_visit by conditionally intercepting global sequences of import statements
-        to wrap them in ``with defer_imports.until_use`` blocks.
-        """
-
-        for field, old_value in ast.iter_fields(node):
-            if isinstance(old_value, list):
-                new_values: list[t.Any] = []
-                start_idx = 0
-
-                for value in old_value:  # pyright: ignore [reportUnknownVariableType]
-                    if isinstance(value, ast.AST):
-                        if self.rewrite_whole_module:
-                            if (
-                                # Only for import nodes without wildcards.
-                                isinstance(value, (ast.Import, ast.ImportFrom))
-                                and value.names[0].name != "*"
-                                # Only outside of escape hatch blocks.
-                                and (self.escape_hatch_depth == 0)
-                            ):
-                                start_idx += 1
-                            elif start_idx > 0:
-                                new_values[-start_idx:] = [self._wrap_import_stmts(new_values[-start_idx:])]
-                                start_idx = 0
-
-                        value = self.visit(value)  # noqa: PLW2901
-
-                        if value is None:
-                            continue
-                        if not isinstance(value, ast.AST):
-                            new_values.extend(value)
-                            continue
-
-                    new_values.append(value)
-
-                if self.rewrite_whole_module and (start_idx > 0):
-                    new_values[-start_idx:] = [self._wrap_import_stmts(new_values[-start_idx:])]
-
-                old_value[:] = new_values
-
-            elif isinstance(old_value, ast.AST):
-                new_node = self.visit(old_value)
-                if new_node is None:
-                    delattr(node, field)
-                else:
-                    setattr(node, field, new_node)
-
-        return node
+# ============================================================================
+# region -------- importlib import hooks --------
+#
+# The module loader, module finder, and import hook API to attach those to the
+# import system.
+# ============================================================================
 
 
 class _DeferredFileLoader(SourceFileLoader):
@@ -632,16 +644,18 @@ class _DeferredFileLoader(SourceFileLoader):
         return super().source_to_code(data, path, _optimize=_optimize)  # pyright: ignore # noqa: PGH003
 
     def exec_module(self, module: types.ModuleType) -> None:
-        """Execute the module (while setting and maintaining relevant state)."""
+        """Execute the module."""
 
+        # This state is needed for self.source_to_code().
         if (spec := module.__spec__) is not None and spec.loader_state is not None:
             self.defer_whole_module = spec.loader_state["defer_whole_module"]
 
         return super().exec_module(module)
 
 
-class _DeferredPathFinder(PathFinder):
-    _original_pathfinder: t.ClassVar[type[PathFinder]]
+class _DeferredFileFinder(FileFinder):
+    def __repr__(self):
+        return f"{self.__class__.__name__}({self.path!r})"
 
     @staticmethod
     def _get_loader_class(config: _DeferConfig) -> _LoaderInit:
@@ -671,16 +685,16 @@ class _DeferredPathFinder(PathFinder):
 
         return config.recursive and any(fullname.startswith(f"{mod}.") for mod in config.module_names)
 
-    @classmethod
-    def find_spec(
-        cls,
-        fullname: str,
-        path: t.Optional[t.Sequence[str]] = None,
-        target: t.Optional[types.ModuleType] = None,
-    ) -> t.Optional[ModuleSpec]:
-        """Try to find a spec for `fullname` on sys.path or `path`.
+    def find_spec(self, fullname: str, target: t.Optional[types.ModuleType] = None) -> t.Optional[ModuleSpec]:
+        """Try to find a spec for the specified module.
 
-        If a spec is found, its loader is overriden and some state is passed on via `ModuleSpec.loader_state` [1]_ [2]_.
+        If a spec is found, its loader may be overriden and some state may be passed on via
+        `ModuleSpec.loader_state` [1]_ [2]_.
+
+        Returns
+        -------
+        t.Optional[ModuleSpec]
+            The matching spec, or `None` if not found.
 
         References
         ----------
@@ -688,7 +702,7 @@ class _DeferredPathFinder(PathFinder):
         .. [2] https://docs.python.org/3/library/importlib.html#importlib.machinery.ModuleSpec.loader_state
         """
 
-        spec = super().find_spec(fullname, path, target)
+        spec = super().find_spec(fullname, target)
 
         if spec is not None and isinstance(spec.loader, SourceFileLoader):
             # NOTE: We're locking in defer_imports configuration for this module between finding it and loading it.
@@ -696,8 +710,8 @@ class _DeferredPathFinder(PathFinder):
             config = _current_defer_config.get(None)
 
             if config is not None:
-                defer_whole_module = cls._get_instrumentation_level(fullname, config)
-                loader_class = cls._get_loader_class(config)
+                defer_whole_module = self._get_instrumentation_level(fullname, config)
+                loader_class = self._get_loader_class(config)
             else:
                 defer_whole_module = False
                 loader_class = _DeferredFileLoader
@@ -706,6 +720,10 @@ class _DeferredPathFinder(PathFinder):
             spec.loader_state = {"defer_whole_module": defer_whole_module}
 
         return spec
+
+
+_LOADER_DETAILS = (_DeferredFileLoader, SOURCE_SUFFIXES)
+_PATH_HOOK = _DeferredFileFinder.path_hook(_LOADER_DETAILS)
 
 
 _current_defer_config: contextvars.ContextVar[_DeferConfig] = contextvars.ContextVar("_current_defer_config")
@@ -741,9 +759,15 @@ class _ImportHookContext:
     state and uninstall defer_import's import meta path finder.
     """
 
-    def __init__(self, _config_ctx_tok: contextvars.Token[_DeferConfig], _uninstall_after: bool) -> None:
+    def __init__(
+        self,
+        _config_ctx_tok: contextvars.Token[_DeferConfig],
+        _uninstall_after: bool,
+        file_finder_paths: set[str],
+    ) -> None:
         self._tok = _config_ctx_tok
         self._uninstall_after = _uninstall_after
+        self._file_finder_paths = file_finder_paths
 
     def __enter__(self) -> Self:
         return self
@@ -765,17 +789,21 @@ class _ImportHookContext:
             del self._tok
 
     def uninstall(self) -> None:
-        """Attempt to replace the custom meta path finder in sys.meta_path with the original.
-
-        If the custom finder is already gone, does nothing.
-        """
+        """Attempt to remove the custom path hook in `sys.path_hook` and undo finder monkeypatching."""
 
         try:
-            finder_index = sys.meta_path.index(_DeferredPathFinder)
+            sys.path_hooks.remove(_PATH_HOOK)
         except ValueError:
             pass
-        else:
-            sys.meta_path[finder_index] = _DeferredPathFinder._original_pathfinder
+
+        if self._file_finder_paths:
+            for path, finder in sys.path_importer_cache.items():
+                if (
+                    path in self._file_finder_paths
+                    and (finder is not None)
+                    and (finder.__class__ is _DeferredFileFinder)
+                ):
+                    finder.__class__ = FileFinder
 
 
 def install_import_hook(
@@ -823,19 +851,36 @@ def install_import_hook(
         msg = "module_names should be a sequence of strings, not a string."
         raise TypeError(msg)
 
-    if _DeferredPathFinder not in sys.meta_path:
+    file_finder_paths: set[str] = set()
+
+    if _PATH_HOOK not in sys.path_hooks:
         try:
-            path_finder_index = sys.meta_path.index(PathFinder)
-        except ValueError:
-            sys.meta_path.insert(0, _DeferredPathFinder)
+            file_finder_index = next(
+                i for i, hook in enumerate(sys.path_hooks) if hook.__name__ == "path_hook_for_FileFinder"
+            )
+        except StopIteration:
+            sys.path_hooks.append(_PATH_HOOK)
         else:
-            # We know the finder class at this index is PathFinder.
-            _DeferredPathFinder._original_pathfinder = sys.meta_path[path_finder_index]  # pyright: ignore [reportAttributeAccessIssue]
-            sys.meta_path[path_finder_index] = _DeferredPathFinder
+            sys.path_hooks.insert(file_finder_index, _PATH_HOOK)
+
+        # HACK: We do some monkeypatching here so that the cached finders for sys.path entries use the right finder
+        # class. This should be safe; _DeferredFinder is a subclass of FileFinder and has the same instance state.
+        #
+        # Alternatives:
+        # - Create and insert a new PathFinder subclass into sys.meta_path, or patch the existing one.
+        #   That would be a bigger monkeypatch, but it's the route that typeguard takes.
+        # - Delete the sys.path_importer_cache entries instead of monkeypatching them.
+        #   This is the docs's recommendation and is technically more correct, but it causes a big slowdown on startup.
+        #
+        # TODO: Determine if this is *still* overkill. It would be more useful in the .pth file case.
+        for path, finder in sys.path_importer_cache.items():
+            if (finder is not None) and (finder.__class__ is FileFinder):
+                file_finder_paths.add(path)
+                finder.__class__ = _DeferredFileFinder
 
     config = _DeferConfig(apply_all, module_names, recursive, loader_class)
     config_ctx_tok = _current_defer_config.set(config)
-    return _ImportHookContext(config_ctx_tok, uninstall_after)
+    return _ImportHookContext(config_ctx_tok, uninstall_after, file_finder_paths)
 
 
 # endregion
@@ -1014,8 +1059,6 @@ def _deferred___import__(
         assert package is not None
         name = _resolve_name(name, package, level)
         level = 0
-
-    # TODO: Return modules cached in sys.modules here?
 
     # Handle submodule imports if relevant top-level imports already occurred in the call site's module.
     if not fromlist and ("." in name):
