@@ -103,6 +103,21 @@ def temp_cache_module(name: str, module: types.ModuleType):
         sys.modules.pop(name, None)
 
 
+@contextlib.contextmanager
+def temp_uncache_tests_path_importer():
+    """Temporarily reset the cached path finder for the tests directory."""
+
+    _missing: Any = object()
+
+    tests_path = str(Path(__file__).parent)
+    cached_path = sys.path_importer_cache.pop(str(Path(__file__).parent), _missing)
+    try:
+        yield
+    finally:
+        if cached_path is not _missing:  # pragma: no cover
+            sys.path_importer_cache[tests_path] = cached_path
+
+
 @pytest.fixture(autouse=True)
 def better_key_repr(monkeypatch: pytest.MonkeyPatch):
     """Replace _DeferredImportKey.__repr__ with a more verbose version for all tests."""
@@ -1020,27 +1035,18 @@ def Y2():
 def test_import_stdlib():
     """Test that defer_imports.until_use works when wrapping imports for most of the stdlib."""
 
-    _missing: Any = object()
-
     # The path finder for the tests directory is already cached, so we need to temporarily reset that entry.
-    _tests_path = str(Path(__file__).parent)
-    _temp_cache = sys.path_importer_cache.pop(_tests_path, _missing)
-
-    try:
+    with temp_uncache_tests_path_importer():
         with install_import_hook(uninstall_after=True):
             import tests.sample_stdlib_imports
 
         # Sample-check the __future__ import.
         expected_future_import = "<key for '__future__' import>: <proxy for 'import __future__'>"
         assert expected_future_import in repr(vars(tests.sample_stdlib_imports))
-    finally:
-        # Revert changes to the path finder cache.
-        if _temp_cache is not _missing:
-            sys.path_importer_cache[_tests_path] = _temp_cache
 
 
-@pytest.mark.skip(reason="Leaking patch problem is currently out of scope.")
-def test_leaking_patch(tmp_path: Path):  # pragma: no cover
+@pytest.mark.skip(reason="Leaking patch problem is currently out of scope.")  # pragma: no cover
+def test_leaking_patch(tmp_path: Path):
     """Test a synthetic package that demonstrates the "leaking patch" problem.
 
     Source: https://github.com/bswck/slothy/tree/bd0828a8dd9af63ca5c85340a70a14a76a6b714f/tests/leaking_patch

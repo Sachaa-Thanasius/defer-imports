@@ -18,4 +18,4 @@ class _DummyContext:
         pass
 
 
-until_use = _DummyContext()
+until_use: _DummyContext = _DummyContext()

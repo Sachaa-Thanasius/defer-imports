@@ -152,7 +152,7 @@ class _LazyModuleType(types.ModuleType):
 
                 # Finally, stop triggering this method, if the module did not
                 # already update its own __class__.
-                if isinstance(self, _LazyModuleType):
+                if isinstance(self, _LazyModuleType):  # pyright: ignore [reportUnnecessaryIsInstance]
                     object.__setattr__(self, "__class__", __class__)
 
         return getattr(self, name)
@@ -257,7 +257,7 @@ def _find_spec_without_lazyfinder(  # noqa: PLR0912
     name: str,
     path: t.Optional[t.Sequence[str]],
     target: t.Optional[types.ModuleType] = None,
-) -> t.Optional[ModuleSpec]:  # pragma: no cover
+) -> t.Optional[ModuleSpec]:  # pragma: no cover (mostly tested in stdlib)
     """Find a module's spec.
 
     Ignore the presence of `_LazyFinder` on `sys.meta_path`.
