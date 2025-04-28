@@ -11,7 +11,7 @@ import sys
 import time
 from pathlib import Path
 
-import defer_imports._ast_rewrite
+import defer_imports.ast_rewrite
 
 
 class CatchTime:
@@ -21,7 +21,7 @@ class CatchTime:
         self.elapsed = time.perf_counter()
         return self
 
-    def __exit__(self, *exc_info: object):
+    def __exit__(self, *_dont_care: object):
         self.elapsed = time.perf_counter() - self.elapsed
 
 
@@ -38,13 +38,13 @@ def bench_slothy() -> float:
 
 
 def bench_defer_imports_local() -> float:
-    with defer_imports._ast_rewrite.install_import_hook(uninstall_after=True), CatchTime() as ct:
+    with defer_imports.ast_rewrite.import_hook(uninstall_after=True), CatchTime() as ct:
         import bench.sample_defer_local
     return ct.elapsed
 
 
 def bench_defer_imports_global() -> float:
-    with defer_imports._ast_rewrite.install_import_hook(uninstall_after=True, apply_all=True), CatchTime() as ct:
+    with defer_imports.ast_rewrite.import_hook(uninstall_after=True, apply_all=True), CatchTime() as ct:
         import bench.sample_defer_global
     return ct.elapsed
 

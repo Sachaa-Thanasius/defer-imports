@@ -18,11 +18,11 @@ import sys
 import types
 from importlib.machinery import BYTECODE_SUFFIXES, SOURCE_SUFFIXES, FileFinder, ModuleSpec, SourceFileLoader
 
-from . import __version__, _lazy_load
+from . import __version__, lazy_load
 
 
 # PYUPDATE: py3.14 - importlib.abc might be cheap enough to eagerly import.
-with _lazy_load.until_module_use:
+with lazy_load.until_module_use:
     import ast
     import importlib.abc  # noqa: F401 # Used in a type alias.
     import threading
@@ -31,10 +31,14 @@ with _lazy_load.until_module_use:
     import warnings
 
 
+__all__ = ("import_hook",)
+
+
 # ============================================================================
 # region -------- Compatibility shims --------
 #
-# Definitions for symbols whose availability depends on the Python version.
+# Definitions for symbols whose availability depends on the Python version
+# or that need to be reimplemented to avoid expensive imports.
 # ============================================================================
 
 
@@ -69,6 +73,25 @@ else:  # pragma: <3.12 cover
     ReadableBuffer: TypeAlias = "t.Union[bytes, bytearray, memoryview]"
 
 
+if TYPE_CHECKING:
+    _final = t.final
+else:
+
+    def final(f: object) -> object:
+        """Decorator to indicate final methods and final classes."""
+        try:
+            f.__final__ = True
+        except (AttributeError, TypeError):
+            # Skip the attribute silently if it is not writable.
+            # AttributeError happens if the object has __slots__ or a
+            # read-only property, TypeError if it's a builtin class.
+            pass
+        return f
+
+    _final = final
+    del final
+
+
 if sys.version_info >= (3, 10):
     _SyntaxErrorContext: TypeAlias = (
         "tuple[t.Optional[str], t.Optional[int], t.Optional[int], t.Optional[str], t.Optional[int], t.Optional[int]]"
@@ -88,10 +111,6 @@ else:
 # endregion
 
 
-__all__ = ("install_import_hook",)
-
-
-_ASTLocation: TypeAlias = "dict[t.Literal['lineno', 'col_offset', 'end_lineno', 'end_col_offset'], int]"
 _SourceData: TypeAlias = "t.Union[ReadableBuffer, str]"
 _LoaderInit: TypeAlias = "t.Callable[[str, str], importlib.abc.Loader]"
 
@@ -239,7 +258,7 @@ def _is_until_use_node(node: ast.With) -> bool:
     )
 
 
-class _DeferredInstrumenter:
+class _ImportInstrumenter:
     """AST transformer that instruments imports within ``with defer_imports.until_use: ...`` blocks.
 
     The results of those imports will be assigned to custom keys in the local namespace.
@@ -248,6 +267,9 @@ class _DeferredInstrumenter:
     -----
     This doesn't subclass `ast.NodeTransformer` but instead vendors its logic to avoid the upfront import cost of `ast`.
     """
+
+    # NOTE: This makes liberal use of ast.fix_missing_locations and ast.copy_location. While they cause a ~30% slowdown
+    # in bytecode compilation compared to manually setting locations, they also reduce tedious location bookeeping.
 
     # PYUPDATE: Ensure visit and generic_visit are consistent with upstream, aside from our customizations.
     # PYUPDATE: py3.14 - Take advantage of better defaults for node parameters, e.g. ast.Load() for ctx,
@@ -271,10 +293,9 @@ class _DeferredInstrumenter:
     def _wrap_import_stmts(self, nodes: list[t.Union[ast.Import, ast.ImportFrom]]) -> ast.With:
         """Wrap a list of import nodes with a `defer_imports.until_use` block and instrument them."""
 
-        lineno = nodes[0].lineno
-        loc: _ASTLocation = {"lineno": lineno, "col_offset": 0, "end_lineno": lineno, "end_col_offset": 0}
-        with_items = [ast.withitem(ast.Name(_ACTUAL_CTX_NAME, ctx=ast.Load(), **loc))]
-        return ast.With(items=with_items, body=self._substitute_import_keys(nodes), **loc)
+        with_items = [ast.withitem(ast.Name(_ACTUAL_CTX_NAME, ctx=ast.Load()))]
+        with_stmt = ast.With(items=with_items, body=self._substitute_import_keys(nodes))
+        return ast.fix_missing_locations(ast.copy_location(with_stmt, nodes[0]))
 
     def generic_visit(self, node: ast.AST) -> ast.AST:  # noqa: PLR0912
         """Called if no explicit visitor function exists for a node.
@@ -365,7 +386,7 @@ class _DeferredInstrumenter:
         return context
 
     @staticmethod
-    def _create_import_name_replacement(name: str, loc: _ASTLocation) -> ast.If:
+    def _create_import_name_replacement(name: str) -> ast.If:
         """Create an AST for changing the name of a variable in locals if the variable is a defer_imports proxy.
 
         The resulting node is roughly equivalent to the following code if unparsed::
@@ -379,42 +400,72 @@ class _DeferredInstrumenter:
 
         return ast.If(
             test=ast.Compare(
-                left=ast.Attribute(ast.Name(name, ctx=ast.Load(), **loc), attr="__class__", ctx=ast.Load(), **loc),
+                left=ast.Attribute(ast.Name(name, ctx=ast.Load()), attr="__class__", ctx=ast.Load()),
                 ops=[ast.Is()],
-                comparators=[ast.Name(_PROXY_CLS_NAME, ctx=ast.Load(), **loc)],
-                **loc,
+                comparators=[ast.Name(_PROXY_CLS_NAME, ctx=ast.Load())],
             ),
             body=[
                 ast.Assign(
                     targets=[
-                        ast.Name(_TEMP_PROXY_NAME, ctx=ast.Store(), **loc),
+                        ast.Name(_TEMP_PROXY_NAME, ctx=ast.Store()),
                         ast.Subscript(
-                            value=ast.Name(_LOCAL_NS_NAME, ctx=ast.Load(), **loc),
+                            value=ast.Name(_LOCAL_NS_NAME, ctx=ast.Load()),
                             slice=ast.Call(
-                                func=ast.Name(_KEY_CLS_NAME, ctx=ast.Load(), **loc),
-                                args=[ast.Constant(name, **loc), ast.Name(_TEMP_PROXY_NAME, ctx=ast.Load(), **loc)],
+                                func=ast.Name(_KEY_CLS_NAME, ctx=ast.Load()),
+                                args=[ast.Constant(name), ast.Name(_TEMP_PROXY_NAME, ctx=ast.Load())],
                                 keywords=[],
-                                **loc,
                             ),
                             ctx=ast.Store(),
-                            **loc,
                         ),
                     ],
                     value=ast.Call(
-                        func=ast.Attribute(ast.Name(_LOCAL_NS_NAME, ctx=ast.Load(), **loc), "pop", ast.Load(), **loc),
-                        args=[ast.Constant(name, **loc)],
+                        func=ast.Attribute(ast.Name(_LOCAL_NS_NAME, ctx=ast.Load()), "pop", ast.Load()),
+                        args=[ast.Constant(name)],
                         keywords=[],
-                        **loc,
                     ),
-                    **loc,
                 )
             ],
             orelse=[],
-            **loc,
         )
 
+    def _substitute_import_keys(self, import_nodes: list[t.Union[ast.Import, ast.ImportFrom]]) -> list[ast.stmt]:
+        """Instrument a *non-empty* list of imports."""
+
+        self.did_any_instrumentation = True
+
+        # Create a node location set that can be re-used, passed around, and modified.
+        # Do not modify it outside of this function.
+
+        new_nodes: list[ast.stmt] = []
+
+        # Start with some helper variables.
+        # A reference to locals() to avoid calling locals() repeatedly.
+        locals_call = ast.Call(func=ast.Name("locals", ctx=ast.Load()), args=[], keywords=[])
+        local_ns = ast.Assign(targets=[ast.Name(_LOCAL_NS_NAME, ctx=ast.Store())], value=locals_call)
+        new_nodes.append(local_ns)
+
+        # A reference to the current proxy being "fixed".
+        temp_proxy = ast.Assign(targets=[ast.Name(_TEMP_PROXY_NAME, ctx=ast.Store())], value=ast.Constant(None))
+        new_nodes.append(temp_proxy)
+
+        # Add the imports + namespace adjustments.
+        for node in import_nodes:
+            new_nodes.append(node)
+            new_nodes.extend(self._create_import_name_replacement(alias.asname or alias.name) for alias in node.names)
+
+        # Clean up the helper variables via deletion.
+        new_nodes.append(ast.Delete([ast.Name(name, ctx=ast.Del()) for name in (_TEMP_PROXY_NAME, _LOCAL_NS_NAME)]))
+
+        return new_nodes
+
     def _validate_until_use_body(self, nodes: list[ast.stmt]) -> list[t.Union[ast.Import, ast.ImportFrom]]:
-        """Validate that the statements within a `defer_imports.until_use` block are instrumentable."""
+        """Validate that the statements within a `defer_imports.until_use` block are instrumentable.
+
+        Raises
+        ------
+        SyntaxError
+            If any of the given nodes are not imports or are wildcard imports.
+        """
 
         for node in nodes:
             if not isinstance(node, (ast.Import, ast.ImportFrom)):
@@ -425,53 +476,8 @@ class _DeferredInstrumenter:
                 msg = "import * not allowed in with defer_imports.until_use blocks"
                 raise SyntaxError(msg, self._get_error_context(node))
 
-        # We won't mutate the list from outside the function to invalidate our type guard, scout's honor.
+        # Warning: Don't mutate the list from outside the function to invalidate our type guard.
         return nodes  # pyright: ignore [reportReturnType]
-
-    def _substitute_import_keys(self, import_nodes: list[t.Union[ast.Import, ast.ImportFrom]]) -> list[ast.stmt]:
-        """Instrument a *non-empty* list of imports.
-
-        Raises
-        ------
-        SyntaxError
-            If any of the given nodes are not imports or are wildcard imports.
-        """
-
-        self.did_any_instrumentation = True
-
-        # Create a node location set that can be re-used, passed around, and modified.
-        # However, it must not be modified outside of this function.
-        lineno = import_nodes[0].lineno
-        loc: _ASTLocation = {"lineno": lineno, "col_offset": 0, "end_lineno": lineno, "end_col_offset": 0}
-
-        new_nodes: list[ast.stmt] = []
-
-        # Start with some helper variables.
-        # A reference to locals() to avoid calling locals() repeatedly.
-        locals_call = ast.Call(func=ast.Name("locals", ctx=ast.Load(), **loc), args=[], keywords=[], **loc)
-        local_ns = ast.Assign(targets=[ast.Name(_LOCAL_NS_NAME, ctx=ast.Store(), **loc)], value=locals_call, **loc)
-        new_nodes.append(local_ns)
-
-        # A reference to the current proxy being "fixed".
-        temp_proxy_name: list[ast.expr] = [ast.Name(_TEMP_PROXY_NAME, ctx=ast.Store(), **loc)]
-        temp_proxy = ast.Assign(targets=temp_proxy_name, value=ast.Constant(None, **loc), **loc)
-        new_nodes.append(temp_proxy)
-
-        # Add the imports + namespace adjustments.
-        for node in import_nodes:
-            new_nodes.append(node)
-            loc["lineno"] = loc["end_lineno"] = node.lineno
-            new_nodes.extend(
-                self._create_import_name_replacement(alias.asname or alias.name, loc) for alias in node.names
-            )
-
-        # Clean up the helper variables via deletion.
-        loc["lineno"] = loc["end_lineno"] = import_nodes[-1].lineno
-        new_nodes.append(
-            ast.Delete([ast.Name(name, ctx=ast.Del(), **loc) for name in (_TEMP_PROXY_NAME, _LOCAL_NS_NAME)], **loc)
-        )
-
-        return new_nodes
 
     def visit_With(self, node: ast.With) -> ast.AST:
         """Check that ``with defer_imports.until_use: ...`` blocks are valid and if so, hook all imports within.
@@ -479,8 +485,7 @@ class _DeferredInstrumenter:
         Raises
         ------
         SyntaxError:
-            If a `defer_imports.until_use` block contains a statement that isn't an import or contains a wildcard
-            import.
+            If a `defer_imports.until_use` block contains a wildcard import or non-import statement.
         """
 
         if not _is_until_use_node(node):
@@ -491,15 +496,16 @@ class _DeferredInstrumenter:
         node.items[0].context_expr = new_ctx_expr
 
         node.body = self._substitute_import_keys(self._validate_until_use_body(node.body))
-        return node
+        return ast.fix_missing_locations(node)
 
     def visit_Module(self, node: ast.Module) -> ast.AST:
         """Insert imports and cleanup necessary to make `defer_imports.until_use` work properly.
 
-        If `defer_imports.until_use` isn't actually used, do nothing.
-
-        Imports will be inserted after the module docstring and after `__future__` imports.
+        If the module is empty or `defer_imports.until_use` isn't actually used, do nothing.
         """
+
+        if not node.body:
+            return node
 
         node = self.generic_visit(node)  # pyright: ignore [reportAssignmentType] # We know it'll return a module.
 
@@ -523,15 +529,13 @@ class _DeferredInstrumenter:
                 break
 
         # Then, add necessary defer_imports import.
-        lineno = position + 1
-        loc: _ASTLocation = {"lineno": lineno, "col_offset": 0, "end_lineno": lineno, "end_col_offset": 0}
-        aliases = [ast.alias(name, asname, **loc) for name, asname in zip(_INTERNALS_NAMES, _INTERNALS_ASNAMES)]
-        node.body.insert(position, ast.ImportFrom(module=__spec__.name, names=aliases, level=0, **loc))
+        aliases = list(map(ast.alias, _INTERNALS_NAMES, _INTERNALS_ASNAMES))
+        import_stmt = ast.ImportFrom(module=__spec__.name, names=aliases, level=0)
+        node.body.insert(position, ast.fix_missing_locations(ast.copy_location(import_stmt, node.body[position])))
 
         # Finally, clean up the namespace via deletion.
-        loc["lineno"] = loc["end_lineno"] = node.body[-1].lineno
-        names: list[ast.expr] = [ast.Name(asname, ctx=ast.Del(), **loc) for asname in _INTERNALS_ASNAMES]
-        node.body.append(ast.Delete(targets=names, **loc))
+        del_stmt = ast.Delete(targets=[ast.Name(asname, ctx=ast.Del()) for asname in _INTERNALS_ASNAMES])
+        node.body.append(ast.fix_missing_locations(ast.copy_location(del_stmt, node.body[-1])))
 
         return node
 
@@ -540,314 +544,9 @@ class _DeferredInstrumenter:
 
 
 # ============================================================================
-# region -------- importlib import hooks --------
-#
-# The module loader, module finder, and import hook API to attach those to the
-# import system.
-# ============================================================================
-
-
-class _DeferredFileLoader(SourceFileLoader):
-    """A file loader that instruments ``.py`` files which use ``with defer_imports.until_use: ...``."""
-
-    def __init__(self, *args: t.Any, **kwargs: t.Any) -> None:
-        super().__init__(*args, **kwargs)
-        self.defer_whole_module: bool = False
-
-    def get_data(self, path: str) -> bytes:
-        """Return the data from `path` as raw bytes.
-
-        If `path` points to a bytecode file, validate that it has a `defer_imports`-specific header.
-
-        Raises
-        ------
-        OSError
-            If the path points to a bytecode file with an invalid `defer_imports`-specific header.
-            `importlib.machinery.SourceLoader.get_code()` expects this error from this function.
-        """
-
-        # NOTE: Another option is to monkeypatch `importlib.util.cache_from_source`, as beartype and typeguard do,
-        # but that seems excessive for this use case.
-        # Ref: https://github.com/beartype/beartype/blob/e9eeb4e282f438e770520b99deadbe219a1c62dc/beartype/claw/_importlib/_clawimpload.py#L177-L312
-
-        data = super().get_data(path)
-
-        if not path.endswith(tuple(BYTECODE_SUFFIXES)):
-            return data
-
-        if not data.startswith(b"defer_imports"):
-            msg = '"defer_imports" header missing from bytecode'
-            raise OSError(msg)
-
-        if not data.startswith(_BYTECODE_HEADER):
-            msg = '"defer_imports" header is outdated'
-            raise OSError(msg)
-
-        return data[len(_BYTECODE_HEADER) :]
-
-    def set_data(self, path: str, data: ReadableBuffer, *, _mode: int = 0o666) -> None:
-        """Write bytes data to a file.
-
-        If the file is a bytecode one, prepend a `defer_imports`-specific header to it. That way, instrumented bytecode
-        can be identified and invalidated later if necessary [1]_.
-
-        References
-        ----------
-        .. [1] https://gregoryszorc.com/blog/2017/03/13/from-__past__-import-bytes_literals/
-        """
-
-        if path.endswith(tuple(BYTECODE_SUFFIXES)):
-            data = _BYTECODE_HEADER + data
-
-        return super().set_data(path, data, _mode=_mode)
-
-    # NOTE: We're purposefully not supporting data being an AST object.
-    # NOTE: The signatures of SourceFileLoader.source_to_code at runtime and in typeshed aren't currently consistent.
-    # ref: https://github.com/python/typeshed/issues/13881
-    # ref: https://github.com/python/typeshed/pull/13880
-    def source_to_code(self, data: _SourceData, path: _ModulePath, *, _optimize: int = -1) -> types.CodeType:  # pyright: ignore [reportIncompatibleMethodOverride]
-        """Compile `data` into a code object, but not before potentially instrumenting it.
-
-        Parameters
-        ----------
-        data: _SourceData
-            A string or buffer type that `compile()` supports.
-        """
-
-        if data:
-            orig_tree = ast.parse(data, path, "exec")
-            if self.defer_whole_module or any(
-                (isinstance(node, ast.With) and _is_until_use_node(node)) for node in ast.walk(orig_tree)
-            ):
-                instrumenter = _DeferredInstrumenter(data, path, module_level=self.defer_whole_module)
-                new_tree = instrumenter.visit(orig_tree)
-                return super().source_to_code(new_tree, path, _optimize=_optimize)  # pyright: ignore # noqa: PGH003
-
-        return super().source_to_code(data, path, _optimize=_optimize)  # pyright: ignore # noqa: PGH003
-
-    def exec_module(self, module: types.ModuleType) -> None:
-        """Execute the module."""
-
-        # This state is needed for self.source_to_code().
-        if (spec := module.__spec__) is not None and spec.loader_state is not None:
-            self.defer_whole_module = spec.loader_state["defer_whole_module"]
-
-        return super().exec_module(module)
-
-
-class _DeferredFileFinder(FileFinder):
-    def __repr__(self):
-        return f"{self.__class__.__name__}({self.path!r})"
-
-    @staticmethod
-    def _get_loader_class(config: _DeferConfig) -> _LoaderInit:
-        if config.loader_class is None:
-            return _DeferredFileLoader
-        else:
-            return config.loader_class
-
-    @staticmethod
-    def _is_full_module_rewrite(fullname: str, config: _DeferConfig) -> bool:
-        """Determine whether all imports should be instrumented instead of just `until_use`-encapsulated imports."""
-
-        # NOTE: This could be written as one boolean expression, but currently, splitting it out makes the hierarchy
-        # of configuration options a bit clearer.
-
-        if config.apply_all:
-            return True
-
-        if not config.module_names:
-            return False
-
-        if fullname in config.module_names:
-            return True
-
-        return config.recursive and any(fullname.startswith(f"{mod}.") for mod in config.module_names)
-
-    def find_spec(self, fullname: str, target: t.Optional[types.ModuleType] = None) -> t.Optional[ModuleSpec]:
-        """Try to find a spec for the specified module.
-
-        If a spec is found, its loader may be overriden and some state may be passed on via
-        `ModuleSpec.loader_state` [1]_ [2]_.
-
-        Returns
-        -------
-        t.Optional[ModuleSpec]
-            The matching spec, or `None` if not found.
-
-        References
-        ----------
-        .. [1] https://github.com/python/cpython/issues/89527
-        .. [2] https://docs.python.org/3/library/importlib.html#importlib.machinery.ModuleSpec.loader_state
-        """
-
-        spec = super().find_spec(fullname, target)
-
-        if spec is not None and isinstance(spec.loader, SourceFileLoader):
-            # NOTE: We're locking in defer_imports configuration for this module between finding it and loading it.
-            # However, it's possible to delay getting the configuration until module execution. Not sure what's best.
-            config = _current_defer_config.get(None)
-
-            if config is not None:
-                defer_whole_module = self._is_full_module_rewrite(fullname, config)
-                loader_class = self._get_loader_class(config)
-            else:
-                defer_whole_module = False
-                loader_class = _DeferredFileLoader
-
-            spec.loader = loader_class(spec.loader.name, spec.loader.path)
-            spec.loader_state = {"defer_whole_module": defer_whole_module}
-
-        return spec
-
-
-_LOADER_DETAILS = (_DeferredFileLoader, SOURCE_SUFFIXES)
-_PATH_HOOK = _DeferredFileFinder.path_hook(_LOADER_DETAILS)
-
-
-_current_defer_config: contextvars.ContextVar[_DeferConfig] = contextvars.ContextVar("_current_defer_config")
-"""The current configuration for defer_imports's instrumentation."""
-
-
-class _DeferConfig:
-    """Configuration container whose contents are used to determine how a module should be instrumented."""
-
-    def __init__(
-        self,
-        apply_all: bool,
-        module_names: t.Sequence[str],
-        recursive: bool,
-        loader_class: t.Optional[_LoaderInit],
-    ) -> None:
-        self.apply_all = apply_all
-        self.module_names = module_names
-        self.recursive = recursive
-        self.loader_class = loader_class
-
-    def __repr__(self) -> str:
-        return (
-            f"{self.__class__.__name__}("
-            f"apply_all={self.apply_all!r}, module_names={self.module_names!r}, "
-            f"recursive={self.recursive!r}, loader_class={self.loader_class!r}"
-            ")"
-        )
-
-
-class _ImportHookContext:
-    """The context manager returned by install_import_hook(). Can reset defer_imports's configuration to its previous
-    state and uninstall defer_import's import path hook.
-    """
-
-    def __init__(self, _config_ctx_tok: contextvars.Token[_DeferConfig], _uninstall_after: bool) -> None:
-        self._tok = _config_ctx_tok
-        self._uninstall_after = _uninstall_after
-
-    def __enter__(self) -> Self:
-        return self
-
-    def __exit__(self, *_dont_care: object) -> None:
-        self.reset()
-        if self._uninstall_after:
-            self.uninstall()
-
-    def reset(self) -> None:
-        """Attempt to reset the import hook configuration. If already reset, does nothing."""
-
-        if (tok := getattr(self, "_tok", None)) is not None:
-            _current_defer_config.reset(tok)
-            del self._tok
-
-    def uninstall(self) -> None:
-        """Attempt to remove the custom path hook in `sys.path_hook` and undo monkeypatching of cached finders."""
-
-        try:
-            sys.path_hooks.remove(_PATH_HOOK)
-        except ValueError:
-            pass
-
-        for finder in sys.path_importer_cache.values():
-            if (finder is not None) and (finder.__class__ is _DeferredFileFinder):
-                finder.__class__ = FileFinder
-
-
-def install_import_hook(
-    *,
-    uninstall_after: bool = False,
-    apply_all: bool = False,
-    module_names: t.Sequence[str] = (),
-    recursive: bool = False,
-    loader_class: t.Optional[_LoaderInit] = None,
-) -> _ImportHookContext:
-    """Install defer_imports's import hook if it isn't already installed, and optionally configure it. Must be called
-    before using defer_imports.until_use.
-
-    The configuration knobs are for instrumenting any global import statements, not only ones wrapped by
-    defer_imports.until_use.
-
-    This should be run before the code it is meant to affect is executed. One place to put do that is __init__.py of a
-    package or app.
-
-    Parameters
-    ----------
-    uninstall_after: bool, default=False
-        Whether to uninstall the import hook upon exit if this function is used as a context manager.
-    apply_all: bool, default=False
-        Whether to apply module-level import deferral, i.e. instrumentation of all imports, to all modules henceforth.
-        Has higher priority than `module_names`. More suitable for use in applications.
-    module_names: t.Sequence[str], optional
-        A set of modules to apply module-level import deferral to. Has lower priority than apply_all. More suitable for
-        use in libraries.
-    recursive: bool, default=False
-        Whether module-level import deferral should apply recursively the submodules of the given module_names. Has the
-        same priority as `module_names`. If no module names are given, this has no effect.
-    loader_class: _LoaderInit, optional
-        An import loader class for `defer_imports` to use instead of the default machinery. If supplied, it is assumed to
-        have an initialization signature matching ``(fullname: str, path: str) -> Loader``.
-
-    Returns
-    -------
-    ImportHookContext
-        A object that can be used to reset the import hook's configuration to its previous state or uninstall it, either
-        automatically by using it as a context manager or manually using its rest() and uninstall methods.
-    """
-
-    if isinstance(module_names, str):
-        msg = "module_names should be a sequence of strings, not a string."
-        raise TypeError(msg)
-
-    if _PATH_HOOK not in sys.path_hooks:
-        file_finder_index = next(
-            (i for i, hook in enumerate(sys.path_hooks) if hook.__name__ == "path_hook_for_FileFinder"),
-            len(sys.path_hooks),
-        )
-        sys.path_hooks.insert(file_finder_index, _PATH_HOOK)
-
-        # HACK: We do some monkeypatching here so that the cached finders for sys.path entries use the right finder
-        # class. This should be safe; _DeferredFinder is a subclass of FileFinder and has the same instance state.
-        #
-        # Alternatives:
-        # - Create and insert a new PathFinder subclass into sys.meta_path, or patch the existing one.
-        #   That would be a bigger monkeypatch, but it's the route that typeguard takes.
-        # - Delete the sys.path_importer_cache entries instead of monkeypatching them.
-        #   This is the docs's recommendation and is technically more correct, but it causes a big slowdown on startup.
-        #
-        # TODO: Determine if this is *still* overkill. It would be more useful in the .pth file case.
-        for finder in sys.path_importer_cache.values():
-            if (finder is not None) and (finder.__class__ is FileFinder):
-                finder.__class__ = _DeferredFileFinder
-
-    config = _DeferConfig(apply_all, module_names, recursive, loader_class)
-    config_ctx_tok = _current_defer_config.set(config)
-    return _ImportHookContext(config_ctx_tok, uninstall_after)
-
-
-# endregion
-
-
-# ============================================================================
 # region -------- Runtime magic --------
 #
-# The proxies, __import__ replacement, and until_use API.
+# The proxies, __import__ replacement, and actual until_use context manager.
 # ============================================================================
 
 
@@ -1045,15 +744,13 @@ def _deferred___import__(
 class _DeferredContext:
     """A context manager within which imports occur lazily. Not reentrant. Use via `defer_imports.until_use`.
 
-    If defer_imports isn't set up properly, e.g. `install_import_hook` is not called first elsewhere, this should be a
+    If defer_imports isn't set up properly, e.g. `import_hook.install()` is not called first elsewhere, this should be a
     no-op equivalent to `contextlib.nullcontext`.
 
     Raises
     ------
     SyntaxError
-        If `defer_imports.until_use` is used improperly, e.g.:
-            1. It contains a statement that isn't an import.
-            2. It contains a wildcard import.
+        If `defer_imports.until_use` is used improperly, e.g. it contains a wildcard import or a non-import statement.
 
     Notes
     -----
@@ -1074,6 +771,319 @@ class _DeferredContext:
 
 
 _actual_until_use: t.Final[_DeferredContext] = _DeferredContext()
+
+
+# endregion
+
+
+# ============================================================================
+# region -------- importlib import hooks --------
+#
+# The module loader, module finder, and import hook API to attach those to the
+# import system.
+# ============================================================================
+
+
+# PYUPDATE: py3.14 - Consider inheriting from importlib.abc.SourceLoader instead since it's (probably) cheap again.
+class _DeferredFileLoader(SourceFileLoader):
+    """A file loader that instruments ``.py`` files which use ``with defer_imports.until_use: ...``."""
+
+    def __init__(self, *args: t.Any, **kwargs: t.Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.defer_whole_module: bool = False
+
+    def get_data(self, path: str) -> bytes:
+        """Return the data from `path` as raw bytes.
+
+        If `path` points to a bytecode file, validate that it has a `defer_imports`-specific header.
+
+        Raises
+        ------
+        OSError
+            If the path points to a bytecode file with an invalid `defer_imports`-specific header.
+            `importlib.machinery.SourceLoader.get_code()` expects this error from this function.
+        """
+
+        # NOTE: Another option is to monkeypatch `importlib.util.cache_from_source`, as beartype and typeguard do,
+        # but that seems excessive for this use case.
+        # Ref: https://github.com/beartype/beartype/blob/e9eeb4e282f438e770520b99deadbe219a1c62dc/beartype/claw/_importlib/_clawimpload.py#L177-L312
+
+        data = super().get_data(path)
+
+        if not path.endswith(tuple(BYTECODE_SUFFIXES)):
+            return data
+
+        if not data.startswith(b"defer_imports"):
+            msg = '"defer_imports" header missing from bytecode'
+            raise OSError(msg)
+
+        if not data.startswith(_BYTECODE_HEADER):
+            msg = '"defer_imports" header is outdated'
+            raise OSError(msg)
+
+        return data[len(_BYTECODE_HEADER) :]
+
+    def set_data(self, path: str, data: ReadableBuffer, *, _mode: int = 0o666) -> None:
+        """Write bytes data to a file.
+
+        If the file is a bytecode one, prepend a `defer_imports`-specific header to it. That way, instrumented bytecode
+        can be identified and invalidated later if necessary [1]_.
+
+        References
+        ----------
+        .. [1] https://gregoryszorc.com/blog/2017/03/13/from-__past__-import-bytes_literals/
+        """
+
+        if path.endswith(tuple(BYTECODE_SUFFIXES)):
+            data = _BYTECODE_HEADER + data
+
+        return super().set_data(path, data, _mode=_mode)
+
+    # NOTE: We're purposefully not supporting data being an AST object.
+    # NOTE: The signatures of SourceFileLoader.source_to_code at runtime and in typeshed aren't currently consistent.
+    # Ref: https://github.com/python/typeshed/pull/13880
+    # Ref: https://github.com/python/typeshed/issues/13881
+    def source_to_code(self, data: _SourceData, path: _ModulePath, *, _optimize: int = -1) -> types.CodeType:  # pyright: ignore [reportIncompatibleMethodOverride]
+        """Compile `data` into a code object, but not before potentially instrumenting it.
+
+        Parameters
+        ----------
+        data: _SourceData
+            A string or buffer type that `compile()` supports.
+        """
+
+        if data:
+            orig_tree = ast.parse(data, path, "exec")
+            if self.defer_whole_module or any(
+                (isinstance(node, ast.With) and _is_until_use_node(node)) for node in ast.walk(orig_tree)
+            ):
+                instrumenter = _ImportInstrumenter(data, path, module_level=self.defer_whole_module)
+                new_tree = instrumenter.visit(orig_tree)
+                return super().source_to_code(new_tree, path, _optimize=_optimize)  # pyright: ignore # noqa: PGH003
+
+        return super().source_to_code(data, path, _optimize=_optimize)  # pyright: ignore # noqa: PGH003
+
+    def exec_module(self, module: types.ModuleType) -> None:
+        """Execute the module."""
+
+        # This state is needed for self.source_to_code().
+        if (spec := module.__spec__) is not None and spec.loader_state is not None:
+            self.defer_whole_module = spec.loader_state["defer_whole_module"]
+
+        return super().exec_module(module)
+
+
+class _DeferredFileFinder(FileFinder):
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}({self.path!r})"
+
+    @staticmethod
+    def _is_full_module_rewrite(fullname: str, config: _DeferConfig) -> bool:
+        """Determine whether all imports should be instrumented instead of just `until_use`-encapsulated imports."""
+
+        # This could be written as one boolean expression, but currently, splitting it out makes the hierarchy
+        # of configuration options a bit clearer.
+
+        if config.apply_all:
+            return True
+
+        if not config.module_names:
+            return False
+
+        if fullname in config.module_names:
+            return True
+
+        return config.recursive and any(fullname.startswith(f"{mod}.") for mod in config.module_names)
+
+    def find_spec(self, fullname: str, target: t.Optional[types.ModuleType] = None) -> t.Optional[ModuleSpec]:
+        """Try to find a spec for the specified module.
+
+        If a spec is found, its loader may be overriden and some state may be passed on via `ModuleSpec.loader_state`
+        [1]_ [2]_.
+
+        Returns
+        -------
+        t.Optional[ModuleSpec]
+            The matching spec, or `None` if not found.
+
+        References
+        ----------
+        .. [1] https://github.com/python/cpython/issues/89527
+        .. [2] https://docs.python.org/3/library/importlib.html#importlib.machinery.ModuleSpec.loader_state
+        """
+
+        spec = super().find_spec(fullname, target)
+
+        # Be precise; only replace the loader when python is loading a source file the built-in way.
+        # This way, user-defined subclasses aren't clobbered.
+        if (spec is not None) and (spec.loader is not None) and (spec.loader.__class__ is SourceFileLoader):
+            # Lock in the defer_imports configuration for this module between finding it and loading it.
+            config = _current_defer_config.get(None)
+
+            if config is not None:
+                defer_whole_module = self._is_full_module_rewrite(fullname, config)
+                loader_class = _DeferredFileLoader if (config.loader_class is None) else config.loader_class
+            else:
+                defer_whole_module = False
+                loader_class = _DeferredFileLoader
+
+            # pyright doesn't respect "obj.__class__ is ...".
+            spec.loader = loader_class(spec.loader.name, spec.loader.path)  # pyright: ignore [reportUnknownMemberType, reportUnknownArgumentType, reportAttributeAccessIssue]
+            spec.loader_state = {"defer_whole_module": defer_whole_module}
+
+        return spec
+
+
+_LOADER_DETAILS = (_DeferredFileLoader, SOURCE_SUFFIXES)
+_PATH_HOOK = _DeferredFileFinder.path_hook(_LOADER_DETAILS)
+
+
+_current_defer_config: contextvars.ContextVar[_DeferConfig] = contextvars.ContextVar("_current_defer_config")
+"""The current configuration for defer_imports's instrumentation."""
+
+
+class _DeferConfig:
+    """Configuration container whose contents are used to determine how a module should be instrumented."""
+
+    def __init__(
+        self,
+        apply_all: bool,
+        module_names: t.Sequence[str],
+        recursive: bool,
+        loader_class: t.Optional[_LoaderInit],
+        uninstall_after: bool,
+    ) -> None:
+        self.apply_all = apply_all
+        self.module_names = module_names
+        self.recursive = recursive
+        self.loader_class = loader_class
+        self.uninstall_after = uninstall_after
+
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}("
+            + f"apply_all={self.apply_all!r}, module_names={self.module_names!r}, recursive={self.recursive!r}, "
+            + f"loader_class={self.loader_class!r}, uninstall_after={self.uninstall_after!r}"
+            + ")"
+        )
+
+
+@_final
+class _ImportHookContext:
+    """The context manager returned by `import_hook()`. Should not be manually constructed.
+
+    This can reset defer_imports's configuration to its previous state and uninstall its import path hook.
+    """
+
+    def __init_subclass__(cls, *args: t.Any, **kwargs: t.Any) -> t.NoReturn:
+        msg = f"Type {cls.__name__!r} is not an acceptable base type."
+        raise TypeError(msg)
+
+    def __init__(self, _config: _DeferConfig) -> None:
+        self._config = _config
+        self._tok: contextvars.Token[_DeferConfig] | None = None
+
+    def __enter__(self) -> Self:
+        self.install()
+        return self
+
+    def __exit__(self, *_dont_care: object) -> None:
+        self.reset()
+        if self._config.uninstall_after:
+            self.uninstall()
+
+    def install(self) -> None:
+        if _PATH_HOOK not in sys.path_hooks:
+            file_finder_index = next(
+                (i for i, hook in enumerate(sys.path_hooks) if hook.__name__ == "path_hook_for_FileFinder"),
+                len(sys.path_hooks),
+            )
+            sys.path_hooks.insert(file_finder_index, _PATH_HOOK)
+
+            # HACK: We do some monkeypatching here so that the cached finders for sys.path entries use the right finder
+            # class. This should be safe; _DeferredFinder is a subclass of FileFinder and has the same instance state.
+            #
+            # Alternatives:
+            # - Create and insert a new PathFinder subclass into sys.meta_path, or patch the existing one.
+            #   That would be a bigger monkeypatch in some ways, but it's the route that typeguard takes
+            #   (and one we took previously).
+            # - Delete the sys.path_importer_cache entries instead of monkeypatching them.
+            #   This is the docs's recommendation and is technically more correct, but it causes a big slowdown on startup.
+            for finder in sys.path_importer_cache.values():
+                if (finder is not None) and (finder.__class__ is FileFinder):
+                    finder.__class__ = _DeferredFileFinder
+
+        self._tok = _current_defer_config.set(self._config)
+
+    def reset(self) -> None:
+        """Attempt to reset the import hook configuration. If already reset, does nothing."""
+
+        if self._tok is not None:
+            _current_defer_config.reset(self._tok)
+            self._tok = None
+
+    def uninstall(self) -> None:
+        """Attempt to remove the custom path hook in `sys.path_hook` and undo monkeypatching of cached finders."""
+
+        try:
+            sys.path_hooks.remove(_PATH_HOOK)
+        except ValueError:
+            pass
+
+        for finder in sys.path_importer_cache.values():
+            if (finder is not None) and (finder.__class__ is _DeferredFileFinder):
+                # We don't also have to invalidate the finder cache, I think; FileFinder's cache is just for potential
+                # module locations, which doesn't change when we modify the class.
+                finder.__class__ = FileFinder
+
+
+def import_hook(
+    *,
+    uninstall_after: bool = False,
+    apply_all: bool = False,
+    module_names: t.Sequence[str] = (),
+    recursive: bool = False,
+    loader_class: t.Optional[_LoaderInit] = None,
+) -> _ImportHookContext:
+    """Get an object for installing defer_imports's import hook, and optionally configure the hook. Must be called
+    before using `defer_imports.until_use` to make it work.
+
+    The configuration knobs are for instrumenting any global import statements, not only ones wrapped by
+    defer_imports.until_use.
+
+    This should be run before the code it is meant to affect is executed. One place to put do that is __init__.py of a
+    package or app.
+
+    Parameters
+    ----------
+    uninstall_after: bool, default=False
+        Whether to uninstall the import hook upon exit if this function is used as a context manager.
+    apply_all: bool, default=False
+        Whether to apply module-level import deferral, i.e. instrumentation of all imports, to all modules henceforth.
+        Has higher priority than `module_names`. More suitable for use in applications.
+    module_names: t.Sequence[str], optional
+        A set of modules to apply module-level import deferral to. Has lower priority than apply_all. More suitable for
+        use in libraries.
+    recursive: bool, default=False
+        Whether module-level import deferral should apply recursively the submodules of the given module_names. Has the
+        same priority as `module_names`. If no module names are given, this has no effect.
+    loader_class: _LoaderInit, optional
+        An import loader class for `defer_imports` to use instead of the default machinery. If supplied, it is assumed to
+        have an initialization signature matching ``(fullname: str, path: str) -> Loader``.
+
+    Returns
+    -------
+    _ImportHookContext
+        A object that can be used to reset the import hook's configuration to its previous state or uninstall it, either
+        automatically by using it as a context manager or manually using its rest() and uninstall methods.
+    """
+
+    if isinstance(module_names, str):
+        msg = "module_names should be a sequence of strings, not a string."
+        raise TypeError(msg)
+
+    config = _DeferConfig(apply_all, module_names, recursive, loader_class, uninstall_after)
+    return _ImportHookContext(config)
 
 
 # endregion

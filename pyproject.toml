@@ -131,7 +131,7 @@ extend-ignore = [
     "RUF002",  # "Ambiguous character" depends on the use case.
     "RUF003",  # "Ambiguous character" depends on the use case.
     "RUF022",  # __all__ ordering can be meaningful.
-    "RUF023",  # __slots__ ordering can be meaningful. 
+    "RUF023",  # __slots__ ordering can be meaningful.
 
     # ---- Recommended by Ruff when using Ruff format
     "W191",
@@ -160,6 +160,9 @@ combine-as-imports = true
 
 [tool.ruff.lint.pyupgrade]
 keep-runtime-typing = true
+
+[tool.ruff.lint.flake8-implicit-str-concat]
+allow-multiline = false
 
 [tool.ruff.lint.per-file-ignores]
 # ---- Package code
@@ -208,3 +211,4 @@ reportImportCycles = "information"                  # Occasionally not a false p
 reportPropertyTypeMismatch = "warning"
 reportShadowedImports = "error"
 reportUnnecessaryTypeIgnoreComment = "warning"
+reportImplicitStringConcatenation = "warning"

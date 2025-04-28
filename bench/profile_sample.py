@@ -1,8 +1,8 @@
-import defer_imports._ast_rewrite
+import defer_imports.ast_rewrite
 
 
 def profile_defer_imports_global() -> None:
-    with defer_imports._ast_rewrite.install_import_hook(uninstall_after=True, apply_all=True):
+    with defer_imports.ast_rewrite.import_hook(uninstall_after=True, apply_all=True):
         import bench.sample_defer_global  # pyright: ignore [reportUnusedImport]
 
 
