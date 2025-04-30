@@ -164,6 +164,9 @@ keep-runtime-typing = true
 [tool.ruff.lint.flake8-implicit-str-concat]
 allow-multiline = false
 
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
 [tool.ruff.lint.per-file-ignores]
 # ---- Package code
 "src/defer_imports/*.py" = [

@@ -54,10 +54,10 @@ else:  # pragma: <3.11 cover
 
 
 # ============================================================================
-# region -------- Module loader --------
+# region -------- Module loader and finder --------
 #
-# These are adapted from importlib.util to avoid depending on private APIs and
-# allow changes.
+# Much of this is adapted from importlib._bootstrap and importlib.util to
+# avoid depending on private APIs and allow changes.
 #
 # PYUPDATE: Ensure these are consistent with upstream, aside from our
 # customizations.
@@ -78,12 +78,14 @@ class _LazyModuleType(types.ModuleType):
 
         __spec__: ModuleSpec = object.__getattribute__(self, "__spec__")
 
-        # NOTE: We want to avoid the importlib machinery unnecessarily causing a load when it checks a lazy module in
-        # sys.modules to see if it is initialized (the relevant code is in importlib._bootstrap._find_and_load()).
-        # Since the machinery determines that via an attribute on module.__spec__, return the spec without loading.
+        # HACK: This is how we prevent internal import machinery from triggering the load early, but it has a tradeoff.
         #
-        # This does make our lazy module a leak abstraction: a user can get __spec__ from a lazy module and modify it
-        # without causing a load. However, it's the best we can do at the moment.
+        # The importlib machinery unnecessarily causes a load when it checks a lazy module in sys.modules to see if it
+        # is initialized (the relevant code is in importlib._bootstrap._find_and_load()). Since the machinery determines
+        # that via an attribute on module.__spec__, return the spec without loading.
+        #
+        # However, this does make our lazy module a leaky abstraction: a user can get __spec__ from a lazy module and
+        # modify it without causing a load. However, it's the best we can do at the moment.
         #
         # Extra
         # -----
@@ -219,21 +221,6 @@ class _LazyLoader(Loader):
         module.__class__ = _LazyModuleType
 
 
-# endregion
-
-
-# ============================================================================
-# region -------- Module finder --------
-#
-# Some of this code, specifically _ImportLockContext and
-# _find_spec_without_lazyfinder(), was adapted from importlib._bootstrap to
-# avoid depending on private APIs and allow changes.
-#
-# PYUPDATE: Ensure the adapted code is consistent with upstream, aside from
-# our customizations.
-# ============================================================================
-
-
 # Adapted from importlib._bootstrap.
 class _ImportLockContext:
     """Context manager for the import lock."""
@@ -354,25 +341,23 @@ class _LazyFinderContext:
             warnings.warn("_LazyFinder unexpectedly missing from sys.meta_path", ImportWarning, stacklevel=2)
 
 
-until_module_use: t.Final[_LazyFinderContext] = _LazyFinderContext()
-"""A context manager within which some imports will occur "lazily".
-
-The modules being imported must be written in pure Python. Anything else will be imported eagerly.
-
-``from`` imports may be evaluated eagerly.
-
-In a nested import such as ``import a.b.c``, only ``c`` will be lazily imported.
-``a`` and ``a.b`` will be eagerly imported. This may change in the future.
-
-Modules with import side effects might not cooperate with this.
-For instance, `collections` puts `collections.abc` in `sys.modules` in an unusual way at import time,
-meaning lazy-loading `collections.abc` will just break.
-"""
-
-
 # Ensure our type annotations are valid if evaluated at runtime.
-with until_module_use:
+with _LazyFinderContext():
     import typing as t
 
 
 # endregion
+
+
+until_module_use: t.Final[_LazyFinderContext] = _LazyFinderContext()
+"""A context manager within which some imports of modules will occur "lazily".
+
+Caveats:
+- The modules being imported must be written in pure Python. Anything else will be imported eagerly.
+- ``from`` imports may be evaluated eagerly.
+- In a nested import such as ``import a.b.c``, only ``c`` will be lazily imported. ``a`` and ``a.b`` will be eagerly
+  imported. This may change in the future.
+- Modules that perform their own import hacks might not cooperate with this. For instance, `collections` puts
+  `collections.abc` in `sys.modules` in an unusual way at import time, so attempting to lazy-load `collections.abc` will
+  just break.
+"""

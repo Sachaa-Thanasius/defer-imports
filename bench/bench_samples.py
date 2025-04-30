@@ -1,4 +1,5 @@
 # pyright: reportUnusedImport=none
+
 """Simple benchark script for comparing the import time of the Python standard library when using regular imports,
 defer_imports-influence imports, and slothy-influenced imports.
 
