@@ -129,6 +129,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    # See how long it actually takes to compile.
     if sys.dont_write_bytecode:
         remove_pycaches()
 
