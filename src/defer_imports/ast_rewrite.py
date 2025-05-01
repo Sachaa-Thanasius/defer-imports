@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import ast
 import builtins
 import contextvars
 import io
@@ -22,7 +23,6 @@ from . import __version__, lazy_load as _lazy_load
 
 
 with _lazy_load.until_module_use:
-    import ast
     import threading
     import tokenize
     import typing as t
