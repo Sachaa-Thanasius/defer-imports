@@ -56,8 +56,8 @@ else:  # pragma: <3.11 cover
 # ============================================================================
 # region -------- Module loader and finder --------
 #
-# Much of this is adapted from importlib._bootstrap and importlib.util to
-# avoid depending on private APIs and allow changes.
+# Much of this is adapted from standard library modules to avoid depending on
+# private APIs and allow changes.
 #
 # PYUPDATE: Ensure these are consistent with upstream, aside from our
 # customizations.
@@ -68,7 +68,7 @@ else:  # pragma: <3.11 cover
 # Changes:
 # - Special-case __spec__ in the lazy module type to avoid loading being unnecessarily triggered by internal importlib
 #   machinery.
-# - Adjust method signatures slightly to be more in line with object's.
+# - Adjust method signatures slightly to be more in line with ModuleType's.
 # - Do some slight personalization.
 class _LazyModuleType(types.ModuleType):
     """A subclass of the module type which triggers loading upon attribute access."""
@@ -221,6 +221,7 @@ class _LazyLoader(Loader):
         module.__class__ = _LazyModuleType
 
 
+# NOTE: We depend on the global import lock being reentrant.
 # Adapted from importlib._bootstrap.
 class _ImportLockContext:
     """Context manager for the import lock."""

@@ -33,10 +33,18 @@ from defer_imports.ast_rewrite import (
 )
 
 
+# TODO: Add tests for lazy_load.
+# TODO: Write tests for ast_rewrite's configuration and its effects.
+# TODO: Write tests for ast_rewrite's finder.
+# TODO: Get closer to 100% coverage.
+
+
 # ============================================================================
 # region -------- Helpers --------
 # ============================================================================
 
+
+SAMPLE_DOCSTRING = "Module docstring here"
 
 MODULE_TEMPLATE = f"""\
 from defer_imports.ast_rewrite import _DeferredImportKey as {_KEY_CLS_NAME}, \
@@ -45,7 +53,6 @@ _DeferredImportProxy as {_PROXY_CLS_NAME}, _actual_until_use as {_ACTUAL_CTX_NAM
 del {_KEY_CLS_NAME}, {_PROXY_CLS_NAME}, {_ACTUAL_CTX_NAME}
 """.rstrip()
 
-
 IMPORT_TEMPLATE = f"""\
 with {_ACTUAL_CTX_NAME}:
     {_LOCAL_NS_NAME} = locals()
@@ -53,7 +60,6 @@ with {_ACTUAL_CTX_NAME}:
 {{}}
     del {_TEMP_PROXY_NAME}, {_LOCAL_NS_NAME}
 """.rstrip()
-
 
 IF_TEMPLATE = f"""\
     if {{0}}.__class__ is {_PROXY_CLS_NAME}:
@@ -169,19 +175,21 @@ def test_path_hook_installation():
     assert len(sys.path_hooks) == before_length
 
 
+common_rewrite_cases = [
+    pytest.param("", "", id="empty module"),
+    pytest.param(*[f'''"""{SAMPLE_DOCSTRING}"""'''] * 2, id="docstring"),
+    pytest.param(*["""from __future__ import annotations"""] * 2, id="from __future__ import"),
+    pytest.param(
+        *[f'''"""{SAMPLE_DOCSTRING}"""\nfrom __future__ import annotations'''] * 2,
+        id="docstring and from __future__ import",
+    ),
+]
+
+
 @pytest.mark.parametrize(
     ("source", "expected_rewrite"),
     [
-        pytest.param(
-            '''"""Module docstring here"""''',
-            '''"""Module docstring here"""''',
-            id="only docstring stays as only element",
-        ),
-        pytest.param(
-            """from __future__ import annotations""",
-            """from __future__ import annotations""",
-            id="only __future__ import stays as only element",
-        ),
+        *common_rewrite_cases,
         pytest.param(
             """\
 from contextlib import nullcontext
@@ -198,6 +206,38 @@ with defer_imports.until_use, nullcontext():
     import inspect
 """.rstrip(),
             id="does nothing if used with another context manager",
+        ),
+        pytest.param(
+            f"""\
+'''{SAMPLE_DOCSTRING}'''
+
+import defer_imports
+
+with defer_imports.until_use:
+    import inspect
+""",
+            f'"""{SAMPLE_DOCSTRING}"""\n'
+            + module_template(
+                "import defer_imports",
+                import_template("    import inspect", if_template("inspect")),
+            ),
+            id="docstring then regular import",
+        ),
+        pytest.param(
+            """\
+from __future__ import annotations
+
+import defer_imports
+
+with defer_imports.until_use:
+    import inspect
+""",
+            "from __future__ import annotations\n"
+            + module_template(
+                "import defer_imports",
+                import_template("    import inspect", if_template("inspect")),
+            ),
+            id="docstring then regular import",
         ),
         pytest.param(
             """\
@@ -276,6 +316,7 @@ def test_instrumentation(source: str, expected_rewrite: str):
 @pytest.mark.parametrize(
     ("source", "expected_rewrite"),
     [
+        *common_rewrite_cases,
         pytest.param(
             "import inspect",
             module_template(import_template("    import inspect", if_template("inspect"))),

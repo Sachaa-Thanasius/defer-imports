@@ -23,6 +23,7 @@ from . import __version__, lazy_load as _lazy_load
 
 
 with _lazy_load.until_module_use:
+    import collections
     import threading
     import tokenize
     import typing as t
@@ -72,7 +73,7 @@ if TYPE_CHECKING:
     _final = t.final
 else:
 
-    def final(f: object) -> object:
+    def final(f: object) -> object:  # pragma: no cover (tested in stdlib)
         """Decorator to indicate final methods and final classes."""
         try:
             f.__final__ = True
@@ -112,9 +113,8 @@ _SourceData: TypeAlias = "t.Union[ReadableBuffer, str]"
 # ============================================================================
 # region -------- Vendored helpers --------
 #
-# These are adapted from importlib._bootstrap and
-# importlib._bootstrap_external to avoid depending on private APIs and allow
-# changes.
+# These are adapted from standard library modules to avoid depending on
+# private APIs and allow changes.
 #
 # PYUPDATE: Ensure these are consistent with upstream, aside from our
 # customizations.
@@ -133,9 +133,9 @@ def _resolve_name(name: str, package: str, level: int) -> str:  # pragma: no cov
     return f"{base}.{name}" if name else base
 
 
-# Adapted from importlib._bootstrap._sanity_check.
+# Adapted from importlib._bootstrap._sanity_check().
 # Changes:
-# - Remove the checks a) that the parser will catch, and b) that only matter when __import__ is invoked manually.
+# - Remove the checks a) that the parser can catch, and b) that only matter when __import__ is invoked manually.
 #   We depend on the the builtin parser and don't allow our __import__ replacement to be invoked manually.
 def _lax_sanity_check(package: t.Optional[str], level: int) -> None:  # pragma: no cover (tested in stdlib)
     """Verify arguments are "sane"."""
@@ -231,6 +231,21 @@ _TEMP_PROXY_NAME = f"{_HYGIENE_PREFIX}temp_proxy"
 _LOCAL_NS_NAME = f"{_HYGIENE_PREFIX}local_ns"
 
 
+def _walk_global(node: ast.AST) -> t.Generator[ast.AST]:
+    """Recursively yield descendent nodes of a tree starting at `node`, including `node` itself.
+
+    Nodes that introduce a new scope, such as class and function definitions, and their children are skipped.
+    """
+
+    todo = collections.deque([node])
+    while todo:
+        node = todo.popleft()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            continue
+        todo.extend(ast.iter_child_nodes(node))
+        yield node
+
+
 def _is_until_use_node(node: ast.With) -> bool:
     """Check if the node matches ``with defer_imports.until_use: ...``."""
 
@@ -242,20 +257,16 @@ def _is_until_use_node(node: ast.With) -> bool:
     )
 
 
-class _ImportsInstrumenter:
+class _ImportsInstrumenter(ast.NodeTransformer):
     """AST transformer that instruments imports within ``with defer_imports.until_use: ...`` blocks.
 
     The results of those imports will be assigned to custom keys in the local namespace.
-
-    Notes
-    -----
-    This doesn't subclass `ast.NodeTransformer` but instead vendors its logic to avoid the upfront import cost of `ast`.
     """
 
     # NOTE: This makes liberal use of ast.fix_missing_locations and ast.copy_location. While they cause a ~30% slowdown
     # in bytecode compilation compared to the manual way, they're much easier to maintain.
 
-    # PYUPDATE: Ensure visit and generic_visit are consistent with upstream, aside from our customizations.
+    # PYUPDATE: Ensure generic_visit is consistent with upstream, aside from our customizations.
     # PYUPDATE: py3.14 - Take advantage of better defaults for node parameters, e.g. ast.Load() for ctx,
     # late-initialized empty lists for parameters that take lists, etc.
 
@@ -263,15 +274,9 @@ class _ImportsInstrumenter:
         self.source: _SourceData = source
         self.filepath: _ModulePath = filepath
         self.rewrite_whole_module: bool = whole_module
+
         self.escape_hatch_depth: int = 0
         self.did_any_instrumentation: bool = False
-
-    def visit(self, node: ast.AST) -> t.Any:
-        """Visit a node."""
-
-        method = f"visit_{node.__class__.__name__}"
-        visitor = getattr(self, method, self.generic_visit)
-        return visitor(node)
 
     def _wrap_import_stmts(self, nodes: list[t.Union[ast.Import, ast.ImportFrom]]) -> ast.With:
         """Wrap a list of import nodes with a `defer_imports.until_use` block and instrument them."""
@@ -279,6 +284,20 @@ class _ImportsInstrumenter:
         with_items = [ast.withitem(ast.Name(_ACTUAL_CTX_NAME, ctx=ast.Load()))]
         with_stmt = ast.With(items=with_items, body=self._substitute_import_keys(nodes))
         return ast.fix_missing_locations(ast.copy_location(with_stmt, nodes[0]))
+
+    def _is_import_to_wrap(self, node: ast.AST) -> bool:
+        """Determine whether a node is a global import that should be instrumented."""
+
+        return (
+            self.escape_hatch_depth == 0
+            # Must be an import node.
+            and (
+                isinstance(node, ast.Import)
+                or
+                # No wildcard or future "from" imports.
+                (isinstance(node, ast.ImportFrom) and node.names[0].name != "*" and node.module != "__future__")
+            )
+        )
 
     def generic_visit(self, node: ast.AST) -> ast.AST:  # noqa: PLR0912
         """Called if no explicit visitor function exists for a node.
@@ -295,13 +314,7 @@ class _ImportsInstrumenter:
                 for value in old_value:  # pyright: ignore [reportUnknownVariableType]
                     if isinstance(value, ast.AST):
                         if self.rewrite_whole_module:
-                            if (
-                                # Only for import nodes without wildcards.
-                                isinstance(value, (ast.Import, ast.ImportFrom))
-                                and value.names[0].name != "*"
-                                # Only outside of escape hatch blocks.
-                                and (self.escape_hatch_depth == 0)
-                            ):
+                            if self._is_import_to_wrap(value):
                                 start_idx += 1
                             elif start_idx > 0:
                                 new_values[-start_idx:] = [self._wrap_import_stmts(new_values[-start_idx:])]
@@ -594,7 +607,7 @@ class _DeferredFileLoader(SourceFileLoader):
     # Ref: https://github.com/python/typeshed/pull/13880
     # Ref: https://github.com/python/typeshed/issues/13881
     def source_to_code(self, data: _SourceData, path: _ModulePath, *, _optimize: int = -1) -> types.CodeType:  # pyright: ignore [reportIncompatibleMethodOverride]
-        """Compile `data` into a code object, but not before potentially instrumenting it.
+        """Compile the source `data` into a code object, possibly instrumenting it along the way.
 
         Parameters
         ----------
@@ -604,8 +617,9 @@ class _DeferredFileLoader(SourceFileLoader):
 
         if data:
             orig_tree = ast.parse(data, path, "exec")
+
             if self.defer_whole_module or any(
-                (isinstance(node, ast.With) and _is_until_use_node(node)) for node in ast.walk(orig_tree)
+                (isinstance(node, ast.With) and _is_until_use_node(node)) for node in _walk_global(orig_tree)
             ):
                 instrumenter = _ImportsInstrumenter(data, path, whole_module=self.defer_whole_module)
                 new_tree = instrumenter.visit(orig_tree)
@@ -615,14 +629,14 @@ class _DeferredFileLoader(SourceFileLoader):
 
         return super().source_to_code(data, path, _optimize=_optimize)  # pyright: ignore # noqa: PGH003
 
-    def exec_module(self, module: types.ModuleType) -> None:
-        """Execute the module."""
+    def create_module(self, spec: ModuleSpec) -> t.Optional[types.ModuleType]:
+        """Use default semantics for module creation."""
 
-        # This state is needed for self.source_to_code().
-        if (module.__spec__ is not None) and (module.__spec__.loader_state is not None):
-            self.defer_whole_module = module.__spec__.loader_state["defer_whole_module"]
+        # This state is needed for self.source_to_code(), which is called by self.exec_module().
+        if spec.loader_state is not None:
+            self.defer_whole_module = spec.loader_state["defer_whole_module"]
 
-        return super().exec_module(module)
+        return super().create_module(spec)
 
 
 class _DeferredFileFinder(FileFinder):
@@ -781,7 +795,7 @@ class ImportHookContext:
             #   That would be a bigger monkeypatch in some ways, but it's the route that typeguard takes
             #   (and one we took previously).
             # - Delete the sys.path_importer_cache entries instead of monkeypatching them.
-            #   This is the docs's recommendation and is technically more correct, but it causes a big slowdown on
+            #   This is recommended by the docs and is technically more correct, but it can cause a big slowdown on
             #   startup.
             for finder in sys.path_importer_cache.values():
                 if (finder is not None) and (finder.__class__ is FileFinder):
@@ -885,15 +899,15 @@ class _DeferredImportProxy:
             msg = f"proxy for module {self.__name!r} has no attribute {name!r}"
             raise AttributeError(msg)
 
-    def __resolve(self, key: str, /) -> None:  # pyright: ignore [reportUnusedFunction] # Used in _DeferredImportKey.
+    def _resolve_di_proxy(self, key: str, /) -> None:
         """Perform an actual import for the proxy and bind the result to the given key in the relevant namespace."""
 
         # 1. Perform the original __import__ and pray.
         module: types.ModuleType = _original_import.get()(*self.__import_args)
 
         # 2. Transfer nested proxies over to the resolved module.
-        module_vars = vars(module)
-        for attr_key, attr_val in vars(self).items():
+        module_vars = module.__dict__
+        for attr_key, attr_val in self.__dict__.items():
             if isinstance(attr_val, _DeferredImportProxy) and not hasattr(module, attr_key):
                 # NOTE: This doesn't use setattr() because pypy normalizes the attr key type to `str`.
                 module_vars[_DeferredImportKey(attr_key, attr_val)] = attr_val
@@ -951,7 +965,7 @@ class _DeferredImportKey(str):
 
                 if not _is_deferred.get():
                     # Tell the proxy to resolve the import and replace itself in the relevant namespace.
-                    self.proxy._DeferredImportProxy__resolve(str(self))  # pyright: ignore [reportCallIssue]
+                    self.proxy._resolve_di_proxy(str(self))
 
         return True
 
@@ -967,26 +981,27 @@ def _deferred___import__(
 ) -> t.Any:
     """An limited replacement for `__import__` that supports deferred imports by returning proxies."""
 
-    # Precondition: This is only called within the context of "with _actual_until_use: ...".
+    # Precondition: This is only called by syntactic import statements within the context of
+    # "with _actual_until_use: ...".
 
     # fromlist is None sometimes. Haven't looked into why yet.
     fromlist = fromlist or ()
     globals = globals if (globals is not None) else {}  # noqa: A001
     locals = locals if (locals is not None) else {}  # noqa: A001
 
-    # We have to do the verification of valid inputs ourselves now.
+    # Do a bit of input validation.
     package = _calc___package__(globals) if (level != 0) else None
     _lax_sanity_check(package, level)
     if level > 0:
-        assert package is not None, "_sanity_check() should have ensured this."
+        assert package is not None, "_lax_sanity_check() should have ensured this."
         name = _resolve_name(name, package, level)
         level = 0
 
-    # Handle submodule imports if relevant top-level imports already occurred in the call site's module.
+    # Handle submodule imports if imports of parent modules already occurred in the call site's namespace.
     if not fromlist and ("." in name):
-        name_parts = name.split(".")
+        sub_s = name.find(".")
         try:
-            base_parent = parent = locals[name_parts[0]]
+            base_parent = parent = locals[name[:sub_s]]
         except KeyError:
             pass
         else:
@@ -994,14 +1009,23 @@ def _deferred___import__(
             #       clobbered. Not sure if this is right, but it feels like the safest move.
             if isinstance(base_parent, (types.ModuleType, _DeferredImportProxy)):
                 # Nest submodule proxies as needed.
-                for limit, attr_or_submod_name in enumerate(name_parts[1:], start=2):
-                    if attr_or_submod_name not in vars(parent):
-                        cur_name = ".".join(name_parts[:limit])
-                        nested_proxy = _DeferredImportProxy(cur_name, globals, locals, (), level, attr_or_submod_name)
-                        setattr(parent, attr_or_submod_name, nested_proxy)
+                sub_s += 1
+
+                # NOTE: Using indices like this is a micro-optimization.
+                while (sub_e := name.find(".", sub_s)) != -1:
+                    submod_name = name[sub_s:sub_e]
+                    if submod_name not in parent.__dict__:
+                        nested_proxy = _DeferredImportProxy(name[:sub_e], globals, locals, (), level, submod_name)
+                        setattr(parent, submod_name, nested_proxy)
                         parent = nested_proxy
                     else:
-                        parent = getattr(parent, attr_or_submod_name)
+                        parent = getattr(parent, submod_name)
+
+                    sub_s = sub_e + 1
+
+                submod_name = name[sub_s:]
+                if submod_name not in parent.__dict__:
+                    setattr(parent, submod_name, _DeferredImportProxy(name, globals, locals, (), level, submod_name))
 
                 return base_parent
 
@@ -1037,7 +1061,8 @@ class _DeferredContext:
         builtins.__import__ = _original_import.get()
 
 
-_actual_until_use: t.Final[_DeferredContext] = _DeferredContext()
+#: The context manager that replaces until_use after instrumentation.
+_actual_until_use = _DeferredContext()
 
 
 # endregion
