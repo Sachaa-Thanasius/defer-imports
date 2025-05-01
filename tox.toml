@@ -3,17 +3,20 @@ env_list = ["coverage_clean", "3.9", "3.10", "3.11", "3.12", "3.13", "3.13t", "p
 skip_missing_interpreters = true
 
 [env_run_base]
+description = "Run tests with pytest under {env_name}."
 package = "wheel"
 wheel_build_env = ".pkg"
 dependency_groups = ["test", "cov"]
 commands = [["coverage", "run", "-m", "pytest", { replace = "posargs", extend = true }]]
 
 [env.coverage_clean]
+description = "Clean coverage artifacts."
 skip_install = true
 dependency_groups = ["cov"]
 commands = [["coverage", "erase"]]
 
 [env.coverage]
+description = "Run coverage and combine results."
 skip_install = true
 dependency_groups = ["cov"]
 depends = ["3.9", "3.10", "3.11", "3.12", "3.13", "3.13t", "pypy3"]

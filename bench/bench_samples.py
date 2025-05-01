@@ -106,7 +106,7 @@ def pretty_print_results(results: dict[str, float], minimum: float) -> None:
 
 BENCH_FUNCS = {
     "regular": bench_regular,
-    "slothy": bench_slothy,
+    # "slothy": bench_slothy,
     "defer_imports (local)": bench_defer_imports_local,
     "defer_imports (global)": bench_defer_imports_global,
 }

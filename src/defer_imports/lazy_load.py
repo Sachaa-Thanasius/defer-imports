@@ -65,7 +65,7 @@ else:  # pragma: <3.11 cover
 
 
 # Adapted from importlib.util.
-# Changes include:
+# Changes:
 # - Special-case __spec__ in the lazy module type to avoid loading being unnecessarily triggered by internal importlib
 #   machinery.
 # - Adjust method signatures slightly to be more in line with object's.
@@ -169,7 +169,7 @@ class _LazyModuleType(types.ModuleType):
 
 
 # Adapted from importlib.util.
-# Changes include:
+# Changes:
 # - Move threading import within exec_module to the top level to avoid circular import issues.
 #     a. This may cause issues when this module is used in emscripten or wasi.
 #        TODO: Test this.

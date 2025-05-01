@@ -133,16 +133,13 @@ def _resolve_name(name: str, package: str, level: int) -> str:  # pragma: no cov
     return f"{base}.{name}" if name else base
 
 
-# Adapted from importlib._bootstrap.
-def _sanity_check(name: str, package: t.Optional[str], level: int) -> None:  # pragma: no cover (tested in stdlib)
+# Adapted from importlib._bootstrap._sanity_check.
+# Changes:
+# - Remove the checks a) that the parser will catch, and b) that only matter when __import__ is invoked manually.
+#   We depend on the the builtin parser and don't allow our __import__ replacement to be invoked manually.
+def _lax_sanity_check(package: t.Optional[str], level: int) -> None:  # pragma: no cover (tested in stdlib)
     """Verify arguments are "sane"."""
 
-    if not isinstance(name, str):  # pyright: ignore [reportUnnecessaryIsInstance] # Account for user error.
-        msg = f"module name must be str, not {name.__class__}"
-        raise TypeError(msg)
-    if level < 0:
-        msg = "level must be >= 0"
-        raise ValueError(msg)
     if level > 0:
         if not isinstance(package, str):
             msg = "__package__ not set to a string"
@@ -150,9 +147,6 @@ def _sanity_check(name: str, package: t.Optional[str], level: int) -> None:  # p
         if not package:
             msg = "attempted relative import with no known parent package"
             raise ImportError(msg)
-    if not name and level == 0:
-        msg = "Empty module name"
-        raise ValueError(msg)
 
 
 # Adapted from importlib._bootstrap.
@@ -616,6 +610,8 @@ class _DeferredFileLoader(SourceFileLoader):
                 instrumenter = _ImportsInstrumenter(data, path, whole_module=self.defer_whole_module)
                 new_tree = instrumenter.visit(orig_tree)
                 return super().source_to_code(new_tree, path, _optimize=_optimize)  # pyright: ignore # noqa: PGH003
+            else:
+                return super().source_to_code(orig_tree, path, _optimize=_optimize)  # pyright: ignore # noqa: PGH003
 
         return super().source_to_code(data, path, _optimize=_optimize)  # pyright: ignore # noqa: PGH003
 
@@ -623,8 +619,8 @@ class _DeferredFileLoader(SourceFileLoader):
         """Execute the module."""
 
         # This state is needed for self.source_to_code().
-        if (spec := module.__spec__) is not None and spec.loader_state is not None:
-            self.defer_whole_module = spec.loader_state["defer_whole_module"]
+        if (module.__spec__ is not None) and (module.__spec__.loader_state is not None):
+            self.defer_whole_module = module.__spec__.loader_state["defer_whole_module"]
 
         return super().exec_module(module)
 
@@ -736,7 +732,7 @@ class ImportHookContext:
 
     __slots__ = ("_config", "_uninstall_after", "_tok")
 
-    def __init_subclass__(cls, *args: t.Any, **kwargs: t.Any) -> t.NoReturn:
+    def __init_subclass__(cls, *args: object, **kwargs: object) -> t.NoReturn:
         msg = f"Type {cls.__name__!r} is not an acceptable base type."
         raise TypeError(msg)
 
@@ -816,7 +812,7 @@ class ImportHookContext:
                 finder.__class__ = FileFinder
 
 
-import_hook: t.Final = ImportHookContext
+import_hook = ImportHookContext
 
 
 # endregion
@@ -942,7 +938,8 @@ class _DeferredImportKey(str):
         return self
 
     def __eq__(self, value: object, /) -> bool:
-        if (is_eq := super().__eq__(value)) is not True:
+        is_eq = super().__eq__(value)
+        if is_eq is not True:
             return is_eq
 
         # Only the first thread to grab the lock should resolve the deferred import.
@@ -970,6 +967,8 @@ def _deferred___import__(
 ) -> t.Any:
     """An limited replacement for `__import__` that supports deferred imports by returning proxies."""
 
+    # Precondition: This is only called within the context of "with _actual_until_use: ...".
+
     # fromlist is None sometimes. Haven't looked into why yet.
     fromlist = fromlist or ()
     globals = globals if (globals is not None) else {}  # noqa: A001
@@ -977,7 +976,7 @@ def _deferred___import__(
 
     # We have to do the verification of valid inputs ourselves now.
     package = _calc___package__(globals) if (level != 0) else None
-    _sanity_check(name, package, level)
+    _lax_sanity_check(package, level)
     if level > 0:
         assert package is not None, "_sanity_check() should have ensured this."
         name = _resolve_name(name, package, level)
