@@ -36,15 +36,6 @@ cov = ["coverage>=7", "covdefaults"]
 bench = ["slothy==1.0.0"]
 
 
-# -------- Benchmark config
-# TODO: Convert this to tox.
-
-[tool.hatch.envs.bench.scripts]
-stdlib = "python -m bench.bench_samples"
-import-time = 'python -X importtime -c "import {args:defer_imports}"'
-simple-import-time = 'python -m timeit -n 1 -r 1 -- "import {args:defer_imports}"'
-
-
 # -------- Test config --------
 
 [tool.pytest.ini_options]

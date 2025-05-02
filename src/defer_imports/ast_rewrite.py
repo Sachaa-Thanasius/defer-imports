@@ -231,18 +231,21 @@ _TEMP_PROXY_NAME = f"{_HYGIENE_PREFIX}temp_proxy"
 _LOCAL_NS_NAME = f"{_HYGIENE_PREFIX}local_ns"
 
 
-def _walk_global(node: ast.AST) -> t.Generator[ast.AST]:
+#: The names of location attributes of AST nodes.
+_AST_LOC_ATTRS = ("lineno", "col_offset", "end_lineno", "end_col_offset")
+
+
+def _walk_globals(node: ast.AST) -> t.Generator[ast.AST]:
     """Recursively yield descendent nodes of a tree starting at `node`, including `node` itself.
 
-    Nodes that introduce a new scope, such as class and function definitions, and their children are skipped.
+    Nodes that introduce a new scope, such as class and function definitions, are skipped entirely.
     """
 
+    scope_node_types = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
     todo = collections.deque([node])
     while todo:
         node = todo.popleft()
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
-            continue
-        todo.extend(ast.iter_child_nodes(node))
+        todo.extend(child for child in ast.iter_child_nodes(node) if not isinstance(child, scope_node_types))
         yield node
 
 
@@ -263,8 +266,8 @@ class _ImportsInstrumenter(ast.NodeTransformer):
     The results of those imports will be assigned to custom keys in the local namespace.
     """
 
-    # NOTE: This makes liberal use of ast.fix_missing_locations and ast.copy_location. While they cause a ~30% slowdown
-    # in bytecode compilation compared to the manual way, they're much easier to maintain.
+    # NOTE: ast.fix_missing_locations and ast.copy_location make location bookeeping easier but slow compilation by
+    # ~30%, so we avoid them.
 
     # PYUPDATE: Ensure generic_visit is consistent with upstream, aside from our customizations.
     # PYUPDATE: py3.14 - Take advantage of better defaults for node parameters, e.g. ast.Load() for ctx,
@@ -281,9 +284,9 @@ class _ImportsInstrumenter(ast.NodeTransformer):
     def _wrap_import_stmts(self, nodes: list[t.Union[ast.Import, ast.ImportFrom]]) -> ast.With:
         """Wrap a list of import nodes with a `defer_imports.until_use` block and instrument them."""
 
-        with_items = [ast.withitem(ast.Name(_ACTUAL_CTX_NAME, ctx=ast.Load()))]
-        with_stmt = ast.With(items=with_items, body=self._substitute_import_keys(nodes))
-        return ast.fix_missing_locations(ast.copy_location(with_stmt, nodes[0]))
+        loc = {attr: getattr(nodes[0], attr) for attr in _AST_LOC_ATTRS}
+        with_items = [ast.withitem(ast.Name(_ACTUAL_CTX_NAME, ctx=ast.Load(), **loc))]
+        return ast.With(items=with_items, body=self._substitute_import_keys(nodes), **loc)
 
     def _is_import_to_wrap(self, node: ast.AST) -> bool:
         """Determine whether a node is a global import that should be instrumented."""
@@ -382,7 +385,7 @@ class _ImportsInstrumenter(ast.NodeTransformer):
         return context
 
     @staticmethod
-    def _create_import_name_replacement(name: str) -> ast.If:
+    def _replace_proxy_key(name: str, loc: dict[str, t.Any]) -> ast.If:
         """Create an AST for changing the name of a variable in locals if the variable is a defer_imports proxy.
 
         The resulting node is roughly equivalent to the following code if unparsed::
@@ -396,57 +399,70 @@ class _ImportsInstrumenter(ast.NodeTransformer):
 
         return ast.If(
             test=ast.Compare(
-                left=ast.Attribute(ast.Name(name, ctx=ast.Load()), attr="__class__", ctx=ast.Load()),
+                left=ast.Attribute(ast.Name(name, ctx=ast.Load(), **loc), attr="__class__", ctx=ast.Load(), **loc),
                 ops=[ast.Is()],
-                comparators=[ast.Name(_PROXY_CLS_NAME, ctx=ast.Load())],
+                comparators=[ast.Name(_PROXY_CLS_NAME, ctx=ast.Load(), **loc)],
+                **loc,
             ),
             body=[
                 ast.Assign(
                     targets=[
-                        ast.Name(_TEMP_PROXY_NAME, ctx=ast.Store()),
+                        ast.Name(_TEMP_PROXY_NAME, ctx=ast.Store(), **loc),
                         ast.Subscript(
-                            value=ast.Name(_LOCAL_NS_NAME, ctx=ast.Load()),
+                            value=ast.Name(_LOCAL_NS_NAME, ctx=ast.Load(), **loc),
                             slice=ast.Call(
-                                func=ast.Name(_KEY_CLS_NAME, ctx=ast.Load()),
-                                args=[ast.Constant(name), ast.Name(_TEMP_PROXY_NAME, ctx=ast.Load())],
+                                func=ast.Name(_KEY_CLS_NAME, ctx=ast.Load(), **loc),
+                                args=[ast.Constant(name, **loc), ast.Name(_TEMP_PROXY_NAME, ctx=ast.Load(), **loc)],
                                 keywords=[],
+                                **loc,
                             ),
                             ctx=ast.Store(),
+                            **loc,
                         ),
                     ],
                     value=ast.Call(
-                        func=ast.Attribute(ast.Name(_LOCAL_NS_NAME, ctx=ast.Load()), "pop", ast.Load()),
-                        args=[ast.Constant(name)],
+                        func=ast.Attribute(ast.Name(_LOCAL_NS_NAME, ctx=ast.Load(), **loc), "pop", ast.Load(), **loc),
+                        args=[ast.Constant(name, **loc)],
                         keywords=[],
+                        **loc,
                     ),
+                    **loc,
                 )
             ],
             orelse=[],
+            **loc,
         )
 
     def _substitute_import_keys(self, import_nodes: list[t.Union[ast.Import, ast.ImportFrom]]) -> list[ast.stmt]:
         """Instrument a *non-empty* list of imports."""
 
         self.did_any_instrumentation = True
+        loc = {attr: getattr(import_nodes[0], attr) for attr in _AST_LOC_ATTRS}
+
         new_nodes: list[ast.stmt] = []
 
         # Start with some helper variables.
         # A reference to locals() to avoid calling locals() repeatedly.
-        locals_call = ast.Call(func=ast.Name("locals", ctx=ast.Load()), args=[], keywords=[])
-        local_ns = ast.Assign(targets=[ast.Name(_LOCAL_NS_NAME, ctx=ast.Store())], value=locals_call)
+        locals_call = ast.Call(func=ast.Name("locals", ctx=ast.Load(), **loc), args=[], keywords=[], **loc)
+        local_ns = ast.Assign(targets=[ast.Name(_LOCAL_NS_NAME, ctx=ast.Store(), **loc)], value=locals_call, **loc)
         new_nodes.append(local_ns)
 
         # A reference to the current proxy being "fixed".
-        temp_proxy = ast.Assign(targets=[ast.Name(_TEMP_PROXY_NAME, ctx=ast.Store())], value=ast.Constant(None))
+        proxy_name: ast.expr = ast.Name(_TEMP_PROXY_NAME, ctx=ast.Store(), **loc)
+        temp_proxy = ast.Assign(targets=[proxy_name], value=ast.Constant(None, **loc), **loc)
         new_nodes.append(temp_proxy)
 
         # Then, add the imports + namespace adjustments.
         for node in import_nodes:
             new_nodes.append(node)
-            new_nodes.extend(self._create_import_name_replacement(alias.asname or alias.name) for alias in node.names)
+            loc["lineno"], loc["end_lineno"] = node.lineno, node.end_lineno
+            new_nodes.extend(self._replace_proxy_key(alias.asname or alias.name, loc) for alias in node.names)
 
         # Finally, clean up the helper variables via deletion.
-        new_nodes.append(ast.Delete([ast.Name(name, ctx=ast.Del()) for name in (_TEMP_PROXY_NAME, _LOCAL_NS_NAME)]))
+        loc_node = import_nodes[-1]
+        loc["lineno"], loc["end_lineno"] = loc_node.lineno, loc_node.end_lineno
+        del_tgts: list[ast.expr] = [ast.Name(name, ctx=ast.Del(), **loc) for name in (_TEMP_PROXY_NAME, _LOCAL_NS_NAME)]
+        new_nodes.append(ast.Delete(targets=del_tgts, **loc))
 
         return new_nodes
 
@@ -484,11 +500,12 @@ class _ImportsInstrumenter(ast.NodeTransformer):
             return self._visit_eager_import_block(node)
 
         # Replace the dummy context manager with the one that will actually replace __import__.
-        new_ctx_expr = ast.copy_location(ast.Name(_ACTUAL_CTX_NAME, ctx=ast.Load()), node.items[0].context_expr)
-        node.items[0].context_expr = new_ctx_expr
+        old_ctx_expr = node.items[0].context_expr
+        loc = {attr: getattr(old_ctx_expr, attr) for attr in _AST_LOC_ATTRS}
+        node.items[0].context_expr = ast.Name(_ACTUAL_CTX_NAME, ctx=ast.Load(), **loc)
 
         node.body = self._substitute_import_keys(self._validate_until_use_body(node.body))
-        return ast.fix_missing_locations(node)
+        return node
 
     def visit_Module(self, node: ast.Module) -> ast.AST:
         """Insert imports and cleanup necessary to make `defer_imports.until_use` work properly.
@@ -520,14 +537,18 @@ class _ImportsInstrumenter(ast.NodeTransformer):
             else:
                 break
 
+        loc = {attr: getattr(node.body[position], attr) for attr in _AST_LOC_ATTRS}
+
         # Then, add necessary defer_imports import.
-        aliases = list(map(ast.alias, _INTERNALS_NAMES, _INTERNALS_ASNAMES))
-        import_stmt = ast.ImportFrom(module=__spec__.name, names=aliases, level=0)
-        node.body.insert(position, ast.fix_missing_locations(ast.copy_location(import_stmt, node.body[position])))
+        aliases = [ast.alias(name, asname, **loc) for name, asname in zip(_INTERNALS_NAMES, _INTERNALS_ASNAMES)]
+        import_stmt = ast.ImportFrom(module=__spec__.name, names=aliases, level=0, **loc)
+        node.body.insert(position, import_stmt)
 
         # Finally, clean up the namespace via deletion.
-        del_stmt = ast.Delete(targets=[ast.Name(asname, ctx=ast.Del()) for asname in _INTERNALS_ASNAMES])
-        node.body.append(ast.fix_missing_locations(ast.copy_location(del_stmt, node.body[-1])))
+        loc_node = node.body[-1]
+        loc["lineno"], loc["end_lineno"] = loc_node.lineno, loc_node.end_lineno
+        del_stmt = ast.Delete(targets=[ast.Name(asname, ctx=ast.Del(), **loc) for asname in _INTERNALS_ASNAMES], **loc)
+        node.body.append(del_stmt)
 
         return node
 
@@ -619,7 +640,7 @@ class _DeferredFileLoader(SourceFileLoader):
             orig_tree = ast.parse(data, path, "exec")
 
             if self.defer_whole_module or any(
-                (isinstance(node, ast.With) and _is_until_use_node(node)) for node in _walk_global(orig_tree)
+                (isinstance(node, ast.With) and _is_until_use_node(node)) for node in _walk_globals(orig_tree)
             ):
                 instrumenter = _ImportsInstrumenter(data, path, whole_module=self.defer_whole_module)
                 new_tree = instrumenter.visit(orig_tree)
@@ -849,7 +870,8 @@ _is_deferred = contextvars.ContextVar("_is_deferred", default=False)
 class _DeferredImportProxy:
     """Proxy for a deferred `__import__` call."""
 
-    # NOTE: We mangle the instance attribute names to help avoid accidental exposure if the proxy leaks.
+    # NOTE: We mangle the instance attribute names to help avoid further exposure if the proxy leaks and a user tries
+    # to get an attribute, not knowing it isn't a module they're getting it from.
 
     def __init__(  # noqa: PLR0913
         self,
@@ -1008,18 +1030,18 @@ def _deferred___import__(
             # NOTE: We assume that if base_parent is a module or a proxy, then it shouldn't be getting
             #       clobbered. Not sure if this is right, but it feels like the safest move.
             if isinstance(base_parent, (types.ModuleType, _DeferredImportProxy)):
-                # Nest submodule proxies as needed.
+                # NOTE: Using indices like this is a micro-optimization.
                 sub_s += 1
 
-                # NOTE: Using indices like this is a micro-optimization.
+                # Nest submodule proxies as needed.
                 while (sub_e := name.find(".", sub_s)) != -1:
                     submod_name = name[sub_s:sub_e]
-                    if submod_name not in parent.__dict__:
+                    try:
+                        parent = getattr(parent, submod_name)
+                    except AttributeError:
                         nested_proxy = _DeferredImportProxy(name[:sub_e], globals, locals, (), level, submod_name)
                         setattr(parent, submod_name, nested_proxy)
                         parent = nested_proxy
-                    else:
-                        parent = getattr(parent, submod_name)
 
                     sub_s = sub_e + 1
 

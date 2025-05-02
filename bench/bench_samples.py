@@ -127,10 +127,15 @@ def main() -> None:
         type=str,
         help="The order in which the influenced (or not influenced) imports are run",
     )
+    parser.add_argument(
+        "--remove-pycaches",
+        action="store_true",
+        help="Whether to remove __pycache__ directories and other bytecode cache files.",
+    )
     args = parser.parse_args()
 
     # See how long it actually takes to compile.
-    if sys.dont_write_bytecode:
+    if args.remove_pycaches:
         remove_pycaches()
 
     exec_order: list[str] = args.exec_order or default_exec_order
