@@ -285,7 +285,7 @@ class _ImportsInstrumenter(ast.NodeTransformer):
         """Wrap a list of import nodes with a `defer_imports.until_use` block and instrument them."""
 
         loc = {attr: getattr(nodes[0], attr) for attr in _AST_LOC_ATTRS}
-        with_items = [ast.withitem(ast.Name(_ACTUAL_CTX_NAME, ctx=ast.Load(), **loc))]
+        with_items = [ast.withitem(context_expr=ast.Name(_ACTUAL_CTX_NAME, ctx=ast.Load(), **loc))]
         return ast.With(items=with_items, body=self._substitute_import_keys(nodes), **loc)
 
     def _is_import_to_wrap(self, node: ast.AST) -> bool:
@@ -385,7 +385,7 @@ class _ImportsInstrumenter(ast.NodeTransformer):
         return context
 
     @staticmethod
-    def _replace_proxy_key(name: str, loc: dict[str, t.Any]) -> ast.If:
+    def _create_key_substitution(name: str, loc: dict[str, t.Any]) -> ast.If:
         """Create an AST for changing the name of a variable in locals if the variable is a defer_imports proxy.
 
         The resulting node is roughly equivalent to the following code if unparsed::
@@ -454,9 +454,9 @@ class _ImportsInstrumenter(ast.NodeTransformer):
 
         # Then, add the imports + namespace adjustments.
         for node in import_nodes:
-            new_nodes.append(node)
             loc["lineno"], loc["end_lineno"] = node.lineno, node.end_lineno
-            new_nodes.extend(self._replace_proxy_key(alias.asname or alias.name, loc) for alias in node.names)
+            new_nodes.append(node)
+            new_nodes.extend(self._create_key_substitution(alias.asname or alias.name, loc) for alias in node.names)
 
         # Finally, clean up the helper variables via deletion.
         loc_node = import_nodes[-1]
