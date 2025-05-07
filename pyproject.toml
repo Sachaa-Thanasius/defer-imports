@@ -30,7 +30,7 @@ Issues = "https://github.com/Sachaa-Thanasius/defer-imports/issues"
 Source = "https://github.com/Sachaa-Thanasius/defer-imports"
 
 [dependency-groups]
-dev = ["tox>=4.24.1"]
+dev = ["tox>=4.24.1", "typing-extensions"]
 test = ["pytest>=8", "pytest-rerunfailures"]
 cov = ["coverage>=7", "covdefaults"]
 bench = ["slothy==1.0.0"]

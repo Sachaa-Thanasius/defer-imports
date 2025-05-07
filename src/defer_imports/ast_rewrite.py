@@ -136,7 +136,6 @@ def _resolve_name(name: str, package: str, level: int) -> str:  # pragma: no cov
 # Adapted from importlib._bootstrap._sanity_check().
 # Changes:
 # - Remove the checks a) that the parser can catch, and b) that only matter when __import__ is invoked manually.
-#   We depend on the the builtin parser and don't allow our __import__ replacement to be invoked manually.
 def _lax_sanity_check(package: t.Optional[str], level: int) -> None:  # pragma: no cover (tested in stdlib)
     """Verify arguments are "sane"."""
 
@@ -871,7 +870,7 @@ class _DeferredImportProxy:
     """Proxy for a deferred `__import__` call."""
 
     # NOTE: We mangle the instance attribute names to help avoid further exposure if the proxy leaks and a user tries
-    # to get an attribute, not knowing it isn't a module they're getting it from.
+    # to use it as a module or module attribute.
 
     def __init__(  # noqa: PLR0913
         self,
@@ -893,7 +892,7 @@ class _DeferredImportProxy:
 
     @property
     def __import_args(self, /):  # noqa: ANN202 # Too verbose.
-        """A tuple of args that can be passed into __import__."""
+        """`tuple`: Arguments to be passed directly into `__import__()`."""
 
         return (self.__name, self.__global_ns, self.__local_ns, self.__fromlist, self.__level)
 
@@ -912,11 +911,9 @@ class _DeferredImportProxy:
             from_proxy = self.__class__(*self.__import_args)
             from_proxy.__fromlist = (name,)
             return from_proxy
-
         elif ("." in self.__name) and (name == self.__name.rpartition(".")[2]):
-            submodule_proxy = self.__class__(*self.__import_args, name)
+            submodule_proxy = self.__class__(*self.__import_args, sub=name)
             return submodule_proxy  # noqa: RET504
-
         else:
             msg = f"proxy for module {self.__name!r} has no attribute {name!r}"
             raise AttributeError(msg)
@@ -960,34 +957,40 @@ class _DeferredImportKey(str):
     When referenced, the key will replace itself in the namespace with the resolved import or the right name from it.
     """
 
-    __slots__ = ("proxy", "is_resolving", "lock")
+    # NOTE: We mangle the instance attribute names to help avoid further exposure if the key leaks and a user tries
+    # to use it as a str.
 
-    proxy: _DeferredImportProxy
-    is_resolving: bool
-    lock: threading.RLock
+    __slots__ = ("__proxy", "__is_resolving", "__lock")
+
+    __proxy: _DeferredImportProxy  # pyright: ignore [reportUninitializedInstanceVariable]
+    __is_resolving: bool  # pyright: ignore [reportUninitializedInstanceVariable]
+    __lock: threading.RLock  # pyright: ignore [reportUninitializedInstanceVariable]
 
     def __new__(cls, key: str, proxy: _DeferredImportProxy, /) -> Self:
         self = super().__new__(cls, key)
-        self.proxy = proxy
-        self.is_resolving = False
-        self.lock = threading.RLock()
+        self.__proxy = proxy
+        self.__is_resolving = False
+        self.__lock = threading.RLock()
         return self
 
     def __eq__(self, value: object, /) -> bool:
         is_eq = super().__eq__(value)
-        if is_eq is not True:
+
+        # Only attempt to resolve the deferred import when
+        # 1. imports are not deferred, and
+        # 2. the key is actually matched.
+        if _is_deferred.get() or (is_eq is not True):
             return is_eq
 
         # Only the first thread to grab the lock should resolve the deferred import.
-        with self.lock:
+        with self.__lock:
             # Reentrant calls from the same thread shouldn't re-trigger the resolution.
             # This can be caused by self-referential imports, e.g. within __init__.py files.
-            if not self.is_resolving:
-                self.is_resolving = True
+            if not self.__is_resolving:
+                self.__is_resolving = True
 
-                if not _is_deferred.get():
-                    # Tell the proxy to resolve the import and replace itself in the relevant namespace.
-                    self.proxy._resolve_di_proxy(str(self))
+                # Tell the proxy to resolve the import and replace itself in the relevant namespace.
+                self.__proxy._resolve_di_proxy(str(self))
 
         return True
 
@@ -996,20 +999,21 @@ class _DeferredImportKey(str):
 
 def _deferred___import__(
     name: str,
-    globals: t.Optional[t.MutableMapping[str, t.Any]] = None,
-    locals: t.Optional[t.MutableMapping[str, t.Any]] = None,
+    globals: t.MutableMapping[str, t.Any],
+    locals: t.MutableMapping[str, t.Any],
     fromlist: t.Optional[t.Sequence[str]] = (),
     level: int = 0,
 ) -> t.Any:
     """An limited replacement for `__import__` that supports deferred imports by returning proxies."""
 
-    # Precondition: This is only called by syntactic import statements within the context of
-    # "with _actual_until_use: ...".
+    # Preconditions:
+    # 1. Only called by syntactic import statements.
+    #     - Allows a stricter signature and less manual input validation because we don't allow usage via
+    #       __import__() and thus can depend on the builtin parser to handle some validation.
+    # 2. Only called within the context of "with _actual_until_use: ...".
 
-    # fromlist is None sometimes. Haven't looked into why yet.
+    # NOTE: fromlist is None sometimes. Haven't looked into why yet.
     fromlist = fromlist or ()
-    globals = globals if (globals is not None) else {}  # noqa: A001
-    locals = locals if (locals is not None) else {}  # noqa: A001
 
     # Do a bit of input validation.
     package = _calc___package__(globals) if (level != 0) else None
@@ -1021,33 +1025,34 @@ def _deferred___import__(
 
     # Handle submodule imports if imports of parent modules already occurred in the call site's namespace.
     if not fromlist and ("." in name):
-        sub_s = name.find(".")
+        sub_0 = name.find(".")
         try:
-            base_parent = parent = locals[name[:sub_s]]
+            base_parent = parent = locals[name[:sub_0]]
         except KeyError:
             pass
         else:
             # NOTE: We assume that if base_parent is a module or a proxy, then it shouldn't be getting
             #       clobbered. Not sure if this is right, but it feels like the safest move.
             if isinstance(base_parent, (types.ModuleType, _DeferredImportProxy)):
-                # NOTE: Using indices like this is a micro-optimization.
-                sub_s += 1
+                # NOTE: Using indices and .find() like this is a micro-optimization.
+                sub_0 += 1
 
                 # Nest submodule proxies as needed.
-                while (sub_e := name.find(".", sub_s)) != -1:
-                    submod_name = name[sub_s:sub_e]
+                while (sub_1 := name.find(".", sub_0)) != -1:
+                    submod_name = name[sub_0:sub_1]
                     try:
                         parent = getattr(parent, submod_name)
                     except AttributeError:
-                        nested_proxy = _DeferredImportProxy(name[:sub_e], globals, locals, (), level, submod_name)
+                        nested_proxy = _DeferredImportProxy(name[:sub_1], globals, locals, (), level, sub=submod_name)
                         setattr(parent, submod_name, nested_proxy)
                         parent = nested_proxy
 
-                    sub_s = sub_e + 1
+                    sub_0 = sub_1 + 1
 
-                submod_name = name[sub_s:]
-                if submod_name not in parent.__dict__:
-                    setattr(parent, submod_name, _DeferredImportProxy(name, globals, locals, (), level, submod_name))
+                submod_name = name[sub_0:]
+                if not hasattr(parent, submod_name):
+                    final_nested_proxy = _DeferredImportProxy(name, globals, locals, (), level, sub=submod_name)
+                    setattr(parent, submod_name, final_nested_proxy)
 
                 return base_parent
 
