@@ -197,11 +197,11 @@ typeCheckingMode = "strict"
 
 defineConstant = { "TYPE_CHECKING" = true } # Just in case.
 
-reportPrivateUsage = "none"                         # We're the library.
-reportUnnecessaryIsInstance = "information"         # Verify user input.
-reportUninitializedInstanceVariable = "information" # Occasionally nice as a checkup, but otherwise noisy.
+reportPrivateUsage = "none"                    # We're the library.
+reportUnnecessaryIsInstance = "information"    # Verify user input.
+reportUninitializedInstanceVariable = "none"   # Occasionally nice as a checkup, but otherwise noisy.
 reportCallInDefaultInitializer = "warning"
-reportImportCycles = "information"                  # Occasionally not a false positive.
+reportImportCycles = "information"             # Occasionally not a false positive.
 reportPropertyTypeMismatch = "warning"
 reportShadowedImports = "error"
 reportUnnecessaryTypeIgnoreComment = "warning"

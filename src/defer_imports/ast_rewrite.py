@@ -14,7 +14,6 @@ import ast
 import builtins
 import contextvars
 import io
-import os
 import sys
 import types
 from importlib.machinery import BYTECODE_SUFFIXES, SOURCE_SUFFIXES, FileFinder, ModuleSpec, SourceFileLoader
@@ -24,6 +23,7 @@ from . import __version__, lazy_load as _lazy_load
 
 with _lazy_load.until_module_use:
     import collections
+    import os
     import threading
     import tokenize
     import typing as t
@@ -223,29 +223,12 @@ def _decode_source(source_bytes: ReadableBuffer) -> str:  # pragma: no cover (te
 #    TODO: Do we actually want to do this one? Surely it's bound to backfire in converse use cases.
 _HYGIENE_PREFIX = "_@di_"
 
-_INTERNALS_NAMES = ("_DeferredImportKey", "_DeferredImportProxy", "_actual_until_use")
-_INTERNALS_ASNAMES = tuple(f"{_HYGIENE_PREFIX}{name}" for name in _INTERNALS_NAMES)
-_KEY_CLS_NAME, _PROXY_CLS_NAME, _ACTUAL_CTX_NAME = _INTERNALS_ASNAMES
-_TEMP_PROXY_NAME = f"{_HYGIENE_PREFIX}temp_proxy"
-_LOCAL_NS_NAME = f"{_HYGIENE_PREFIX}local_ns"
-
+_ACTUAL_CTX_NAME = "_actual_until_use"
+_ACTUAL_CTX_ASNAME = f"{_HYGIENE_PREFIX}_actual_until_use"
+_TEMP_ASNAMES = f"{_HYGIENE_PREFIX}_temp_asnames"
 
 #: The names of location attributes of AST nodes.
 _AST_LOC_ATTRS = ("lineno", "col_offset", "end_lineno", "end_col_offset")
-
-
-def _walk_globals(node: ast.AST) -> t.Generator[ast.AST]:
-    """Recursively yield descendent nodes of a tree starting at `node`, including `node` itself.
-
-    Nodes that introduce a new scope, such as class and function definitions, are skipped entirely.
-    """
-
-    scope_node_types = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
-    todo = collections.deque([node])
-    while todo:
-        node = todo.popleft()
-        todo.extend(child for child in ast.iter_child_nodes(node) if not isinstance(child, scope_node_types))
-        yield node
 
 
 def _is_until_use_node(node: ast.With) -> bool:
@@ -280,12 +263,43 @@ class _ImportsInstrumenter(ast.NodeTransformer):
         self.escape_hatch_depth: int = 0
         self.did_any_instrumentation: bool = False
 
-    def _wrap_import_stmts(self, nodes: list[t.Union[ast.Import, ast.ImportFrom]]) -> ast.With:
+    def _substitute_import_keys(self, import_nodes: list[t.Union[ast.Import, ast.ImportFrom]]) -> list[ast.stmt]:
+        """Instrument a *non-empty* list of imports."""
+
+        self.did_any_instrumentation = True
+        loc = {attr: getattr(import_nodes[0], attr) for attr in _AST_LOC_ATTRS}
+
+        new_nodes: list[ast.stmt] = []
+
+        # Create a temporary variable to hold the "asnames" for each import, i.e. what variable(s) the result will be
+        # saved into.
+        for node in import_nodes:
+            loc["lineno"], loc["end_lineno"] = node.lineno, node.end_lineno
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    asnames_name = ast.Name(_TEMP_ASNAMES, ctx=ast.Store(), **loc)
+                    temp_asnames = ast.Assign([asnames_name], value=ast.Constant(alias.asname, **loc), **loc)
+                    new_nodes.append(temp_asnames)
+                    new_nodes.append(ast.Import(names=[alias], **loc))
+            else:
+                asnames_name = ast.Name(_TEMP_ASNAMES, ctx=ast.Store(), **loc)
+                asnames_vals: list[ast.expr] = [ast.Constant(alias.asname, **loc) for alias in node.names]
+                temp_asnames = ast.Assign([asnames_name], value=ast.Tuple(asnames_vals, ctx=ast.Load(), **loc), **loc)
+                new_nodes.append(temp_asnames)
+                new_nodes.append(node)
+
+        # Clean up the temporary helper.
+        del_stmt = ast.Delete(targets=[ast.Name(_TEMP_ASNAMES, ctx=ast.Del(), **loc)], **loc)
+        new_nodes.append(del_stmt)
+
+        return new_nodes
+
+    def _wrap_import_stmts(self, import_nodes: list[t.Union[ast.Import, ast.ImportFrom]]) -> ast.With:
         """Wrap a list of import nodes with a `defer_imports.until_use` block and instrument them."""
 
-        loc = {attr: getattr(nodes[0], attr) for attr in _AST_LOC_ATTRS}
-        with_items = [ast.withitem(context_expr=ast.Name(_ACTUAL_CTX_NAME, ctx=ast.Load(), **loc))]
-        return ast.With(items=with_items, body=self._substitute_import_keys(nodes), **loc)
+        loc = {attr: getattr(import_nodes[0], attr) for attr in _AST_LOC_ATTRS}
+        with_items = [ast.withitem(context_expr=ast.Name(_ACTUAL_CTX_ASNAME, ctx=ast.Load(), **loc))]
+        return ast.With(items=with_items, body=self._substitute_import_keys(import_nodes), **loc)
 
     def _is_import_to_wrap(self, node: ast.AST) -> bool:
         """Determine whether a node is a global import that should be instrumented."""
@@ -383,88 +397,6 @@ class _ImportsInstrumenter(ast.NodeTransformer):
             context += (node.end_lineno, end_col_offset)
         return context
 
-    @staticmethod
-    def _create_key_substitution(name: str, loc: dict[str, t.Any]) -> ast.If:
-        """Create an AST for changing the name of a variable in locals if the variable is a defer_imports proxy.
-
-        The resulting node is roughly equivalent to the following code if unparsed::
-
-            if {name}.__class__ is _DeferredImportProxy:
-                temp_proxy = local_ns[_DeferredImportKey("{name}", temp_proxy)] = local_ns.pop("{name}")
-        """
-
-        if "." in name:
-            name = name.partition(".")[0]
-
-        return ast.If(
-            test=ast.Compare(
-                left=ast.Attribute(ast.Name(name, ctx=ast.Load(), **loc), attr="__class__", ctx=ast.Load(), **loc),
-                ops=[ast.Is()],
-                comparators=[ast.Name(_PROXY_CLS_NAME, ctx=ast.Load(), **loc)],
-                **loc,
-            ),
-            body=[
-                ast.Assign(
-                    targets=[
-                        ast.Name(_TEMP_PROXY_NAME, ctx=ast.Store(), **loc),
-                        ast.Subscript(
-                            value=ast.Name(_LOCAL_NS_NAME, ctx=ast.Load(), **loc),
-                            slice=ast.Call(
-                                func=ast.Name(_KEY_CLS_NAME, ctx=ast.Load(), **loc),
-                                args=[ast.Constant(name, **loc), ast.Name(_TEMP_PROXY_NAME, ctx=ast.Load(), **loc)],
-                                keywords=[],
-                                **loc,
-                            ),
-                            ctx=ast.Store(),
-                            **loc,
-                        ),
-                    ],
-                    value=ast.Call(
-                        func=ast.Attribute(ast.Name(_LOCAL_NS_NAME, ctx=ast.Load(), **loc), "pop", ast.Load(), **loc),
-                        args=[ast.Constant(name, **loc)],
-                        keywords=[],
-                        **loc,
-                    ),
-                    **loc,
-                )
-            ],
-            orelse=[],
-            **loc,
-        )
-
-    def _substitute_import_keys(self, import_nodes: list[t.Union[ast.Import, ast.ImportFrom]]) -> list[ast.stmt]:
-        """Instrument a *non-empty* list of imports."""
-
-        self.did_any_instrumentation = True
-        loc = {attr: getattr(import_nodes[0], attr) for attr in _AST_LOC_ATTRS}
-
-        new_nodes: list[ast.stmt] = []
-
-        # Start with some helper variables.
-        # A reference to locals() to avoid calling locals() repeatedly.
-        locals_call = ast.Call(func=ast.Name("locals", ctx=ast.Load(), **loc), args=[], keywords=[], **loc)
-        local_ns = ast.Assign(targets=[ast.Name(_LOCAL_NS_NAME, ctx=ast.Store(), **loc)], value=locals_call, **loc)
-        new_nodes.append(local_ns)
-
-        # A reference to the current proxy being "fixed".
-        proxy_name: ast.expr = ast.Name(_TEMP_PROXY_NAME, ctx=ast.Store(), **loc)
-        temp_proxy = ast.Assign(targets=[proxy_name], value=ast.Constant(None, **loc), **loc)
-        new_nodes.append(temp_proxy)
-
-        # Then, add the imports + namespace adjustments.
-        for node in import_nodes:
-            loc["lineno"], loc["end_lineno"] = node.lineno, node.end_lineno
-            new_nodes.append(node)
-            new_nodes.extend(self._create_key_substitution(alias.asname or alias.name, loc) for alias in node.names)
-
-        # Finally, clean up the helper variables via deletion.
-        loc_node = import_nodes[-1]
-        loc["lineno"], loc["end_lineno"] = loc_node.lineno, loc_node.end_lineno
-        del_tgts: list[ast.expr] = [ast.Name(name, ctx=ast.Del(), **loc) for name in (_TEMP_PROXY_NAME, _LOCAL_NS_NAME)]
-        new_nodes.append(ast.Delete(targets=del_tgts, **loc))
-
-        return new_nodes
-
     def _validate_until_use_body(self, nodes: list[ast.stmt]) -> list[t.Union[ast.Import, ast.ImportFrom]]:
         """Validate that the statements within a `defer_imports.until_use` block are instrumentable.
 
@@ -501,9 +433,11 @@ class _ImportsInstrumenter(ast.NodeTransformer):
         # Replace the dummy context manager with the one that will actually replace __import__.
         old_ctx_expr = node.items[0].context_expr
         loc = {attr: getattr(old_ctx_expr, attr) for attr in _AST_LOC_ATTRS}
-        node.items[0].context_expr = ast.Name(_ACTUAL_CTX_NAME, ctx=ast.Load(), **loc)
+        node.items[0].context_expr = ast.Name(_ACTUAL_CTX_ASNAME, ctx=ast.Load(), **loc)
 
+        # Actually instrument the import nodes.
         node.body = self._substitute_import_keys(self._validate_until_use_body(node.body))
+
         return node
 
     def visit_Module(self, node: ast.Module) -> ast.AST:
@@ -539,14 +473,13 @@ class _ImportsInstrumenter(ast.NodeTransformer):
         loc = {attr: getattr(node.body[position], attr) for attr in _AST_LOC_ATTRS}
 
         # Then, add necessary defer_imports import.
-        aliases = [ast.alias(name, asname, **loc) for name, asname in zip(_INTERNALS_NAMES, _INTERNALS_ASNAMES)]
-        import_stmt = ast.ImportFrom(module=__spec__.name, names=aliases, level=0, **loc)
+        ctx_alias = ast.alias(_ACTUAL_CTX_NAME, _ACTUAL_CTX_ASNAME, **loc)
+        import_stmt = ast.ImportFrom(module=__spec__.name, names=[ctx_alias], level=0, **loc)
         node.body.insert(position, import_stmt)
 
         # Finally, clean up the namespace via deletion.
-        loc_node = node.body[-1]
-        loc["lineno"], loc["end_lineno"] = loc_node.lineno, loc_node.end_lineno
-        del_stmt = ast.Delete(targets=[ast.Name(asname, ctx=ast.Del(), **loc) for asname in _INTERNALS_ASNAMES], **loc)
+        loc["lineno"], loc["end_lineno"] = node.body[-1].lineno, node.body[-1].end_lineno
+        del_stmt = ast.Delete(targets=[ast.Name(_ACTUAL_CTX_ASNAME, ctx=ast.Del(), **loc)], **loc)
         node.body.append(del_stmt)
 
         return node
@@ -565,6 +498,20 @@ class _ImportsInstrumenter(ast.NodeTransformer):
 
 _BYTECODE_HEADER = f"defer_imports{__version__}".encode()
 """Custom header for defer_imports-instrumented bytecode files. Differs for every version."""
+
+
+def _walk_globals(node: ast.AST) -> t.Generator[ast.AST]:
+    """Recursively yield descendent nodes of a tree starting at `node`, including `node` itself.
+
+    Nodes that introduce a new scope, such as class and function definitions, are skipped entirely.
+    """
+
+    scope_node_types = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
+    todo = collections.deque([node])
+    while todo:
+        node = todo.popleft()
+        todo.extend(child for child in ast.iter_child_nodes(node) if not isinstance(child, scope_node_types))
+        yield node
 
 
 # PYUPDATE: py3.14 - Consider inheriting from importlib.abc.SourceLoader instead since it's (probably) cheap again.
@@ -859,6 +806,9 @@ import_hook = ImportHookContext
 # ============================================================================
 
 
+_ImportArgs: TypeAlias = "tuple[str, t.MutableMapping[str, t.Any], t.MutableMapping[str, t.Any], t.Sequence[str], int]"
+_StrTree: TypeAlias = "dict[str, t.Optional[_StrTree]]"
+
 _original_import = contextvars.ContextVar("_original_import", default=builtins.__import__)
 """What builtins.__import__ last pointed to."""
 
@@ -866,119 +816,95 @@ _is_deferred = contextvars.ContextVar("_is_deferred", default=False)
 """Whether imports in import statements should be deferred."""
 
 
-class _DeferredImportProxy:
-    """Proxy for a deferred `__import__` call."""
+def _create_str_tree(components: t.Sequence[str]) -> _StrTree:
+    root: _StrTree = None  # pyright: ignore [reportAssignmentType]
+    for key in reversed(components):
+        root = {key: root}
+    return root
 
-    # NOTE: We mangle the instance attribute names to help avoid further exposure if the proxy leaks and a user tries
-    # to use it as a module or module attribute.
 
-    def __init__(  # noqa: PLR0913
-        self,
-        name: str,
-        global_ns: t.MutableMapping[str, t.Any],
-        local_ns: t.MutableMapping[str, t.Any],
-        fromlist: t.Sequence[str],
-        level: int = 0,
-        sub: t.Optional[str] = None,
-    ) -> None:
-        self.__name = name
-        self.__global_ns = global_ns
-        self.__local_ns = local_ns
-        self.__fromlist = fromlist
-        self.__level = level
+def _merge_trees(base: _StrTree, other: t.Optional[_StrTree], /) -> _StrTree:
+    if other is not None:
+        for key, other_val in other.items():
+            # Base cases that require action.
+            if (key not in base) or ((not base[key]) and other_val):
+                base[key] = other_val
 
-        # Only used in cases of non-from-import submodule aliasing a la "import a.b as c".
-        self.__sub = sub
+            # Recursive case.
+            elif (base_val := base[key]) and other_val:
+                _merge_trees(base_val, other_val)
 
-    @property
-    def __import_args(self, /):  # noqa: ANN202 # Too verbose.
-        """`tuple`: Arguments to be passed directly into `__import__()`."""
+    return base
 
-        return (self.__name, self.__global_ns, self.__local_ns, self.__fromlist, self.__level)
+
+def _merge_key_trees(
+    base_tree: t.Optional[_StrTree],
+    base_vars: t.MutableMapping[str, t.Any],
+    import_name: str,
+) -> None:
+    if base_tree is None:
+        return
+
+    for submod_root, submod_children in base_tree.items():
+        if submod_root in base_vars:
+            root_key = next(filter(submod_root.__eq__, base_vars))
+            if isinstance(root_key, _DIKey):
+                _merge_trees(root_key._DIKey__submods_tree, submod_children)  # pyright: ignore  # noqa: PGH003 # Too verbose.
+            else:
+                _merge_key_trees(submod_children, base_vars[root_key].__dict__, f"{import_name}.{submod_root}")
+        else:
+            # NOTE: This doesn't use setattr() because pypy normalizes the attr key type to `str`.
+            # Change the namespaces as well to make sure nested proxies are replaced in the right place.
+            nested_key = _DIKey(submod_root, (f"{import_name}.{submod_root}", base_vars, base_vars, (), 0))
+            if submod_children:
+                nested_key.__submods_tree |= submod_children
+            base_vars[nested_key] = _DIPlaceholder(f"{import_name}.{submod_root}")
+
+
+# NOTE: We mangle the instance attribute names on the key and placeholder classes to help avoid further exposure if an
+# instance of either leaks and a user tries use them as a string or module (attribute) respectively.
+
+
+class _DIPlaceholder:
+    __slots__ = ("__import_name",)
+
+    def __init__(self, import_name: str, /) -> None:
+        self.__import_name = import_name
 
     def __repr__(self, /) -> str:
-        if self.__fromlist:
-            imp_stmt = f"from {self.__name} import {', '.join(self.__fromlist)}"
-        elif self.__sub:
-            imp_stmt = f"import {self.__name} as ..."
-        else:
-            imp_stmt = f"import {self.__name}"
-
-        return f"<proxy for {imp_stmt!r}>"
+        return f"<proxy for {self.__import_name!r} import>"
 
     def __getattr__(self, name: str, /) -> Self:
-        if name in self.__fromlist:
-            from_proxy = self.__class__(*self.__import_args)
-            from_proxy.__fromlist = (name,)
-            return from_proxy
-        elif ("." in self.__name) and (name == self.__name.rpartition(".")[2]):
-            submodule_proxy = self.__class__(*self.__import_args, sub=name)
-            return submodule_proxy  # noqa: RET504
-        else:
-            msg = f"proxy for module {self.__name!r} has no attribute {name!r}"
-            raise AttributeError(msg)
-
-    def _resolve_di_proxy(self, key: str, /) -> None:
-        """Perform an actual import for the proxy and bind the result to the given key in the relevant namespace."""
-
-        # 1. Perform the original __import__ and pray.
-        module: types.ModuleType = _original_import.get()(*self.__import_args)
-
-        # 2. Transfer nested proxies over to the resolved module.
-        module_vars = module.__dict__
-        for attr_key, attr_val in self.__dict__.items():
-            if isinstance(attr_val, _DeferredImportProxy) and not hasattr(module, attr_key):
-                # NOTE: This doesn't use setattr() because pypy normalizes the attr key type to `str`.
-                module_vars[_DeferredImportKey(attr_key, attr_val)] = attr_val
-
-                # Change the namespaces as well to make sure nested proxies are replaced in the right place.
-                attr_val.__global_ns = attr_val.__local_ns = module_vars
-
-        # 3. Replace the deferred version of the key in the relevant namespace to avoid it sticking around.
-        # This will trigger __eq__ again, so we temporarily set is_deferred to prevent recursion.
-        _is_deferred_tok = _is_deferred.set(True)
-        try:
-            self.__local_ns[key] = self.__local_ns.pop(key)
-        finally:
-            _is_deferred.reset(_is_deferred_tok)
-
-        # 4. Resolve any requested attribute access and replace the proxy with the result in the relevant namespace.
-        if self.__fromlist:
-            self.__local_ns[key] = getattr(module, self.__fromlist[0])
-        elif self.__sub:
-            self.__local_ns[key] = getattr(module, self.__sub)
-        else:
-            self.__local_ns[key] = module
+        return self.__class__(f"{self.__import_name}.{name}")
 
 
-class _DeferredImportKey(str):
+class _DIKey(str):
     """Mapping key for an import proxy.
 
     When referenced, the key will replace itself in the namespace with the resolved import or the right name from it.
     """
 
-    # NOTE: We mangle the instance attribute names to help avoid further exposure if the key leaks and a user tries
-    # to use it as a str.
+    __slots__ = ("__import_args", "__submods_tree", "__is_resolving", "__lock")
 
-    __slots__ = ("__proxy", "__is_resolving", "__lock")
+    __import_args: _ImportArgs
+    __submods_tree: _StrTree
+    __is_resolving: bool
+    __lock: threading.RLock
 
-    __proxy: _DeferredImportProxy  # pyright: ignore [reportUninitializedInstanceVariable]
-    __is_resolving: bool  # pyright: ignore [reportUninitializedInstanceVariable]
-    __lock: threading.RLock  # pyright: ignore [reportUninitializedInstanceVariable]
+    def __new__(cls, asname: str, import_args: _ImportArgs, /) -> Self:
+        self = super().__new__(cls, asname)
 
-    def __new__(cls, key: str, proxy: _DeferredImportProxy, /) -> Self:
-        self = super().__new__(cls, key)
-        self.__proxy = proxy
+        self.__import_args = import_args
+        self.__submods_tree = {}
         self.__is_resolving = False
         self.__lock = threading.RLock()
+
         return self
 
     def __eq__(self, value: object, /) -> bool:
         is_eq = super().__eq__(value)
 
-        # Only attempt to resolve the deferred import when
-        # 1. imports are not deferred, and
-        # 2. the key is actually matched.
+        # Only resolve the deferred import when the key is directly referenced while imports are *not* deferred.
         if _is_deferred.get() or (is_eq is not True):
             return is_eq
 
@@ -988,13 +914,35 @@ class _DeferredImportKey(str):
             # This can be caused by self-referential imports, e.g. within __init__.py files.
             if not self.__is_resolving:
                 self.__is_resolving = True
-
-                # Tell the proxy to resolve the import and replace itself in the relevant namespace.
-                self.__proxy._resolve_di_proxy(str(self))
+                self.__resolve_import()
 
         return True
 
     __hash__ = str.__hash__
+
+    def __resolve_import(self, /) -> None:
+        """Resolve the import and replace the deferred key and placeholder in the relevant namespace with the result."""
+
+        key = str(self)
+        name, _, local_ns, fromlist, _ = self.__import_args
+
+        # 1. Perform the original __import__ and pray.
+        module: types.ModuleType = _original_import.get()(*self.__import_args)
+
+        # 2. Create nested proxies as needed over to the resolved module.
+        if self.__submods_tree:
+            _merge_key_trees(self.__submods_tree, module.__dict__, name)
+
+        # 3. Replace the deferred version of the key in the relevant namespace to avoid it sticking around.
+        # This will trigger __eq__ again, so we temporarily set is_deferred to prevent recursion.
+        _is_deferred_tok = _is_deferred.set(True)
+        try:
+            local_ns[key] = local_ns.pop(key)
+        finally:
+            _is_deferred.reset(_is_deferred_tok)
+
+        # 4. Resolve any requested attribute access and replace the proxy with the result in the relevant namespace.
+        local_ns[key] = getattr(module, fromlist[0]) if fromlist else module
 
 
 def _deferred___import__(
@@ -1012,10 +960,10 @@ def _deferred___import__(
     #       __import__() and thus can depend on the builtin parser to handle some validation.
     # 2. Only called within the context of "with _actual_until_use: ...".
 
-    # NOTE: fromlist is None sometimes. Haven't looked into why yet.
+    # NOTE: fromlist is None sometimes. I think it's an implementation detail of the IMPORT_FROM bytecode.
     fromlist = fromlist or ()
 
-    # Do a bit of input validation.
+    # Do minimal input validation.
     package = _calc___package__(globals) if (level != 0) else None
     _lax_sanity_check(package, level)
     if level > 0:
@@ -1023,40 +971,51 @@ def _deferred___import__(
         name = _resolve_name(name, package, level)
         level = 0
 
-    # Handle submodule imports if imports of parent modules already occurred in the call site's namespace.
-    if not fromlist and ("." in name):
-        sub_0 = name.find(".")
-        try:
-            base_parent = parent = locals[name[:sub_0]]
-        except KeyError:
-            pass
-        else:
-            # NOTE: We assume that if base_parent is a module or a proxy, then it shouldn't be getting
-            #       clobbered. Not sure if this is right, but it feels like the safest move.
-            if isinstance(base_parent, (types.ModuleType, _DeferredImportProxy)):
-                # NOTE: Using indices and .find() like this is a micro-optimization.
-                sub_0 += 1
+    asname = locals[_TEMP_ASNAMES]
 
-                # Nest submodule proxies as needed.
-                while (sub_1 := name.find(".", sub_0)) != -1:
-                    submod_name = name[sub_0:sub_1]
-                    try:
-                        parent = getattr(parent, submod_name)
-                    except AttributeError:
-                        nested_proxy = _DeferredImportProxy(name[:sub_1], globals, locals, (), level, sub=submod_name)
-                        setattr(parent, submod_name, nested_proxy)
-                        parent = nested_proxy
+    if not fromlist:
+        if asname:
+            if "." in name:
+                # Case 1: import a.b as c
+                # NOTE: We pretend it's a "from" import to avoid excessive key nesting.
+                parent_name, _, submod_name = name.rpartition(".")
+                locals[_DIKey(asname, (parent_name, globals, locals, (submod_name,), 0))] = None
+                placeholder = _DIPlaceholder(parent_name)
+            else:
+                # Case 2: import a as c
+                locals[_DIKey(asname, (name, globals, locals, (), 0))] = None
+                placeholder = _DIPlaceholder(name)
 
-                    sub_0 = sub_1 + 1
+        else:  # noqa: PLR5501
+            if "." in name:
+                # Case 3: import a.b
+                split_name = name.split(".")
+                parent_name = split_name[0]
 
-                submod_name = name[sub_0:]
-                if not hasattr(parent, submod_name):
-                    final_nested_proxy = _DeferredImportProxy(name, globals, locals, (), level, sub=submod_name)
-                    setattr(parent, submod_name, final_nested_proxy)
+                if parent_name in locals:
+                    # Handle submodule imports if imports of parent modules already occurred in the call site's namespace.
+                    _merge_key_trees(_create_str_tree(split_name), locals, name)
+                    return locals[parent_name]
+                else:
+                    key = _DIKey(parent_name, (parent_name, globals, locals, (), 0))
+                    key._DIKey__submods_tree = _create_str_tree(split_name[1:])  # pyright: ignore [reportAttributeAccessIssue]
+                    locals[key] = None
+                    placeholder = _DIPlaceholder(parent_name)
 
-                return base_parent
+            else:
+                # Case 4: import a
+                locals[_DIKey(name, (name, globals, locals, (), 0))] = None
+                placeholder = _DIPlaceholder(name)
 
-    return _DeferredImportProxy(name, globals, locals, fromlist, level)
+    else:
+        # Case 5: from ... import ... [as ...]
+        from_asname: str | None
+        for from_name, from_asname in zip(fromlist, asname):
+            locals[_DIKey(from_asname or from_name, (name, globals, locals, (from_name,), 0))] = None
+
+        placeholder = _DIPlaceholder(name)
+
+    return placeholder
 
 
 class _DeferredContext:
@@ -1075,7 +1034,7 @@ class _DeferredContext:
     As part of its implementation, this temporarily replaces `builtins.__import__`.
     """
 
-    __slots__ = ("_import_ctx_token", "_defer_ctx_token")  # pyright: ignore [reportUninitializedInstanceVariable]
+    __slots__ = ("_import_ctx_token", "_defer_ctx_token")
 
     def __enter__(self, /) -> None:
         self._defer_ctx_token = _is_deferred.set(True)

@@ -20,13 +20,11 @@ from typing import Any, cast
 import pytest
 
 from defer_imports.ast_rewrite import (
+    _ACTUAL_CTX_ASNAME,
     _ACTUAL_CTX_NAME,
     _BYTECODE_HEADER,
-    _KEY_CLS_NAME,
-    _LOCAL_NS_NAME,
     _PATH_HOOK,
-    _PROXY_CLS_NAME,
-    _TEMP_PROXY_NAME,
+    _TEMP_ASNAMES,
     _DeferredFileLoader,
     _ImportsInstrumenter,
     import_hook,
@@ -47,35 +45,27 @@ from defer_imports.ast_rewrite import (
 SAMPLE_DOCSTRING = "Module docstring here"
 
 MODULE_TEMPLATE = f"""\
-from defer_imports.ast_rewrite import _DeferredImportKey as {_KEY_CLS_NAME}, \
-_DeferredImportProxy as {_PROXY_CLS_NAME}, _actual_until_use as {_ACTUAL_CTX_NAME}
+from defer_imports.ast_rewrite import {_ACTUAL_CTX_NAME} as {_ACTUAL_CTX_ASNAME}
 {{}}
-del {_KEY_CLS_NAME}, {_PROXY_CLS_NAME}, {_ACTUAL_CTX_NAME}
+del {_ACTUAL_CTX_ASNAME}
 """.rstrip()
 
 IMPORT_TEMPLATE = f"""\
-with {_ACTUAL_CTX_NAME}:
-    {_LOCAL_NS_NAME} = locals()
-    {_TEMP_PROXY_NAME} = None
-{{}}
-    del {_TEMP_PROXY_NAME}, {_LOCAL_NS_NAME}
+with {_ACTUAL_CTX_ASNAME}:
+    {{}}
+    del {_TEMP_ASNAMES}
 """.rstrip()
-
-IF_TEMPLATE = f"""\
-    if {{0}}.__class__ is {_PROXY_CLS_NAME}:
-        {_TEMP_PROXY_NAME} = {_LOCAL_NS_NAME}[{_KEY_CLS_NAME}({{0!r}}, {_TEMP_PROXY_NAME})] = {_LOCAL_NS_NAME}.pop({{0!r}})
-""".rstrip()
-
-
-if_template = IF_TEMPLATE.format
 
 
 def import_template(*lines: str) -> str:
-    return IMPORT_TEMPLATE.format("\n".join(lines))
+    return IMPORT_TEMPLATE.format("\n    ".join(lines))
 
 
 def module_template(*lines: str) -> str:
     return MODULE_TEMPLATE.format("\n".join(lines))
+
+
+temp_asnames = f"{_TEMP_ASNAMES} = {{!r}}".format
 
 
 def create_sample_module(
@@ -131,12 +121,12 @@ def temp_uncache_tests_path_importer():
 
 @pytest.fixture(autouse=True)
 def better_key_repr(monkeypatch: pytest.MonkeyPatch):
-    """Replace _DeferredImportKey.__repr__ with a more verbose version for all tests."""
+    """Replace _DIKey.__repr__ with a more verbose version for all tests."""
 
     def verbose_repr(self: object) -> str:
         return f"<key for {super(type(self), self).__repr__()} import>"
 
-    monkeypatch.setattr("defer_imports.ast_rewrite._DeferredImportKey.__repr__", verbose_repr)
+    monkeypatch.setattr("defer_imports.ast_rewrite._DIKey.__repr__", verbose_repr)
 
 
 # endregion
@@ -176,11 +166,20 @@ def test_path_hook_installation():
 
 
 common_rewrite_cases = [
-    pytest.param("", "", id="empty module"),
-    pytest.param(*[f'''"""{SAMPLE_DOCSTRING}"""'''] * 2, id="docstring"),
-    pytest.param(*["""from __future__ import annotations"""] * 2, id="from __future__ import"),
     pytest.param(
-        *[f'''"""{SAMPLE_DOCSTRING}"""\nfrom __future__ import annotations'''] * 2,
+        *[""] * 2,
+        id="empty module",
+    ),
+    pytest.param(
+        *[f'"""{SAMPLE_DOCSTRING}"""'] * 2,
+        id="docstring",
+    ),
+    pytest.param(
+        *["from __future__ import annotations"] * 2,
+        id="from __future__ import",
+    ),
+    pytest.param(
+        *[f'"""{SAMPLE_DOCSTRING}"""\nfrom __future__ import annotations'] * 2,
         id="docstring and from __future__ import",
     ),
 ]
@@ -190,6 +189,16 @@ common_rewrite_cases = [
     ("source", "expected_rewrite"),
     [
         *common_rewrite_cases,
+        pytest.param(
+            """\
+import defer_imports
+
+with defer_imports.until_use:
+    import __future__
+""",
+            module_template("import defer_imports", import_template(temp_asnames(None), "import __future__")),
+            id="top-level __future__ import",
+        ),
         pytest.param(
             """\
 from contextlib import nullcontext
@@ -217,10 +226,7 @@ with defer_imports.until_use:
     import inspect
 """,
             f'"""{SAMPLE_DOCSTRING}"""\n'
-            + module_template(
-                "import defer_imports",
-                import_template("    import inspect", if_template("inspect")),
-            ),
+            + module_template("import defer_imports", import_template(temp_asnames(None), "import inspect")),
             id="docstring then regular import",
         ),
         pytest.param(
@@ -233,11 +239,8 @@ with defer_imports.until_use:
     import inspect
 """,
             "from __future__ import annotations\n"
-            + module_template(
-                "import defer_imports",
-                import_template("    import inspect", if_template("inspect")),
-            ),
-            id="docstring then regular import",
+            + module_template("import defer_imports", import_template(temp_asnames(None), "import inspect")),
+            id="from __future__ then regular import",
         ),
         pytest.param(
             """\
@@ -246,7 +249,7 @@ import defer_imports
 with defer_imports.until_use:
     import inspect
 """,
-            module_template("import defer_imports", import_template("    import inspect", if_template("inspect"))),
+            module_template("import defer_imports", import_template(temp_asnames(None), "import inspect")),
             id="regular import",
         ),
         pytest.param(
@@ -256,7 +259,7 @@ import defer_imports
 with defer_imports.until_use:
     import inspect as i
 """,
-            module_template("import defer_imports", import_template("    import inspect as i", if_template("i"))),
+            module_template("import defer_imports", import_template(temp_asnames("i"), "import inspect as i")),
             id="regular import with rename 1",
         ),
         pytest.param(
@@ -268,7 +271,7 @@ with defer_imports.until_use:
 """,
             module_template(
                 "import defer_imports",
-                import_template("    import sys, os as so", if_template("sys"), if_template("so")),
+                import_template(temp_asnames(None), "import sys", temp_asnames("so"), "import os as so"),
             ),
             id="regular import with rename 2",
         ),
@@ -282,12 +285,7 @@ with defer_imports.until_use:
 """,
             module_template(
                 "import defer_imports",
-                import_template(
-                    "    import importlib",
-                    if_template("importlib"),
-                    "    import importlib.abc",
-                    if_template("importlib"),
-                ),
+                import_template(temp_asnames(None), "import importlib", temp_asnames(None), "import importlib.abc"),
             ),
             id="mixed imports",
         ),
@@ -298,7 +296,7 @@ import defer_imports
 with defer_imports.until_use:
     from . import a
 """,
-            module_template("import defer_imports", import_template("    from . import a", if_template("a"))),
+            module_template("import defer_imports", import_template(temp_asnames((None,)), "from . import a")),
             id="relative import",
         ),
     ],
@@ -319,19 +317,19 @@ def test_instrumentation(source: str, expected_rewrite: str):
         *common_rewrite_cases,
         pytest.param(
             "import inspect",
-            module_template(import_template("    import inspect", if_template("inspect"))),
+            module_template(import_template(temp_asnames(None), "import inspect")),
             id="regular import",
         ),
         pytest.param(
-            "import hello\nimport world\nimport foo\n",
+            "\n".join(("import hello", "import world", "import foo")),
             module_template(
                 import_template(
-                    "    import hello",
-                    if_template("hello"),
-                    "    import world",
-                    if_template("world"),
-                    "    import foo",
-                    if_template("foo"),
+                    temp_asnames(None),
+                    "import hello",
+                    temp_asnames(None),
+                    "import world",
+                    temp_asnames(None),
+                    "import foo",
                 )
             ),
             id="multiple imports consecutively",
@@ -346,9 +344,9 @@ print("hello")
 import foo
 """,
             module_template(
-                import_template("    import hello", if_template("hello"), "    import world", if_template("world")),
+                import_template(temp_asnames(None), "import hello", temp_asnames(None), "import world"),
                 "print('hello')",
-                import_template("    import foo", if_template("foo")),
+                import_template(temp_asnames(None), "import foo"),
             ),
             id="multiple imports separated by statement 1",
         ),
@@ -363,10 +361,10 @@ def do_the_thing(a: int) -> int:
 import foo
 """,
             module_template(
-                import_template("    import hello", if_template("hello"), "    import world", if_template("world")),
+                import_template(temp_asnames(None), "import hello", temp_asnames(None), "import world"),
                 "def do_the_thing(a: int) -> int:",
                 "    return a",
-                import_template("    import foo", if_template("foo")),
+                import_template(temp_asnames(None), "import foo"),
             ),
             id="multiple imports separated by statement 2",
         ),
@@ -379,7 +377,7 @@ def do_the_thing(a: int) -> int:
     return a
 """,
             module_template(
-                import_template("    import hello", if_template("hello")),
+                import_template(temp_asnames(None), "import hello"),
                 "def do_the_thing(a: int) -> int:",
                 "    import world",
                 "    return a",
@@ -393,9 +391,9 @@ from world import *
 import foo
 """,
             module_template(
-                import_template("    import hello", if_template("hello")),
+                import_template(temp_asnames(None), "import hello"),
                 "from world import *",
-                import_template("    import foo", if_template("foo")),
+                import_template(temp_asnames(None), "import foo"),
             ),
             id="avoids doing anything with wildcard imports",
         ),
@@ -409,12 +407,12 @@ finally:
 import bar
 """,
             module_template(
-                import_template("    import foo", if_template("foo")),
+                import_template(temp_asnames(None), "import foo"),
                 "try:",
                 "    import hello",
                 "finally:",
                 "    pass",
-                import_template("    import bar", if_template("bar")),
+                import_template(temp_asnames(None), "import bar"),
             ),
             id="avoids imports in try-finally",
         ),
@@ -426,10 +424,10 @@ with nullcontext():
 import bar
 """,
             module_template(
-                import_template("    import foo", if_template("foo")),
+                import_template(temp_asnames(None), "import foo"),
                 "with nullcontext():",
                 "    import hello",
-                import_template("    import bar", if_template("bar")),
+                import_template(temp_asnames(None), "import bar"),
             ),
             id="avoids imports in non-defer_imports.until_use with block",
         ),
@@ -442,28 +440,27 @@ with defer_imports.until_use:
 import bar
 """,
             module_template(
-                import_template(
-                    "    import defer_imports", if_template("defer_imports"), "    import foo", if_template("foo")
-                ),
-                import_template("    import hello", if_template("hello")),
-                import_template("    import bar", if_template("bar")),
+                import_template(temp_asnames(None), "import defer_imports", temp_asnames(None), "import foo"),
+                import_template(temp_asnames(None), "import hello"),
+                import_template(temp_asnames(None), "import bar"),
             ),
             id="still instruments imports in defer_imports.until_use with block",
         ),
+        # NOTE: "\n".join() is less concise but more readable here than strings littered with "\n".
         pytest.param(
-            *["try:\n    import foo\nexcept:\n    pass"] * 2,
+            *["\n".join(("try:", "    import foo", "except:", "    pass"))] * 2,
             id="escape hatch: try",
         ),
         pytest.param(
-            *["try:\n    raise Exception\nexcept:\n    import foo"] * 2,
+            *["\n".join(("try:", "    raise Exception", "except:", "    import foo"))] * 2,
             id="escape hatch: except",
         ),
         pytest.param(
-            *["try:\n    print('hi')\nexcept:\n    print('error')\nelse:\n    import foo"] * 2,
+            *["\n".join(("try:", "    print('hi')", "except:", "    print('error')", "else:", "    import foo"))] * 2,
             id="escape hatch: else",
         ),
         pytest.param(
-            *["try:\n    pass\nfinally:\n    import foo"] * 2,
+            *["\n".join(("try:", "    pass", "finally:", "    import foo"))] * 2,
             id="escape hatch: finally",
         ),
     ],
@@ -475,11 +472,11 @@ def test_module_instrumentation(source: str, expected_rewrite: str):
     new_tree = transformer.visit(ast.parse(source))
     actual_rewrite = ast.unparse(new_tree)
 
-    # We can't depend on ast.unparse() making whitespace exactly as we want it.
-    actual_no_ws = "\n".join(filter(str.strip, actual_rewrite.splitlines()))
-    expected_no_ws = "\n".join(filter(str.strip, expected_rewrite.splitlines()))
+    # We can't and shouldn't depend on ast.unparse() matching our expected whitespace.
+    actual_no_empty_lines = "\n".join(filter(str.strip, actual_rewrite.splitlines()))
+    expected_no_empty_lines = "\n".join(filter(str.strip, expected_rewrite.splitlines()))
 
-    assert actual_no_ws == expected_no_ws
+    assert actual_no_empty_lines == expected_no_empty_lines
 
 
 # endregion
@@ -541,7 +538,7 @@ with defer_imports.until_use:
     assert spec.loader
     spec.loader.exec_module(module)
 
-    expected_inspect_repr = "<key for 'inspect' import>: <proxy for 'import inspect'>"
+    expected_inspect_repr = "<key for 'inspect' import>: <proxy for 'inspect' import>"
     assert expected_inspect_repr in repr(vars(module))
     assert module.inspect
     assert expected_inspect_repr not in repr(vars(module))
@@ -565,7 +562,7 @@ with defer_imports.until_use:
     assert spec.loader
     spec.loader.exec_module(module)
 
-    expected_gin_repr = "<key for 'gin' import>: <proxy for 'import inspect'>"
+    expected_gin_repr = "<key for 'gin' import>: <proxy for 'inspect' import>"
 
     assert expected_gin_repr in repr(vars(module))
 
@@ -598,7 +595,7 @@ with defer_imports.until_use:
     assert spec.loader
     spec.loader.exec_module(module)
 
-    expected_importlib_repr = "<key for 'importlib' import>: <proxy for 'import importlib.abc'>"
+    expected_importlib_repr = "<key for 'importlib' import>: <proxy for 'importlib' import>"
     assert expected_importlib_repr in repr(vars(module))
 
     assert module.importlib
@@ -621,7 +618,7 @@ with defer_imports.until_use:
     spec.loader.exec_module(module)
 
     # Make sure the right proxy is in the namespace.
-    expected_xyz_repr = "<key for 'xyz' import>: <proxy for 'import collections.abc as ...'>"
+    expected_xyz_repr = "<key for 'xyz' import>: <proxy for 'collections.abc' import>"
     assert expected_xyz_repr in repr(vars(module))
 
     # Make sure the intermediate imports or proxies for them aren't in the namespace.
@@ -669,8 +666,8 @@ with defer_imports.until_use:
     assert spec.loader
     spec.loader.exec_module(module)
 
-    expected_isfunction_repr = "<key for 'isfunction' import>: <proxy for 'from inspect import isfunction'>"
-    expected_signature_repr = "<key for 'signature' import>: <proxy for 'from inspect import signature'>"
+    expected_isfunction_repr = "<key for 'isfunction' import>: <proxy for 'inspect.isfunction' import>"
+    expected_signature_repr = "<key for 'signature' import>: <proxy for 'inspect.signature' import>"
     assert expected_isfunction_repr in repr(vars(module))
     assert expected_signature_repr in repr(vars(module))
 
@@ -700,7 +697,7 @@ with defer_imports.until_use:
     assert spec.loader
     spec.loader.exec_module(module)
 
-    expected_my_signature_repr = "<key for 'MySignature' import>: <proxy for 'from inspect import Signature'>"
+    expected_my_signature_repr = "<key for 'MySignature' import>: <proxy for 'inspect.Signature' import>"
     assert expected_my_signature_repr in repr(vars(module))
 
     with pytest.raises(NameError):
@@ -796,9 +793,9 @@ with defer_imports.until_use:
     for mod in ("importlib", "importlib.abc", "importlib.util"):
         sys.modules.pop(mod, None)
 
-    expected_importlib_repr = "<key for 'importlib' import>: <proxy for 'import importlib'>"
-    expected_importlib_abc_repr = "<key for 'abc' import>: <proxy for 'import importlib.abc as ...'>"
-    expected_importlib_util_repr = "<key for 'util' import>: <proxy for 'import importlib.util as ...'>"
+    expected_importlib_repr = "<key for 'importlib' import>: <proxy for 'importlib' import>"
+    expected_importlib_abc_repr = "<key for 'abc' import>: <proxy for 'importlib.abc' import>"
+    expected_importlib_util_repr = "<key for 'util' import>: <proxy for 'importlib.util' import>"
 
     # Test that the importlib proxy is here and then resolves.
     assert expected_importlib_repr in repr(vars(module))
@@ -854,11 +851,9 @@ with defer_imports.until_use:
     assert spec.loader
     spec.loader.exec_module(module)
 
-    expected_asyncio_repr = "<key for 'asyncio' import>: <proxy for 'import asyncio'>"
-    expected_asyncio_base_events_repr = "<key for 'base_events' import>: <proxy for 'from asyncio import base_events'>"
-    expected_asyncio_base_futures_repr = (
-        "<key for 'base_futures' import>: <proxy for 'from asyncio import base_futures'>"
-    )
+    expected_asyncio_repr = "<key for 'asyncio' import>: <proxy for 'asyncio' import>"
+    expected_asyncio_base_events_repr = "<key for 'base_events' import>: <proxy for 'asyncio.base_events' import>"
+    expected_asyncio_base_futures_repr = "<key for 'base_futures' import>: <proxy for 'asyncio.base_futures' import>"
 
     # Make sure the right proxies are present.
     assert expected_asyncio_repr in repr(vars(module))
@@ -945,9 +940,9 @@ class B:
         spec.loader.exec_module(module)
 
         module_locals_repr = repr(vars(module))
-        assert "<key for 'a' import>: <proxy for 'from sample_pkg import a'>" in module_locals_repr
-        assert "<key for 'A' import>: <proxy for 'from sample_pkg.a import A'>" in module_locals_repr
-        assert "<key for 'B' import>: <proxy for 'from sample_pkg.b import B'>" in module_locals_repr
+        assert "<key for 'a' import>: <proxy for 'sample_pkg.a' import>" in module_locals_repr
+        assert "<key for 'A' import>: <proxy for 'sample_pkg.a.A' import>" in module_locals_repr
+        assert "<key for 'B' import>: <proxy for 'sample_pkg.b.B' import>" in module_locals_repr
 
         assert module.A
         assert repr(module.A("hello")).startswith("<sample_pkg.a.A object at")
@@ -1039,7 +1034,7 @@ def test_import_stdlib():
             import tests.sample_stdlib_imports
 
         # Sample-check the __future__ import.
-        expected_future_import = "<key for '__future__' import>: <proxy for 'import __future__'>"
+        expected_future_import = "<key for '__future__' import>: <proxy for '__future__' import>"
         assert expected_future_import in repr(vars(tests.sample_stdlib_imports))
 
 
@@ -1145,7 +1140,7 @@ type ManyExpensive = tuple[Expensive, ...]
 
     with temp_cache_module(package_name, module):
         spec.loader.exec_module(module)
-        expected_proxy_repr = "<key for 'Expensive' import>: <proxy for 'from type_stmt_pkg.exp import Expensive'>"
+        expected_proxy_repr = "<key for 'Expensive' import>: <proxy for 'type_stmt_pkg.exp.Expensive' import>"
 
         assert expected_proxy_repr in repr(vars(module))
 
