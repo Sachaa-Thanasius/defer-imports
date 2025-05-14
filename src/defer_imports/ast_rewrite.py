@@ -134,21 +134,6 @@ def _resolve_name(name: str, package: str, level: int) -> str:  # pragma: no cov
     return f"{base}.{name}" if name else base
 
 
-# Adapted from importlib._bootstrap._sanity_check().
-# Changes:
-# - Remove the checks a) that the parser can catch, and b) that only matter when __import__ is invoked manually.
-def _lax_sanity_check(package: t.Optional[str], level: int) -> None:  # pragma: no cover (tested in stdlib)
-    """Verify arguments are "sane"."""
-
-    if level > 0:
-        if not isinstance(package, str):
-            msg = "__package__ not set to a string"
-            raise TypeError(msg)
-        if not package:
-            msg = "attempted relative import with no known parent package"
-            raise ImportError(msg)
-
-
 # Adapted from importlib._bootstrap.
 def _calc___package__(globals: t.MutableMapping[str, t.Any]) -> t.Optional[str]:  # pragma: no cover (tested in stdlib)
     """Calculate what __package__ should be.
@@ -275,7 +260,7 @@ def get_source_segment(source: str, node: t.Union[ast.expr, ast.stmt], *, padded
 #
 # 1. The "@" isn't a valid character for identifiers, so there won't be conflicts with "regular" user code.
 #    pytest does something similar.
-# 2. The "di" will namespace the symbols somewhat in case third parties augment the code further with similar codegen.
+# 2. The "di" namespaces the symbols somewhat in case third parties augment the code further with similar codegen.
 #    pytest does something similiar.
 # 3. The starting "_" will prevent the symbols from being picked up by code that programmatically accesses a namespace
 #    during module execution but avoids symbols starting with an underscore.
@@ -598,6 +583,7 @@ class _DeferredFileLoader(SourceFileLoader):
         # NOTE: Another option is to monkeypatch `importlib.util.cache_from_source`, as beartype and typeguard do,
         # but that seems excessive for this use case.
         # Ref: https://github.com/beartype/beartype/blob/e9eeb4e282f438e770520b99deadbe219a1c62dc/beartype/claw/_importlib/_clawimpload.py#L177-L312
+        # NOTE: See facebookincubator/cinderx's strict loader for a much more sophisticated code rewriter that also deals with this.
 
         data = super().get_data(path)
 
@@ -869,7 +855,7 @@ import_hook = ImportHookContext
 
 # TODO: Account for module subclasses that don't allow attribute assignment throughout the process.
 
-_ImportArgs: TypeAlias = "tuple[str, t.MutableMapping[str, t.Any], t.MutableMapping[str, t.Any], t.Sequence[str], int]"
+_ImportArgs: TypeAlias = "tuple[str, t.MutableMapping[str, t.Any], t.MutableMapping[str, t.Any], t.Sequence[str]]"
 _StrTree: TypeAlias = "dict[str, t.Optional[_StrTree]]"
 
 _original_import = contextvars.ContextVar("_original_import", default=builtins.__import__)
@@ -879,25 +865,27 @@ _is_deferred = contextvars.ContextVar("_is_deferred", default=False)
 """Whether imports in import statements should be deferred."""
 
 
-def _merge_trees(base: t.Optional[_StrTree], other: t.Optional[_StrTree], /) -> t.Optional[_StrTree]:
+def _deep_merge_trees(base: t.Optional[_StrTree], other: t.Optional[_StrTree], /) -> t.Optional[_StrTree]:
     """Recursively and destructively merge the `other` string tree into the `base` string tree.
 
     Takes ownership of `other`, if it isn't None, and all subtrees within it.
     """
 
-    if other is None:
-        return base
-    elif base is None:
-        return other
-    else:
-        while other:
-            key, other_val = other.popitem()
-            if (key not in base) or ((not base[key]) and other_val):
-                base[key] = other_val
-            elif base[key] and other_val:
-                base[key] = _merge_trees(base[key], other_val)
+    # Invariant: If a variable holding a tree or None is truthy, then it is a populated tree.
 
-        return base
+    if base is None:
+        return other
+
+    while other:
+        key, other_val = other.popitem()
+        if (key not in base) or ((not base[key]) and other_val):
+            base[key] = other_val
+
+        elif (base_val := base[key]) and other_val:
+            # Both values are two populated subtrees.
+            base[key] = _deep_merge_trees(base_val, other_val)
+
+    return base
 
 
 def _merge_key_trees(base_tree: _StrTree, namespace: t.MutableMapping[str, t.Any], import_name: str, /) -> None:
@@ -905,6 +893,8 @@ def _merge_key_trees(base_tree: _StrTree, namespace: t.MutableMapping[str, t.Any
 
     Takes ownership of `base_tree` and all subtrees within.
     """
+
+    # Invariant: If a variable holding a tree or None is truthy, then it is a populated tree.
 
     while base_tree:
         submod_root, submod_children = base_tree.popitem()
@@ -915,16 +905,16 @@ def _merge_key_trees(base_tree: _StrTree, namespace: t.MutableMapping[str, t.Any
 
         if nmsp_key is not None:
             if nmsp_key.__class__ is _DIKey:
-                nmsp_key._DIKey__submods_tree = _merge_trees(nmsp_key._DIKey__submods_tree, submod_children)  # pyright: ignore  # noqa: PGH003 # Too verbose.
+                nmsp_key._DIKey__submods_tree = _deep_merge_trees(nmsp_key._DIKey__submods_tree, submod_children)  # pyright: ignore  # noqa: PGH003 # Too verbose.
             elif submod_children:
                 _merge_key_trees(submod_children, namespace[submod_root].__dict__, f"{import_name}.{submod_root}")
 
         else:
             # NOTE: We can't use setattr() here because PyPy would normalize the attr key type to `str`.
             # Change the namespaces as well to make sure nested proxies are replaced in the right place.
-            nested_key = _DIKey(submod_root, (f"{import_name}.{submod_root}", namespace, namespace, (), 0))
-            if submod_children:
-                nested_key._DIKey__submods_tree = submod_children  # pyright: ignore  # noqa: PGH003 # Too verbose.
+            nested_key = _DIKey(
+                submod_root, (f"{import_name}.{submod_root}", namespace, namespace, ()), submod_children
+            )
             namespace[nested_key] = _DIProxy(f"{import_name}.{submod_root}")
 
 
@@ -953,16 +943,17 @@ class _DIKey(str):
 
     __slots__ = ("__import_args", "__submods_tree", "__is_resolving", "__lock")
 
+    # Invariant: If __submods_tree is not None, then it is a *populated* tree.
+
     __import_args: _ImportArgs
     __submods_tree: t.Optional[_StrTree]
     __is_resolving: bool
     __lock: threading.RLock
 
-    def __new__(cls, asname: str, import_args: _ImportArgs, /) -> Self:
+    def __new__(cls, asname: str, import_args: _ImportArgs, submods_tree: t.Optional[_StrTree] = None, /) -> Self:
         self = super().__new__(cls, asname)
-
         self.__import_args = import_args
-        self.__submods_tree = None
+        self.__submods_tree = submods_tree
         self.__is_resolving = False
         self.__lock = threading.RLock()
 
@@ -991,10 +982,10 @@ class _DIKey(str):
         """Resolve the import and replace the deferred key and placeholder in the relevant namespace with the result."""
 
         raw_asname = str(self)
-        imp_name, _, caller_locals, fromlist, _ = self.__import_args
+        imp_name, _, caller_locals, fromlist = self.__import_args
 
         # 1. Perform the original __import__ and pray.
-        module: types.ModuleType = _original_import.get()(*self.__import_args)
+        module: types.ModuleType = _original_import.get()(*self.__import_args, 0)
 
         # 2. Create nested keys and proxies as needed in the resolved module.
         if self.__submods_tree:
@@ -1028,7 +1019,7 @@ class _DIKey(str):
             caller_locals[raw_asname] = module
 
 
-def _deferred___import__(
+def _deferred___import__(  # noqa: PLR0912
     name: str,
     globals: t.MutableMapping[str, t.Any],
     locals: t.MutableMapping[str, t.Any],
@@ -1038,21 +1029,29 @@ def _deferred___import__(
     """An limited replacement for `__import__` that supports deferred imports by returning proxies."""
 
     # Preconditions:
-    # 1. Only called by syntactic import statements, i.e. no manual calls via __import__.
-    #     - Allows a stricter signature and less manual input validation because we can depend on the builtin parser
-    #       to handle some validation.
+    # 1. Only invoked by syntactic import statements; cannot be called manually via __import__().
+    #     - Allows a stricter signature and less input validation because we have a more limited range of inputs and
+    #       can depend on the builtin parser to handle some validation.
     # 2. Only called within the context of "with _actual_until_use: ...".
+    #     - _is_deferred is set to True and thus _DIKey instances won't trigger resolution.
 
     # Do minimal input validation on top of the parser's work.
     package = _calc___package__(globals) if (level != 0) else None
-    _lax_sanity_check(package, level)
     if level > 0:
-        assert package is not None, "_lax_sanity_check() should have ensured this."
+        # These checks are adapted and inlined from importlib._bootstrap._sanity_check() since we don't need all of them.
+        if not isinstance(package, str):  # pragma: no cover (tested in stdlib)
+            msg = "__package__ not set to a string"
+            raise TypeError(msg)
+        if not package:  # pragma: no cover (tested in stdlib)
+            msg = "attempted relative import with no known parent package"
+            raise ImportError(msg)
+
         name = _resolve_name(name, package, level)
         level = 0
 
-    # The AST transformer guarantees that this exists as either `tuple[str | None, ...]` when fromlist exists,
-    # or `str | None` otherwise.
+    # Invariant: locals[_TEMP_ASNAMES] must exist.
+    # The AST transformer guarantees that it exists as `tuple[str | None, ...]` when fromlist is populated, or as
+    # `str | None` otherwise.
     # Since we can't dependently annotate it that way, and annotating it as a union would require isinstance checks to
     # satisfy the type checker, leaving it as Any "satisfies" the type checker with less runtime cost.
     asname = locals[_TEMP_ASNAMES]
@@ -1063,11 +1062,11 @@ def _deferred___import__(
                 # Case 1: import a.b as c
                 # NOTE: We pretend it's a "from" import to avoid key tree creation.
                 parent_name, _, submod_name = name.rpartition(".")
-                locals[_DIKey(asname, (parent_name, globals, locals, (submod_name,), 0))] = None
+                locals[_DIKey(asname, (parent_name, globals, locals, (submod_name,)))] = None
                 result = _DIProxy(parent_name)
             else:
                 # Case 2: import a as c
-                locals[_DIKey(asname, (name, globals, locals, (), 0))] = None
+                locals[_DIKey(asname, (name, globals, locals, ()))] = None
                 result = _DIProxy(name)
 
         elif "." in name:
@@ -1081,26 +1080,23 @@ def _deferred___import__(
 
             # Heuristic: If locals[parent_name] is a module or proxy, don't clobber it.
             if parent_name in locals and isinstance(preexisting := (locals[parent_name]), (types.ModuleType, _DIProxy)):
-                # Case 3.a: import importlib, -> importlib.util <-
-                # Handle submodule imports if imports of parent modules already occurred in the call site's namespace.
+                # Case 3.a: import importlib[.abc], -> importlib.util <-
                 _merge_key_trees(name_tree, locals, parent_name)
                 result = preexisting
             else:
-                key = _DIKey(parent_name, (parent_name, globals, locals, (), 0))
-                key._DIKey__submods_tree = name_tree.popitem()[1]  # pyright: ignore [reportAttributeAccessIssue]
-                locals[key] = None
+                locals[_DIKey(parent_name, (parent_name, globals, locals, ()), name_tree.popitem()[1])] = None
                 result = _DIProxy(parent_name)
 
         else:
             # Case 4: import a
-            locals[_DIKey(name, (name, globals, locals, (), 0))] = None
+            locals[_DIKey(name, (name, globals, locals, ()))] = None
             result = _DIProxy(name)
 
     else:
         # Case 5: from ... import ... [as ...]
         from_asname: str | None
         for from_name, from_asname in zip(fromlist, asname):
-            locals[_DIKey(from_asname or from_name, (name, globals, locals, (from_name,), 0))] = None
+            locals[_DIKey(from_asname or from_name, (name, globals, locals, (from_name,)))] = None
 
         result = _DIProxy(name)
 
