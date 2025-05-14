@@ -918,11 +918,10 @@ def _merge_key_trees(base_tree: _StrTree, namespace: t.MutableMapping[str, t.Any
             namespace[nested_key] = _DIProxy(f"{import_name}.{submod_root}")
 
 
-# NOTE: We mangle the instance attribute names on the key and placeholder classes to help avoid further exposure if an
-# instance of either leaks and a user tries use them as a string or module (attribute) respectively.
-
-
 class _DIProxy:
+    # NOTE: Mangle instance attribute name(s) to help avoid further exposure if an instance leaks and a user tries to
+    # use it as a regular module.
+
     __slots__ = ("__import_name",)
 
     def __init__(self, import_name: str, /) -> None:
@@ -941,9 +940,12 @@ class _DIKey(str):
     When referenced, the key will replace itself in the namespace with the resolved import or the right name from it.
     """
 
-    __slots__ = ("__import_args", "__submods_tree", "__is_resolving", "__lock")
+    # NOTE: Mangle instance attribute name(s) to help avoid further exposure if an instance leaks and a user tries to
+    # use it as a regular string.
 
     # Invariant: If __submods_tree is not None, then it is a *populated* tree.
+
+    __slots__ = ("__import_args", "__submods_tree", "__is_resolving", "__lock")
 
     __import_args: _ImportArgs
     __submods_tree: t.Optional[_StrTree]
