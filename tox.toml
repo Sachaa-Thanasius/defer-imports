@@ -19,5 +19,5 @@ commands = [["coverage", "erase"]]
 description = "Run coverage and combine results."
 skip_install = true
 dependency_groups = ["cov"]
-depends = ["3.9", "3.10", "3.11", "3.12", "3.13", "3.13t", "pypy3"]
+depends = ["3.9", "3.10", "3.11", "3.12", "3.13", "3.13t", "pypy310"]
 commands = [["coverage", "combine"], ["coverage", "report"]]

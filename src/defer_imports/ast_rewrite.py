@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import ast
 import builtins
+import collections
 import contextvars
 import io
+import itertools
 import sys
 import types
 from importlib.machinery import BYTECODE_SUFFIXES, SOURCE_SUFFIXES, FileFinder, ModuleSpec, SourceFileLoader
@@ -22,7 +24,6 @@ from . import __version__, lazy_load as _lazy_load
 
 
 with _lazy_load.until_module_use:
-    import collections
     import os
     import threading
     import tokenize
@@ -114,7 +115,7 @@ _SourceData: TypeAlias = "t.Union[ReadableBuffer, str]"
 # region -------- Vendored helpers --------
 #
 # These are adapted from standard library modules to avoid depending on
-# private APIs and allow changes.
+# private APIs and/or allow changes.
 #
 # PYUPDATE: Ensure these are consistent with upstream, aside from our
 # customizations.
@@ -201,6 +202,66 @@ def _decode_source(source_bytes: ReadableBuffer) -> str:  # pragma: no cover (te
     return newline_decoder.decode(source)  # pyright: ignore [reportUnknownArgumentType]
 
 
+# Adapted from ast.
+# Changes:
+# - Inline the helper functions.
+# - Use io.StringIO with newline=None instead of regex to parse lines ending with newlines; it's a bit faster and
+#   uses a module that takes less time to import.
+# - Use itertools.islice to avoid materializing and resizing a potentially much larger list of lines.
+#
+# NOTE: Technically, the type of `node` would be more accurately represented with something like
+# ast.AST & LocationAttrsProtocol, but Python doesn't have intersections yet and, for us, import-time typing usage bad.
+def get_source_segment(source: str, node: t.Union[ast.expr, ast.stmt], *, padded: bool = False) -> t.Optional[str]:
+    """Get the source code segment of `source` that generated `node`.
+
+    Parameters
+    ----------
+    source: str
+        The source code.
+    node: ast.expr | ast.stmt
+        An AST created from `source`, with location information.
+    padded: bool, default=False
+        Whether to pad, with spaces, the first line of a multi-line statement to match its original position.
+
+    Returns
+    -------
+    str | None
+        The found source segment, or None if some location information (`lineno`, `end_lineno`, `col_offset`, or
+        `end_col_offset`) is missing.
+    """
+
+    try:
+        if (node.end_lineno is None) or (node.end_col_offset is None):
+            return None
+
+        col_offset = node.col_offset
+        end_col_offset = node.end_col_offset
+
+        # Convert from 1-indexed to 0-indexed.
+        lineno = node.lineno - 1
+        end_lineno = node.end_lineno - 1
+    except AttributeError:
+        return None
+
+    # Split a string into lines while ignoring form feed and other chars.
+    # This mimics how the Python parser splits source code.
+    with io.StringIO(source, newline=None) as source_buffer:
+        lines = list(itertools.islice(source_buffer, lineno, end_lineno + 1))
+
+    if lineno == end_lineno:
+        return lines[0].encode()[col_offset:end_col_offset].decode()
+
+    if padded:
+        # Replace all chars, except '\f\t', with spaces before the node's start on its starting line.
+        padding = "".join((c if (c in "\f\t") else " ") for c in lines[lineno].encode()[:col_offset].decode())
+    else:
+        padding = ""
+
+    lines[lineno] = padding + lines[lineno].encode()[col_offset:].decode()
+    lines[end_lineno] = lines[end_lineno].encode()[:end_col_offset].decode()
+    return "".join(lines)
+
+
 # endregion
 
 
@@ -248,7 +309,7 @@ class _ImportsInstrumenter(ast.NodeTransformer):
     The results of those imports will be assigned to custom keys in the local namespace.
     """
 
-    # NOTE: ast.fix_missing_locations and ast.copy_location make location bookeeping easier but slow compilation by
+    # NOTE: ast.fix_missing_locations and ast.copy_location make location bookkeeping easier but slow compilation by
     # ~30%, so we avoid them.
 
     # PYUPDATE: Ensure generic_visit is consistent with upstream, aside from our customizations.
@@ -271,7 +332,7 @@ class _ImportsInstrumenter(ast.NodeTransformer):
 
         new_nodes: list[ast.stmt] = []
 
-        # Create a temporary variable to hold the "asnames" for each import, i.e. what variable(s) the result will be
+        # Create a temporary variable to hold the "asnames" for each import, i.e. what variable(s) the result(s) will be
         # saved into.
         for node in import_nodes:
             loc["lineno"], loc["end_lineno"] = node.lineno, node.end_lineno
@@ -389,7 +450,7 @@ class _ImportsInstrumenter(ast.NodeTransformer):
         """
 
         source = self.source if isinstance(self.source, str) else _decode_source(self.source)
-        text = ast.get_source_segment(source, node, padded=True)
+        text = get_source_segment(source, node, padded=True)
         filepath = self.filepath if isinstance(self.filepath, (str, bytes, os.PathLike)) else bytes(self.filepath)
         context = (os.fsdecode(filepath), node.lineno, node.col_offset + 1, text)
         if sys.version_info >= (3, 10):  # pragma: >=3.10 cover
@@ -806,6 +867,8 @@ import_hook = ImportHookContext
 # ============================================================================
 
 
+# TODO: Account for module subclasses that don't allow attribute assignment throughout the process.
+
 _ImportArgs: TypeAlias = "tuple[str, t.MutableMapping[str, t.Any], t.MutableMapping[str, t.Any], t.Sequence[str], int]"
 _StrTree: TypeAlias = "dict[str, t.Optional[_StrTree]]"
 
@@ -816,56 +879,60 @@ _is_deferred = contextvars.ContextVar("_is_deferred", default=False)
 """Whether imports in import statements should be deferred."""
 
 
-def _create_str_tree(components: t.Sequence[str]) -> _StrTree:
-    root: _StrTree = None  # pyright: ignore [reportAssignmentType]
-    for key in reversed(components):
-        root = {key: root}
-    return root
+def _merge_trees(base: t.Optional[_StrTree], other: t.Optional[_StrTree], /) -> t.Optional[_StrTree]:
+    """Recursively and destructively merge the `other` string tree into the `base` string tree.
 
+    Takes ownership of `other`, if it isn't None, and all subtrees within it.
+    """
 
-def _merge_trees(base: _StrTree, other: t.Optional[_StrTree], /) -> _StrTree:
-    if other is not None:
-        for key, other_val in other.items():
-            # Base cases that require action.
+    if other is None:
+        return base
+    elif base is None:
+        return other
+    else:
+        while other:
+            key, other_val = other.popitem()
             if (key not in base) or ((not base[key]) and other_val):
                 base[key] = other_val
+            elif base[key] and other_val:
+                base[key] = _merge_trees(base[key], other_val)
 
-            # Recursive case.
-            elif (base_val := base[key]) and other_val:
-                _merge_trees(base_val, other_val)
-
-    return base
+        return base
 
 
-def _merge_key_trees(
-    base_tree: t.Optional[_StrTree],
-    base_vars: t.MutableMapping[str, t.Any],
-    import_name: str,
-) -> None:
-    if base_tree is None:
-        return
+def _merge_key_trees(base_tree: _StrTree, namespace: t.MutableMapping[str, t.Any], import_name: str, /) -> None:
+    """Recursively create special keys in namespaces based on the given string tree, destroying the tree in the process.
 
-    for submod_root, submod_children in base_tree.items():
-        if submod_root in base_vars:
-            root_key = next(filter(submod_root.__eq__, base_vars))
-            if isinstance(root_key, _DIKey):
-                _merge_trees(root_key._DIKey__submods_tree, submod_children)  # pyright: ignore  # noqa: PGH003 # Too verbose.
-            else:
-                _merge_key_trees(submod_children, base_vars[root_key].__dict__, f"{import_name}.{submod_root}")
+    Takes ownership of `base_tree` and all subtrees within.
+    """
+
+    while base_tree:
+        submod_root, submod_children = base_tree.popitem()
+
+        # NOTE: Normal "==" semantics via base_tree.__contains__ causes a performance issue because _DIKey's very slow
+        # __eq__ always take priority over str's.
+        nmsp_key = next(filter(submod_root.__eq__, namespace), None)
+
+        if nmsp_key is not None:
+            if nmsp_key.__class__ is _DIKey:
+                nmsp_key._DIKey__submods_tree = _merge_trees(nmsp_key._DIKey__submods_tree, submod_children)  # pyright: ignore  # noqa: PGH003 # Too verbose.
+            elif submod_children:
+                _merge_key_trees(submod_children, namespace[submod_root].__dict__, f"{import_name}.{submod_root}")
+
         else:
-            # NOTE: This doesn't use setattr() because pypy normalizes the attr key type to `str`.
+            # NOTE: We can't use setattr() here because PyPy would normalize the attr key type to `str`.
             # Change the namespaces as well to make sure nested proxies are replaced in the right place.
-            nested_key = _DIKey(submod_root, (f"{import_name}.{submod_root}", base_vars, base_vars, (), 0))
+            nested_key = _DIKey(submod_root, (f"{import_name}.{submod_root}", namespace, namespace, (), 0))
             if submod_children:
-                nested_key.__submods_tree |= submod_children
-            base_vars[nested_key] = _DIPlaceholder(f"{import_name}.{submod_root}")
+                nested_key._DIKey__submods_tree = submod_children  # pyright: ignore  # noqa: PGH003 # Too verbose.
+            namespace[nested_key] = _DIProxy(f"{import_name}.{submod_root}")
 
 
 # NOTE: We mangle the instance attribute names on the key and placeholder classes to help avoid further exposure if an
 # instance of either leaks and a user tries use them as a string or module (attribute) respectively.
 
 
-class _DIPlaceholder:
+class _DIProxy:
     __slots__ = ("__import_name",)
 
     def __init__(self, import_name: str, /) -> None:
@@ -887,7 +954,7 @@ class _DIKey(str):
     __slots__ = ("__import_args", "__submods_tree", "__is_resolving", "__lock")
 
     __import_args: _ImportArgs
-    __submods_tree: _StrTree
+    __submods_tree: t.Optional[_StrTree]
     __is_resolving: bool
     __lock: threading.RLock
 
@@ -895,7 +962,7 @@ class _DIKey(str):
         self = super().__new__(cls, asname)
 
         self.__import_args = import_args
-        self.__submods_tree = {}
+        self.__submods_tree = None
         self.__is_resolving = False
         self.__lock = threading.RLock()
 
@@ -905,7 +972,7 @@ class _DIKey(str):
         is_eq = super().__eq__(value)
 
         # Only resolve the deferred import when the key is directly referenced while imports are *not* deferred.
-        if _is_deferred.get() or (is_eq is not True):
+        if (is_eq is not True) or _is_deferred.get():
             return is_eq
 
         # Only the first thread to grab the lock should resolve the deferred import.
@@ -923,47 +990,60 @@ class _DIKey(str):
     def __resolve_import(self, /) -> None:
         """Resolve the import and replace the deferred key and placeholder in the relevant namespace with the result."""
 
-        key = str(self)
-        name, _, local_ns, fromlist, _ = self.__import_args
+        raw_asname = str(self)
+        imp_name, _, caller_locals, fromlist, _ = self.__import_args
 
         # 1. Perform the original __import__ and pray.
         module: types.ModuleType = _original_import.get()(*self.__import_args)
 
-        # 2. Create nested proxies as needed over to the resolved module.
+        # 2. Create nested keys and proxies as needed in the resolved module.
         if self.__submods_tree:
-            _merge_key_trees(self.__submods_tree, module.__dict__, name)
+            _is_deferred_tok = _is_deferred.set(True)
+            try:
+                _merge_key_trees(self.__submods_tree, module.__dict__, imp_name.partition(".")[0])
+            finally:
+                _is_deferred.reset(_is_deferred_tok)
+
+            self.__submods_tree = None
 
         # 3. Replace the deferred version of the key in the relevant namespace to avoid it sticking around.
         # This will trigger __eq__ again, so we temporarily set is_deferred to prevent recursion.
         _is_deferred_tok = _is_deferred.set(True)
         try:
-            local_ns[key] = local_ns.pop(key)
+            temp = caller_locals[raw_asname]
+            del caller_locals[raw_asname]
+            caller_locals[raw_asname] = temp
         finally:
             _is_deferred.reset(_is_deferred_tok)
 
         # 4. Resolve any requested attribute access and replace the proxy with the result in the relevant namespace.
-        local_ns[key] = getattr(module, fromlist[0]) if fromlist else module
+        if fromlist:
+            caller_locals[raw_asname] = getattr(module, fromlist[0])
+        elif ("." in imp_name) and ("." not in raw_asname):
+            result = module
+            for attr in imp_name.rpartition(".")[2].split("."):
+                result = getattr(result, attr)
+            caller_locals[raw_asname] = result
+        else:
+            caller_locals[raw_asname] = module
 
 
 def _deferred___import__(
     name: str,
     globals: t.MutableMapping[str, t.Any],
     locals: t.MutableMapping[str, t.Any],
-    fromlist: t.Optional[t.Sequence[str]] = (),
+    fromlist: t.Optional[t.Sequence[str]] = None,
     level: int = 0,
 ) -> t.Any:
     """An limited replacement for `__import__` that supports deferred imports by returning proxies."""
 
     # Preconditions:
-    # 1. Only called by syntactic import statements.
-    #     - Allows a stricter signature and less manual input validation because we don't allow usage via
-    #       __import__() and thus can depend on the builtin parser to handle some validation.
+    # 1. Only called by syntactic import statements, i.e. no manual calls via __import__.
+    #     - Allows a stricter signature and less manual input validation because we can depend on the builtin parser
+    #       to handle some validation.
     # 2. Only called within the context of "with _actual_until_use: ...".
 
-    # NOTE: fromlist is None sometimes. I think it's an implementation detail of the IMPORT_FROM bytecode.
-    fromlist = fromlist or ()
-
-    # Do minimal input validation.
+    # Do minimal input validation on top of the parser's work.
     package = _calc___package__(globals) if (level != 0) else None
     _lax_sanity_check(package, level)
     if level > 0:
@@ -971,41 +1051,50 @@ def _deferred___import__(
         name = _resolve_name(name, package, level)
         level = 0
 
+    # The AST transformer guarantees that this exists as either `tuple[str | None, ...]` when fromlist exists,
+    # or `str | None` otherwise.
+    # Since we can't dependently annotate it that way, and annotating it as a union would require isinstance checks to
+    # satisfy the type checker, leaving it as Any "satisfies" the type checker with less runtime cost.
     asname = locals[_TEMP_ASNAMES]
 
     if not fromlist:
         if asname:
             if "." in name:
                 # Case 1: import a.b as c
-                # NOTE: We pretend it's a "from" import to avoid excessive key nesting.
+                # NOTE: We pretend it's a "from" import to avoid key tree creation.
                 parent_name, _, submod_name = name.rpartition(".")
                 locals[_DIKey(asname, (parent_name, globals, locals, (submod_name,), 0))] = None
-                placeholder = _DIPlaceholder(parent_name)
+                result = _DIProxy(parent_name)
             else:
                 # Case 2: import a as c
                 locals[_DIKey(asname, (name, globals, locals, (), 0))] = None
-                placeholder = _DIPlaceholder(name)
+                result = _DIProxy(name)
 
-        else:  # noqa: PLR5501
-            if "." in name:
-                # Case 3: import a.b
-                split_name = name.split(".")
-                parent_name = split_name[0]
+        elif "." in name:
+            # Case 3: import a.b
+            split_name = name.split(".")
+            parent_name = split_name[0]
 
-                if parent_name in locals:
-                    # Handle submodule imports if imports of parent modules already occurred in the call site's namespace.
-                    _merge_key_trees(_create_str_tree(split_name), locals, name)
-                    return locals[parent_name]
-                else:
-                    key = _DIKey(parent_name, (parent_name, globals, locals, (), 0))
-                    key._DIKey__submods_tree = _create_str_tree(split_name[1:])  # pyright: ignore [reportAttributeAccessIssue]
-                    locals[key] = None
-                    placeholder = _DIPlaceholder(parent_name)
+            name_tree: _StrTree = None  # pyright: ignore [reportAssignmentType]
+            for key in reversed(split_name):
+                name_tree = {key: name_tree}
 
+            # Heuristic: If locals[parent_name] is a module or proxy, don't clobber it.
+            if parent_name in locals and isinstance(preexisting := (locals[parent_name]), (types.ModuleType, _DIProxy)):
+                # Case 3.a: import importlib, -> importlib.util <-
+                # Handle submodule imports if imports of parent modules already occurred in the call site's namespace.
+                _merge_key_trees(name_tree, locals, parent_name)
+                result = preexisting
             else:
-                # Case 4: import a
-                locals[_DIKey(name, (name, globals, locals, (), 0))] = None
-                placeholder = _DIPlaceholder(name)
+                key = _DIKey(parent_name, (parent_name, globals, locals, (), 0))
+                key._DIKey__submods_tree = name_tree.popitem()[1]  # pyright: ignore [reportAttributeAccessIssue]
+                locals[key] = None
+                result = _DIProxy(parent_name)
+
+        else:
+            # Case 4: import a
+            locals[_DIKey(name, (name, globals, locals, (), 0))] = None
+            result = _DIProxy(name)
 
     else:
         # Case 5: from ... import ... [as ...]
@@ -1013,9 +1102,9 @@ def _deferred___import__(
         for from_name, from_asname in zip(fromlist, asname):
             locals[_DIKey(from_asname or from_name, (name, globals, locals, (from_name,), 0))] = None
 
-        placeholder = _DIPlaceholder(name)
+        result = _DIProxy(name)
 
-    return placeholder
+    return result
 
 
 class _DeferredContext:

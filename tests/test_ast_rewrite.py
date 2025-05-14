@@ -809,7 +809,7 @@ with defer_imports.until_use:
     assert expected_importlib_util_repr in repr(module_importlib_vars)
 
     assert expected_importlib_abc_repr in repr(module_importlib_vars)
-    assert module.importlib.abc
+    assert module.importlib.abc.__spec__.name == "importlib.abc"
     assert expected_importlib_abc_repr not in repr(module_importlib_vars)
 
     assert expected_importlib_util_repr in repr(module_importlib_vars)
