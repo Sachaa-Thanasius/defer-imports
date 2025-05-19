@@ -15,7 +15,6 @@ import builtins
 import collections
 import contextvars
 import io
-import itertools
 import sys
 import types
 from importlib.machinery import BYTECODE_SUFFIXES, SOURCE_SUFFIXES, FileFinder, ModuleSpec, SourceFileLoader
@@ -191,8 +190,7 @@ def _decode_source(source_bytes: ReadableBuffer) -> str:  # pragma: no cover (te
 # Changes:
 # - Inline the helper functions.
 # - Use io.StringIO with newline=None instead of regex to parse lines ending with newlines; it's a bit faster and
-#   uses a module that takes less time to import.
-# - Use itertools.islice to avoid materializing and resizing a potentially much larger list of lines.
+#   uses a module that we were importing anyway.
 #
 # NOTE: Technically, the type of `node` would be more accurately represented with something like
 # ast.AST & LocationAttrsProtocol, but Python doesn't have intersections yet and, for us, import-time typing usage bad.
@@ -231,7 +229,8 @@ def get_source_segment(source: str, node: t.Union[ast.expr, ast.stmt], *, padded
     # Split a string into lines while ignoring form feed and other chars.
     # This mimics how the Python parser splits source code.
     with io.StringIO(source, newline=None) as source_buffer:
-        lines = list(itertools.islice(source_buffer, lineno, end_lineno + 1))
+        # NOTE: We could use itertools.islice() here to avoid materializing a potentially much larger list of lines.
+        lines = list(source_buffer)[lineno : end_lineno + 1]
 
     if lineno == end_lineno:
         return lines[0].encode()[col_offset:end_col_offset].decode()
@@ -853,9 +852,8 @@ import_hook = ImportHookContext
 # ============================================================================
 
 
-# TODO: Account for module subclasses that don't allow attribute assignment throughout the process.
-
 _ImportArgs: TypeAlias = "tuple[str, t.MutableMapping[str, t.Any], t.MutableMapping[str, t.Any], t.Optional[str]]"
+
 
 _original_import = contextvars.ContextVar("_original_import", default=builtins.__import__)
 """What builtins.__import__ last pointed to."""
@@ -864,56 +862,53 @@ _is_deferred = contextvars.ContextVar[bool]("_is_deferred", default=False)
 """Whether imports in import statements should be deferred."""
 
 
-def _handle_import_key(full_name: str, namespace: t.MutableMapping[str, t.Any], start: int = 0) -> None:  # noqa: PLR0912
+def _handle_import_key(import_name: str, nmsp: t.MutableMapping[str, t.Any], start_idx: int = 0, /) -> None:
     # Precondition: full_name is a dotted name.
 
-    sub_0 = start
-    while (sub_1 := full_name.find(".", sub_0)) != -1:
-        submod_name = full_name[sub_0:sub_1]
+    while True:
+        end_idx = import_name.find(".", start_idx)
+
+        at_end_of_name = end_idx == -1
+        if not at_end_of_name:
+            submod_name = import_name[start_idx:end_idx]
+        else:
+            submod_name = import_name[start_idx:]
 
         # NOTE: Normal "==" semantics via base_tree.__contains__ causes a performance issue because _DIKey's very slow
         # __eq__ always take priority over str's.
-        existing_key = next(filter(submod_name.__eq__, namespace), None)
-
-        if existing_key is not None:
-            if existing_key.__class__ is not _DIKey:
-                namespace = namespace[submod_name].__dict__
-            else:
-                if existing_key._DIKey__submod_names:  # pyright: ignore [reportAttributeAccessIssue, reportUnknownMemberType]
-                    existing_key._DIKey__submod_names.add(full_name)  # pyright: ignore  # noqa: PGH003 # Too verbose.
-                else:
-                    existing_key._DIKey__submod_names = {full_name}  # pyright: ignore  # noqa: PGH003 # Too verbose.
-                break
-        else:
-            full_submod_name = full_name[:sub_1]
-
-            sub_names: set[str] = set()
-            while (sub_1 := full_name.find(".", sub_0)) != -1:
-                sub_names.add(full_name[:sub_1])
-                sub_0 = sub_1 + 1
-            sub_names.add(full_name)
-
-            # Change the namespaces as well to make sure nested proxies are replaced in the right place.
-            nested_key = _DIKey(submod_name, (full_submod_name, namespace, namespace, None), sub_names)
-
-            # NOTE: We can't use setattr() here because PyPy would normalize the attr key type to `str`.
-            namespace[nested_key] = _DIProxy(full_submod_name)
-            break
-
-        sub_0 = sub_1 + 1
-
-    else:
-        submod_name = full_name[sub_0:]
-        existing_key = next(filter(submod_name.__eq__, namespace), None)
+        existing_key = next(filter(submod_name.__eq__, nmsp), None)
 
         if existing_key is not None:
             if existing_key.__class__ is _DIKey:
                 if existing_key._DIKey__submod_names:  # pyright: ignore [reportAttributeAccessIssue, reportUnknownMemberType]
-                    existing_key._DIKey__submod_names.add(submod_name)  # pyright: ignore  # noqa: PGH003 # Too verbose.
+                    existing_key._DIKey__submod_names.add(import_name)  # pyright: ignore  # noqa: PGH003 # Too verbose.
                 else:
-                    existing_key._DIKey__submod_names = {submod_name}  # pyright: ignore  # noqa: PGH003 # Too verbose.
+                    existing_key._DIKey__submod_names = {import_name}  # pyright: ignore  # noqa: PGH003 # Too verbose.
+                break
+
+            if not at_end_of_name:
+                nmsp = nmsp[submod_name].__dict__
+
+        elif not at_end_of_name:
+            full_submod_name = import_name[:end_idx]
+
+            sub_names: set[str] = set()
+            while (end_idx := import_name.find(".", start_idx)) != -1:
+                sub_names.add(import_name[:end_idx])
+                start_idx = end_idx + 1
+            sub_names.add(import_name)
+
+            # Replace the namespaces as well to make sure the proxy is replaced in the right place.
+            # NOTE: We can't use setattr() on the module here because PyPy would normalize the attr key type to
+            # `str`. Instead, use the module dict directly.
+            nmsp[_DIKey(submod_name, (full_submod_name, nmsp, nmsp, None), sub_names)] = _DIProxy(full_submod_name)
+            break
+
         else:
-            namespace[_DIKey(submod_name, (full_name, namespace, namespace, None))] = _DIProxy(full_name)
+            nmsp[_DIKey(submod_name, (import_name, nmsp, nmsp, None))] = _DIProxy(import_name)
+            break
+
+        start_idx = end_idx + 1
 
 
 class _DIProxy:
@@ -950,12 +945,10 @@ class _DIKey(str):
 
     def __new__(cls, asname: str, import_args: _ImportArgs, submod_names: t.Optional[set[str]] = None, /) -> Self:
         self = super().__new__(cls, asname)
-
         self.__import_args = import_args
         self.__submod_names = submod_names
         self.__is_resolving = False
         self.__lock = threading.RLock()
-
         return self
 
     def __eq__(self, value: object, /) -> bool:
@@ -1079,15 +1072,20 @@ def _deferred___import__(  # noqa: PLR0912
         elif "." in name:
             # Case 3: import a.b
             parent_name = name.partition(".")[0]
-
-            # Heuristic: If locals[parent_name] is a module or proxy, don't clobber it.
-            if parent_name in locals and isinstance(preexisting := (locals[parent_name]), (types.ModuleType, _DIProxy)):
-                # Case 3.a: import importlib[.abc], -> importlib.util <-
-                _handle_import_key(name, locals)
-                result = preexisting
-            else:
+            try:
+                preexisting = locals[parent_name]
+            except KeyError:
                 locals[_DIKey(parent_name, (parent_name, globals, locals, None), {name})] = None
                 result = _DIProxy(parent_name)
+            else:
+                # Heuristic: If locals[parent_name] is not a module or proxy, pretend it didn't exist and clobber it.
+                if not isinstance(preexisting, (types.ModuleType, _DIProxy)):
+                    locals[_DIKey(parent_name, (parent_name, globals, locals, None), {name})] = None
+                    result = _DIProxy(parent_name)
+                else:
+                    # Case 3.a: import importlib[.abc], -> importlib.util <-
+                    _handle_import_key(name, locals)
+                    result = preexisting
 
         else:
             # Case 4: import a
