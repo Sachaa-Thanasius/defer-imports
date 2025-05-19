@@ -11,11 +11,11 @@
 from __future__ import annotations
 
 import _imp
-import importlib.machinery
 import sys
 import threading
 import types
 import warnings
+from importlib.machinery import ModuleSpec, SourceFileLoader
 
 
 __all__ = ("until_module_use",)
@@ -76,7 +76,7 @@ class _LazyModuleType(types.ModuleType):
     def __getattribute__(self, name: str, /) -> t.Any:
         """Trigger the load of the module and return the attribute."""
 
-        __spec__: importlib.machinery.ModuleSpec = object.__getattribute__(self, "__spec__")
+        __spec__: ModuleSpec = object.__getattribute__(self, "__spec__")
 
         # HACK: This is how we prevent internal import machinery from triggering the load early, but it has a tradeoff.
         #
@@ -196,7 +196,7 @@ class _LazyLoader(Loader):
         self.__check_eager_loader(loader)
         self.loader = loader
 
-    def create_module(self, spec: importlib.machinery.ModuleSpec) -> t.Optional[types.ModuleType]:
+    def create_module(self, spec: ModuleSpec) -> t.Optional[types.ModuleType]:
         return self.loader.create_module(spec)
 
     def exec_module(self, module: types.ModuleType) -> None:
@@ -245,7 +245,7 @@ def _find_spec_without_lazyfinder(  # noqa: PLR0912
     name: str,
     path: t.Optional[t.Sequence[str]],
     target: t.Optional[types.ModuleType] = None,
-) -> t.Optional[importlib.machinery.ModuleSpec]:  # pragma: no cover (mostly tested in stdlib)
+) -> t.Optional[ModuleSpec]:  # pragma: no cover (mostly tested in stdlib)
     """Find a module's spec.
 
     Ignore the presence of `_LazyFinder` on `sys.meta_path`.
@@ -311,14 +311,14 @@ class _LazyFinder:
         name: str,
         path: t.Optional[t.Sequence[str]] = None,
         target: t.Optional[types.ModuleType] = None,
-    ) -> t.Optional[importlib.machinery.ModuleSpec]:
+    ) -> t.Optional[ModuleSpec]:
         spec = _find_spec_without_lazyfinder(name, path, target)
 
         # Skip being lazy for non-source modules to avoid issues with extension modules having
         # uninitialized state, especially since loading can't currently be triggered by PyModule_GetState.
         # Ref: https://github.com/python/cpython/issues/85963
-        if (spec is not None) and isinstance(spec.loader, importlib.machinery.SourceFileLoader):
-            spec.loader = _LazyLoader(spec.loader)
+        if (spec is not None) and ((loader := spec.loader) is not None) and isinstance(loader, SourceFileLoader):
+            spec.loader = _LazyLoader(loader)
 
         return spec
 
