@@ -862,8 +862,10 @@ _is_deferred = contextvars.ContextVar[bool]("_is_deferred", default=False)
 """Whether imports in import statements should be deferred."""
 
 
-def _handle_import_key(import_name: str, nmsp: t.MutableMapping[str, t.Any], start_idx: int = 0, /) -> None:
-    # Precondition: full_name is a dotted name.
+def _handle_import_key(import_name: str, nmsp: t.MutableMapping[str, t.Any], start_idx: int = 0, /) -> None:  # noqa: PLR0912
+    # Precondition: import_name is a dotted name.
+    # NOTE: We can't use setattr() on modules directly because PyPy normalizes the attr key type to `str` in setattr().
+    # Instead, we assign into the module dict.
 
     while True:
         end_idx = import_name.find(".", start_idx)
@@ -874,9 +876,15 @@ def _handle_import_key(import_name: str, nmsp: t.MutableMapping[str, t.Any], sta
         else:
             submod_name = import_name[start_idx:]
 
-        # NOTE: Normal "==" semantics via base_tree.__contains__ causes a performance issue because _DIKey's very slow
-        # __eq__ always take priority over str's.
-        existing_key = next(filter(submod_name.__eq__, nmsp), None)
+        # NOTE: Finding the key takes ~70% of this function's time, at minimum.
+        # Normal "==" semantics are triggered by most presence checks, e.g. nmsp.__contains__, and that causes a
+        # performance issue because _DIKey's very slow __eq__ always take priority over str's. Thus, we avoid those
+        # routes.
+        # Micro-optimization: The `for` loop is ~5-10% faster than `next(filter(...), None)`.
+        for existing_key in filter(submod_name.__eq__, nmsp):  # noqa: B007
+            break
+        else:
+            existing_key = None
 
         if existing_key is not None:
             if existing_key.__class__ is _DIKey:
@@ -899,8 +907,7 @@ def _handle_import_key(import_name: str, nmsp: t.MutableMapping[str, t.Any], sta
             sub_names.add(import_name)
 
             # Replace the namespaces as well to make sure the proxy is replaced in the right place.
-            # NOTE: We can't use setattr() on the module here because PyPy would normalize the attr key type to
-            # `str`. Instead, use the module dict directly.
+
             nmsp[_DIKey(submod_name, (full_submod_name, nmsp, nmsp, None), sub_names)] = _DIProxy(full_submod_name)
             break
 
