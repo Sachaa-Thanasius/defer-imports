@@ -138,8 +138,12 @@ extend-ignore = [
     "W293",   # Not recommended, but ruff format handles it as well.
 
     # ---- Project-specific rules
-    "RET505", # Returns in both parts of if-else can be more readable.
-    "SIM108", # if-else instead of a ternary can be more readable. 
+    # Readability.
+    "SIM108",  # if-else instead of a ternary.
+    "RET505",  # elif/else after return.
+    "RET507",  # elif/else after continue.
+    "RET508",  # elif/else after break.
+    "PLR5501", # if within else block instead of elif.
 ]
 unfixable = [
     "ERA", # Prevent unlikely erroneous deletion.
@@ -160,7 +164,7 @@ convention = "numpy"
 
 [tool.ruff.lint.per-file-ignores]
 # ---- Package code
-"src/defer_imports/*.py" = [
+"src/defer_imports/ast_rewrite.py" = [
     "A002", # Allow some shadowing of builtins by parameter names.
 ]
 

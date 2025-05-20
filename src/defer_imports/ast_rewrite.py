@@ -502,7 +502,7 @@ class _ImportsInstrumenter(ast.NodeTransformer):
         # First, get past the module docstring and __future__ imports. We don't want to break those.
         expect_docstring = True
         position = 0
-        for position, sub in enumerate(node.body):  # noqa: B007
+        for position, sub in enumerate(node.body):  # noqa: B007 # position is used after the loop.
             if (
                 expect_docstring
                 and isinstance(sub, ast.Expr)
@@ -862,60 +862,55 @@ _is_deferred = contextvars.ContextVar[bool]("_is_deferred", default=False)
 """Whether imports in import statements should be deferred."""
 
 
-def _handle_import_key(import_name: str, nmsp: t.MutableMapping[str, t.Any], start_idx: int = 0, /) -> None:  # noqa: PLR0912
+def _handle_import_key(import_name: str, nmsp: t.MutableMapping[str, t.Any], start_idx: int = 0, /) -> None:
     # Precondition: import_name is a dotted name.
     # NOTE: We can't use setattr() on modules directly because PyPy normalizes the attr key type to `str` in setattr().
     # Instead, we assign into the module dict.
 
     while True:
         end_idx = import_name.find(".", start_idx)
+        at_final_part_of_name = end_idx == -1
 
-        at_end_of_name = end_idx == -1
-        if not at_end_of_name:
+        if not at_final_part_of_name:
             submod_name = import_name[start_idx:end_idx]
         else:
             submod_name = import_name[start_idx:]
 
-        # NOTE: Finding the key takes ~70% of this function's time, at minimum.
+        # NOTE: Finding the key takes ~60% of this function's time, at minimum.
         # Normal "==" semantics are triggered by most presence checks, e.g. nmsp.__contains__, and that causes a
         # performance issue because _DIKey's very slow __eq__ always take priority over str's. Thus, we avoid those
         # routes.
-        # Micro-optimization: The `for` loop is ~5-10% faster than `next(filter(...), None)`.
-        for existing_key in filter(submod_name.__eq__, nmsp):  # noqa: B007
-            break
-        else:
-            existing_key = None
+        existing_key = next(filter(submod_name.__eq__, nmsp), None)
 
         if existing_key is not None:
-            if existing_key.__class__ is _DIKey:
+            if existing_key.__class__ is not _DIKey:
+                nmsp = nmsp[submod_name].__dict__
+                start_idx = end_idx + 1
+                continue
+
+            else:
                 if existing_key._DIKey__submod_names:  # pyright: ignore [reportAttributeAccessIssue, reportUnknownMemberType]
                     existing_key._DIKey__submod_names.add(import_name)  # pyright: ignore  # noqa: PGH003 # Too verbose.
                 else:
                     existing_key._DIKey__submod_names = {import_name}  # pyright: ignore  # noqa: PGH003 # Too verbose.
                 break
 
-            if not at_end_of_name:
-                nmsp = nmsp[submod_name].__dict__
-
-        elif not at_end_of_name:
-            full_submod_name = import_name[:end_idx]
-
-            sub_names: set[str] = set()
-            while (end_idx := import_name.find(".", start_idx)) != -1:
-                sub_names.add(import_name[:end_idx])
-                start_idx = end_idx + 1
-            sub_names.add(import_name)
-
-            # Replace the namespaces as well to make sure the proxy is replaced in the right place.
-
-            nmsp[_DIKey(submod_name, (full_submod_name, nmsp, nmsp, None), sub_names)] = _DIProxy(full_submod_name)
-            break
-
         else:
-            nmsp[_DIKey(submod_name, (import_name, nmsp, nmsp, None))] = _DIProxy(import_name)
-            break
+            if not at_final_part_of_name:
+                full_submod_name = import_name[:end_idx]
 
-        start_idx = end_idx + 1
+                sub_names: set[str] = set()
+                while (end_idx := import_name.find(".", start_idx)) != -1:
+                    sub_names.add(import_name[:end_idx])
+                    start_idx = end_idx + 1
+                sub_names.add(import_name)
+
+                nmsp[_DIKey(submod_name, (full_submod_name, nmsp, nmsp, None), sub_names)] = _DIProxy(full_submod_name)
+                break
+
+            else:
+                nmsp[_DIKey(submod_name, (import_name, nmsp, nmsp, None))] = _DIProxy(import_name)
+                break
 
 
 class _DIProxy:
@@ -959,12 +954,10 @@ class _DIKey(str):
         return self
 
     def __eq__(self, value: object, /) -> bool:
-        # Micro-optimization: Use str.__eq__() instead of super().__eq__().
-
         if _is_deferred.get():
-            return str.__eq__(self, value)
+            return super().__eq__(value)
 
-        is_eq = str.__eq__(self, value)
+        is_eq = super().__eq__(value)
         if is_eq is not True:
             return is_eq
 
@@ -984,10 +977,10 @@ class _DIKey(str):
         """Resolve the import and replace the deferred key and placeholder in the relevant namespace with the result."""
 
         raw_asname = str(self)
-        imp_name, imp_globals, imp_locals, from_item = self.__import_args
+        imp_name, imp_globals, imp_locals, from_name = self.__import_args
 
         # 1. Perform the original __import__ and pray.
-        from_list = (from_item,) if (from_item is not None) else ()
+        from_list = (from_name,) if (from_name is not None) else ()
         module: types.ModuleType = _original_import.get()(imp_name, imp_globals, imp_locals, from_list, 0)
 
         # 2. Create nested keys and proxies as needed in the resolved module.
@@ -1012,8 +1005,8 @@ class _DIKey(str):
             _is_deferred.reset(_is_deferred_tok)
 
         # 4. Resolve any requested attribute access and replace the proxy with the result in the relevant namespace.
-        if from_item is not None:
-            imp_locals[raw_asname] = getattr(module, from_item)
+        if from_name is not None:
+            imp_locals[raw_asname] = getattr(module, from_name)
         elif ("." in imp_name) and ("." not in raw_asname):
             attr = module
             for attr_name in imp_name.rpartition(".")[2].split("."):
@@ -1075,29 +1068,28 @@ def _deferred___import__(  # noqa: PLR0912
                 # Case 2: import a as c
                 locals[_DIKey(asname, (name, globals, locals, None))] = None
                 result = _DIProxy(name)
-
-        elif "." in name:
-            # Case 3: import a.b
-            parent_name = name.partition(".")[0]
-            try:
-                preexisting = locals[parent_name]
-            except KeyError:
-                locals[_DIKey(parent_name, (parent_name, globals, locals, None), {name})] = None
-                result = _DIProxy(parent_name)
-            else:
-                # Heuristic: If locals[parent_name] is not a module or proxy, pretend it didn't exist and clobber it.
-                if not isinstance(preexisting, (types.ModuleType, _DIProxy)):
+        else:
+            if "." in name:
+                # Case 3: import a.b
+                parent_name = name.partition(".")[0]
+                try:
+                    preexisting = locals[parent_name]
+                except KeyError:
                     locals[_DIKey(parent_name, (parent_name, globals, locals, None), {name})] = None
                     result = _DIProxy(parent_name)
                 else:
-                    # Case 3.a: import importlib[.abc], -> importlib.util <-
-                    _handle_import_key(name, locals)
-                    result = preexisting
-
-        else:
-            # Case 4: import a
-            locals[_DIKey(name, (name, globals, locals, None))] = None
-            result = _DIProxy(name)
+                    # Heuristic: If locals[parent_name] is not a module or proxy, pretend it didn't exist and clobber it.
+                    if not isinstance(preexisting, (types.ModuleType, _DIProxy)):
+                        locals[_DIKey(parent_name, (parent_name, globals, locals, None), {name})] = None
+                        result = _DIProxy(parent_name)
+                    else:
+                        # Case 3.a: import importlib[.abc], -> importlib.util <-
+                        _handle_import_key(name, locals)
+                        result = preexisting
+            else:
+                # Case 4: import a
+                locals[_DIKey(name, (name, globals, locals, None))] = None
+                result = _DIProxy(name)
 
     else:
         # Case 5: from ... import ... [as ...]
