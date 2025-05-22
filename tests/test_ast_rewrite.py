@@ -25,7 +25,7 @@ from defer_imports.ast_rewrite import (
     _BYTECODE_HEADER,
     _PATH_HOOK,
     _TEMP_ASNAMES,
-    _DeferredFileLoader,
+    _DIFileLoader,
     _ImportsInstrumenter,
     import_hook,
 )
@@ -71,7 +71,7 @@ temp_asnames = f"{_TEMP_ASNAMES} = {{!r}}".format
 def create_sample_module(
     path: Path,
     source: str,
-    loader_type: type = _DeferredFileLoader,
+    loader_type: type = _DIFileLoader,
     defer_whole_module: bool = False,
 ):
     """Create a sample module based on the given attributes."""
@@ -924,7 +924,7 @@ class B:
     package_name = "sample_pkg"
     package_init_path = str(sample_pkg_path / "__init__.py")
 
-    loader = _DeferredFileLoader(package_name, package_init_path)
+    loader = _DIFileLoader(package_name, package_init_path)
     spec = importlib.util.spec_from_file_location(
         package_name,
         package_init_path,
@@ -1007,7 +1007,7 @@ def Y2():
     package_name = "circular_pkg"
     package_init_path = str(circular_pkg_path / "__init__.py")
 
-    loader = _DeferredFileLoader(package_name, package_init_path)
+    loader = _DIFileLoader(package_name, package_init_path)
     spec = importlib.util.spec_from_file_location(
         package_name,
         package_init_path,
@@ -1079,7 +1079,7 @@ mock_B = patcher.start()
     package_name = "leaking_patch_pkg"
     package_init_path = str(leaking_patch_pkg_path / "__init__.py")
 
-    loader = _DeferredFileLoader(package_name, package_init_path)
+    loader = _DIFileLoader(package_name, package_init_path)
     spec = importlib.util.spec_from_file_location(
         package_name,
         package_init_path,
@@ -1126,7 +1126,7 @@ type ManyExpensive = tuple[Expensive, ...]
     package_name = "type_stmt_pkg"
     package_init_path = str(type_stmt_pkg_path / "__init__.py")
 
-    loader = _DeferredFileLoader(package_name, package_init_path)
+    loader = _DIFileLoader(package_name, package_init_path)
     spec = importlib.util.spec_from_file_location(
         package_name,
         package_init_path,

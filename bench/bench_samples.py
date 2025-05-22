@@ -45,7 +45,7 @@ def bench_defer_imports_local() -> float:
 
 
 def bench_defer_imports_global() -> float:
-    with defer_imports.ast_rewrite.import_hook(uninstall_after=True, apply_all=True), CatchTime() as ct:
+    with defer_imports.ast_rewrite.import_hook(module_names=["*"], uninstall_after=True), CatchTime() as ct:
         import bench.sample_defer_global
     return ct.elapsed
 

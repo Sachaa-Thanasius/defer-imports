@@ -358,7 +358,7 @@ Caveats:
 - ``from`` imports may be evaluated eagerly.
 - In a nested import such as ``import a.b.c``, only ``c`` will be lazily imported. ``a`` and ``a.b`` will be eagerly
   imported. This may change in the future.
-- Modules that perform their own import hacks might not cooperate with this. For instance, `collections` puts
-  `collections.abc` in `sys.modules` in an unusual way at import time, so attempting to lazy-load `collections.abc` will
-  just break.
+- Modules that perform their own import hacks might not cooperate with this. For instance, at one point, `collections`
+  put `collections.abc` in `sys.modules` in an unusual way at import time, so attempting to lazy-load `collections.abc`
+  would just break.
 """
