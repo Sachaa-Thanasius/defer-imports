@@ -61,14 +61,13 @@ else:  # pragma: <3.11 cover
         """Placeholder for typing.Self."""
 
 
-if sys.version_info >= (3, 12):  # pragma: >=3.12 cover
+if TYPE_CHECKING:
+    from typing_extensions import Buffer as ReadableBuffer
+elif sys.version_info >= (3, 12):  # pragma: >=3.12 cover
     with _lazy_load.until_module_use:
         import collections.abc
 
-    ReadableBuffer: TypeAlias = "collections.abc.Buffer"
-
-elif TYPE_CHECKING:
-    from typing_extensions import Buffer as ReadableBuffer
+    ReadableBuffer: t.TypeAlias = "collections.abc.Buffer"
 else:  # pragma: <3.12 cover
     ReadableBuffer: TypeAlias = "t.Union[bytes, bytearray, memoryview]"
 
@@ -103,9 +102,9 @@ else:
 # compile()'s internals, and thus wrappers of it (e.g. ast.parse()), dropped support in 3.12 for non-bytes buffers as
 # the filename argument (see https://github.com/python/cpython/issues/98393).
 if sys.version_info >= (3, 12):
-    _ModulePath: TypeAlias = "t.Union[str, os.PathLike[str], bytes, os.PathLike[bytes]]"
+    _ModulePath: TypeAlias = "t.Union[str, os.PathLike[str], bytes]"
 else:
-    _ModulePath: TypeAlias = "t.Union[str, os.PathLike[str], ReadableBuffer, os.PathLike[bytes]]"
+    _ModulePath: TypeAlias = "t.Union[str, os.PathLike[str], ReadableBuffer]"
 
 
 # endregion
@@ -552,11 +551,15 @@ class _ImportsInstrumenter(ast.NodeTransformer):
 # ============================================================================
 
 
+#: Custom header for defer_imports-instrumented bytecode files. Differs for every version.
 _BYTECODE_HEADER = f"defer_imports{__version__}".encode()
-"""Custom header for defer_imports-instrumented bytecode files. Differs for every version."""
 
 
-def _walk_globals(node: ast.AST) -> t.Generator[ast.AST]:
+#: The current configuration for defer_imports's instrumentation.
+_current_config = contextvars.ContextVar[tuple[str, ...]]("_current_config", default=())
+
+
+def _walk_globals(node: ast.AST) -> t.Generator[ast.AST, None, None]:
     """Recursively yield descendent nodes of a tree starting at `node`, including `node` itself.
 
     Nodes that introduce a new scope, such as class and function definitions, are skipped entirely.
@@ -616,7 +619,7 @@ class _DIFileLoader(SourceFileLoader):
     def set_data(self, path: str, data: ReadableBuffer, *, _mode: int = 0o666) -> None:
         """Write bytes data to a file.
 
-        If the file is a bytecode one, prepend a `defer_imports`-specific header to it. That way, instrumented bytecode
+        If the file is a bytecode one, add a `defer_imports`-specific header to it. That way, instrumented bytecode
         can be identified and invalidated later if necessary [1]_.
 
         References
@@ -643,16 +646,16 @@ class _DIFileLoader(SourceFileLoader):
         """
 
         if not data:
-            return super().source_to_code(data, path, **kwargs)  # pyright: ignore [reportArgumentType]
+            return super().source_to_code(data, path, **kwargs)
 
         orig_tree = ast.parse(data, path, "exec")
 
         if not (self.defer_whole_module or any(map(_is_until_use_node, _walk_globals(orig_tree)))):
-            return super().source_to_code(orig_tree, path, **kwargs)  # pyright: ignore [reportArgumentType]
+            return super().source_to_code(orig_tree, path, **kwargs)
 
         instrumenter = _ImportsInstrumenter(data, path, whole_module=self.defer_whole_module)
         new_tree = instrumenter.visit(orig_tree)
-        return super().source_to_code(new_tree, path, **kwargs)  # pyright: ignore [reportArgumentType]
+        return super().source_to_code(new_tree, path, **kwargs)
 
     def create_module(self, spec: ModuleSpec) -> t.Optional[types.ModuleType]:
         """Use default semantics for module creation."""
@@ -704,12 +707,7 @@ class _DIFileFinder(FileFinder):
         return spec
 
 
-_LOADER_DETAILS = (_DIFileLoader, SOURCE_SUFFIXES)
-_PATH_HOOK = _DIFileFinder.path_hook(_LOADER_DETAILS)
-
-
-_current_config: contextvars.ContextVar[tuple[str, ...]] = contextvars.ContextVar("_current_config", default=())
-"""The current configuration for defer_imports's instrumentation."""
+_PATH_HOOK = _DIFileFinder.path_hook((_DIFileLoader, SOURCE_SUFFIXES))
 
 
 @_final
@@ -736,7 +734,7 @@ class ImportHookContext:
         Whether to uninstall the import hook upon exit if this function is used as a context manager.
     """
 
-    __slots__ = ("_config", "_uninstall_after", "_tok")
+    __slots__ = ("_config", "_uninstall_after", "_config_token")
 
     def __init_subclass__(cls, *args: object, **kwargs: object) -> t.NoReturn:
         msg = f"Type {cls.__name__!r} is not an acceptable base type."
@@ -749,7 +747,7 @@ class ImportHookContext:
 
         self._config = tuple(module_names)
         self._uninstall_after: bool = uninstall_after
-        self._tok: contextvars.Token[tuple[str, ...]] | None = None
+        self._config_token: contextvars.Token[tuple[str, ...]] | None = None
 
     def __enter__(self, /) -> Self:
         self.install()
@@ -785,14 +783,14 @@ class ImportHookContext:
                 if (finder is not None) and (finder.__class__ is FileFinder):
                     finder.__class__ = _DIFileFinder
 
-        self._tok = _current_config.set(self._config)
+        self._config_token = _current_config.set(self._config)
 
     def reset(self, /) -> None:
         """Attempt to reset the import hook configuration. If already reset, does nothing."""
 
-        if self._tok is not None:
-            _current_config.reset(self._tok)
-            self._tok = None
+        if self._config_token is not None:
+            _current_config.reset(self._config_token)
+            self._config_token = None
 
     def uninstall(self, /) -> None:
         """Attempt to uninstall the custom path hook from `sys.path_hooks`. If already uninstalled, does nothing."""
@@ -826,11 +824,11 @@ import_hook = ImportHookContext
 _ImportArgs: TypeAlias = "tuple[str, t.MutableMapping[str, t.Any], t.MutableMapping[str, t.Any], t.Optional[str]]"
 
 
+#: What builtins.__import__ last pointed to.
 _original_import = contextvars.ContextVar("_original_import", default=builtins.__import__)
-"""What builtins.__import__ last pointed to."""
 
+#: Whether imports in import statements should be deferred.
 _is_deferred = contextvars.ContextVar[bool]("_is_deferred", default=False)
-"""Whether imports in import statements should be deferred."""
 
 
 def _handle_import_key(import_name: str, nmsp: t.MutableMapping[str, t.Any], start_idx: int = 0, /) -> None:
@@ -854,17 +852,18 @@ def _handle_import_key(import_name: str, nmsp: t.MutableMapping[str, t.Any], sta
         existing_key = next(filter(submod_name.__eq__, nmsp), None)
 
         if existing_key is not None:
-            if existing_key.__class__ is not _DIKey:
+            if not isinstance(existing_key, _DIKey):
+                # if existing_key.__class__ is not _DIKey:
                 # Keep looping, but with a more nested namespace.
                 nmsp = nmsp[submod_name].__dict__
                 start_idx = end_idx + 1
                 continue
 
             else:
-                if existing_key._DIKey__submod_names:  # pyright: ignore [reportAttributeAccessIssue, reportUnknownMemberType]
-                    existing_key._DIKey__submod_names.add(import_name)  # pyright: ignore  # noqa: PGH003 # Too verbose.
+                if existing_key._di_submod_names:
+                    existing_key._di_submod_names.add(import_name)
                 else:
-                    existing_key._DIKey__submod_names = {import_name}  # pyright: ignore  # noqa: PGH003 # Too verbose.
+                    existing_key._di_submod_names = {import_name}
 
         else:
             if not at_final_part_of_name:
@@ -909,19 +908,19 @@ class _DIKey(str):
     # NOTE: Mangle instance attribute name(s) to help avoid further exposure if an instance leaks and a user tries to
     # use it as a regular string.
 
-    __slots__ = ("__import_args", "__submod_names", "__is_resolving", "__lock")
+    __slots__ = ("__import_args", "__is_resolving", "__lock", "_di_submod_names")
 
     __import_args: _ImportArgs
-    __submod_names: t.Optional[set[str]]
     __is_resolving: bool
     __lock: threading.RLock
+    _di_submod_names: t.Optional[set[str]]
 
     def __new__(cls, asname: str, import_args: _ImportArgs, submod_names: t.Optional[set[str]] = None, /) -> Self:
         self = super().__new__(cls, asname)
         self.__import_args = import_args
-        self.__submod_names = submod_names
         self.__is_resolving = False
         self.__lock = threading.RLock()
+        self._di_submod_names = submod_names
         return self
 
     def __eq__(self, value: object, /) -> bool:
@@ -955,17 +954,17 @@ class _DIKey(str):
         module: types.ModuleType = _original_import.get()(imp_name, imp_globals, imp_locals, from_list, 0)
 
         # 2. Create nested keys and proxies as needed in the resolved module.
-        if self.__submod_names:
+        if self._di_submod_names:
             starting_point = len(imp_name) + 1
             # Avoid triggering our __eq__ again.
             _is_deferred_tok = _is_deferred.set(True)
             try:
-                for submod_name in self.__submod_names:
+                for submod_name in self._di_submod_names:
                     _handle_import_key(submod_name, module.__dict__, starting_point)
             finally:
                 _is_deferred.reset(_is_deferred_tok)
 
-            self.__submod_names = None
+            self._di_submod_names = None
 
         # 3. Replace the deferred version of the key in the relevant namespace to avoid it sticking around.
         # Avoid triggering our __eq__ again (would be a recursive trigger too).
@@ -1076,8 +1075,8 @@ def _deferred___import__(  # noqa: PLR0912
 class _DIContext:
     """A context manager within which imports occur lazily. Not reentrant. Use via `defer_imports.until_use`.
 
-    If defer_imports isn't set up properly, e.g. `import_hook.install()` is not called first elsewhere, this should be a
-    no-op equivalent to `contextlib.nullcontext`.
+    If defer_imports isn't set up properly, e.g. `import_hook().install()` is not called first elsewhere, this should be
+    a no-op equivalent to `contextlib.nullcontext`.
 
     Raises
     ------

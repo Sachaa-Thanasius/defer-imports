@@ -49,9 +49,6 @@ parallel = true
 [tool.coverage.paths]
 defer_imports = ["src", "*/site-packages"]
 
-[tool.coverage.report]
-exclude_lines = ["^\\s*(el)?if TYPE_CHECKING:$"]
-
 
 # -------- Linter config --------
 
