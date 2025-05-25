@@ -54,6 +54,7 @@ defer_imports = ["src", "*/site-packages"]
 
 [tool.ruff]
 include = ["src/defer_imports/*.py"]
+extend-exclude = ["bench/sample_*.py", "tests/sample_*.py"]  # Generated.
 line-length = 120
 
 [tool.ruff.lint]

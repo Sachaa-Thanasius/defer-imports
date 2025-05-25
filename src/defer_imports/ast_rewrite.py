@@ -205,7 +205,7 @@ def get_source_segment(source: str, node: t.Union[ast.expr, ast.stmt], *, padded
     source: str
         The source code.
     node: ast.expr | ast.stmt
-        An AST created from `source`, with location information.
+        An AST, with location information, corresponding to some code within `source`.
     padded: bool, default=False
         Whether to pad, with spaces, the first line of a multi-line statement to match its original position.
 
