@@ -443,14 +443,17 @@ class _ImportsInstrumenter(ast.NodeTransformer):
         .. [1] https://docs.python.org/3.14/library/exceptions.html#SyntaxError
         """
 
+        filepath = self.filepath if isinstance(self.filepath, (str, bytes, os.PathLike)) else bytes(self.filepath)
         source = self.source if isinstance(self.source, str) else _decode_source(self.source)
         text = get_source_segment(source, node, padded=True)
-        filepath = self.filepath if isinstance(self.filepath, (str, bytes, os.PathLike)) else bytes(self.filepath)
         context = (os.fsdecode(filepath), node.lineno, node.col_offset + 1, text)
+
         if sys.version_info >= (3, 10):  # pragma: >=3.10 cover
             end_col_offset = node.end_col_offset
-            end_col_offset = (end_col_offset + 1) if (end_col_offset is not None) else None
+            if end_col_offset is not None:
+                end_col_offset += 1
             context += (node.end_lineno, end_col_offset)
+
         return context
 
     def _validate_until_use_body(self, nodes: list[ast.stmt]) -> list[t.Union[ast.Import, ast.ImportFrom]]:
@@ -568,6 +571,7 @@ def _walk_globals(node: ast.AST) -> t.Generator[ast.AST, None, None]:
     scope_node_types = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
     if isinstance(node, scope_node_types):
         return
+
     todo = collections.deque([node])
     while todo:
         node = todo.popleft()
@@ -1003,16 +1007,16 @@ def _deferred___import__(  # noqa: PLR0912
     #     - _is_deferred is set to True and thus _DIKey instances won't trigger resolution.
 
     # Do minimal input validation on top of the parser's work.
-    if level > 0:
+    if level > 0:  # pragma: no cover (tested in stdlib)
         # These checks are adapted and inlined from importlib.__import__() and importlib._bootstrap._sanity_check()
         # since we don't need all of them.
         package = _calc___package__(globals)
 
-        if not isinstance(package, str):  # pragma: no cover (tested in stdlib)
+        if not isinstance(package, str):
             msg = "__package__ not set to a string"
             raise TypeError(msg)
 
-        if not package:  # pragma: no cover (tested in stdlib)
+        if not package:
             msg = "attempted relative import with no known parent package"
             raise ImportError(msg)
 
