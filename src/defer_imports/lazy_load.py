@@ -78,7 +78,7 @@ class _LazyModuleType(types.ModuleType):
 
         __spec__: ModuleSpec = object.__getattribute__(self, "__spec__")
 
-        # HACK: This is how we prevent internal import machinery from triggering the load early, but it has a tradeoff.
+        # HACK: Prevent internal import machinery from triggering the load early, but with a tradeoff.
         #
         # The importlib machinery unnecessarily causes a load when it checks a lazy module in sys.modules to see if it
         # is initialized (the relevant code is in importlib._bootstrap._find_and_load()). Since the machinery determines
@@ -172,12 +172,12 @@ class _LazyModuleType(types.ModuleType):
 # Changes:
 # - Move threading import within exec_module to the top level to avoid circular import issues.
 #     a. This may cause issues when this module is used in emscripten or wasi.
-#        TODO: Test this.
 #     b. This may cause issues when this module is used with gevent.
-#        TODO: Test this.
 # - Do some slight personalization.
 class _LazyLoader(Loader):
     """A loader that creates a module which defers loading until attribute access."""
+
+    # PYUPDATE: py3.12 - Use an accurate protocol instead of Loader in the annotations of these duck-typed methods.
 
     @staticmethod
     def __check_eager_loader(loader: t.Union[Loader, type[Loader]]) -> None:

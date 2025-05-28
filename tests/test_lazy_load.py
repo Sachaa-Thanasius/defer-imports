@@ -1,4 +1,4 @@
-# A substantial portion of the code and comments below is adapted from
+# Most of the tests below are adapted from
 # https://github.com/python/cpython/blob/49234c065cf2b1ea32c5a3976d834b1d07b9b831/Lib/test/test_importlib/test_lazy.py
 # with the original copyright being:
 # Copyright (c) 2001 Python Software Foundation; All Rights Reserved
@@ -9,19 +9,24 @@
 
 from __future__ import annotations
 
-import collections.abc
 import importlib.abc
 import importlib.util
 import sys
 import threading
 import time
 import types
+from collections.abc import Sequence
 from importlib.machinery import ModuleSpec
 from unittest import mock
 
 import pytest
 
 from defer_imports.lazy_load import _LazyFinder, _LazyLoader, _LazyModuleType, until_module_use
+
+
+# ============================================================================
+# region -------- Helpers --------
+# ============================================================================
 
 
 def _can_start_thread() -> bool:
@@ -50,8 +55,12 @@ requires_working_threading = pytest.mark.skipif(not _can_start_thread(), reason=
 
 
 @pytest.fixture
-def uncache_test_module(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.delitem(sys.modules, TestingImporter.module_name, raising=False)
+def preserve_sys_modules():
+    with mock.patch.dict(sys.modules):
+        yield
+
+
+# endregion
 
 
 class CollectInit:
@@ -88,7 +97,7 @@ class TestingImporter(importlib.abc.MetaPathFinder, importlib.abc.Loader):
     def find_spec(
         self,
         name: str,
-        path: collections.abc.Sequence[str] | None,
+        path: Sequence[str] | None,
         target: types.ModuleType | None = None,
     ) -> ModuleSpec | None:
         if name != self.module_name:  # pragma: no cover
@@ -102,13 +111,8 @@ class TestingImporter(importlib.abc.MetaPathFinder, importlib.abc.Loader):
         self.load_count += 1
 
 
-@pytest.mark.usefixtures("uncache_test_module")
+@pytest.mark.usefixtures("preserve_sys_modules")
 class TestLazyLoader:
-    def test_init(self):
-        with pytest.raises(TypeError):
-            # Classes that don't define exec_module() trigger TypeError.
-            _LazyLoader(object)
-
     def new_module(self, source_code: str | None = None, loader: TestingImporter | None = None) -> types.ModuleType:
         if loader is None:
             loader = TestingImporter()
@@ -125,6 +129,11 @@ class TestLazyLoader:
         # Module is now lazy.
         assert loader.loaded is None
         return module
+
+    def test_init(self):
+        with pytest.raises(TypeError):
+            # Classes that don't define exec_module() trigger TypeError.
+            _LazyLoader(object)
 
     def test_e2e(self):
         # End-to-end test to verify the load is in fact lazy.

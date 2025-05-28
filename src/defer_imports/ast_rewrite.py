@@ -700,12 +700,12 @@ class _DIFileFinder(FileFinder):
         spec = super().find_spec(fullname, target)
 
         # Be precise so that we don't replace user-defined loader classes.
-        if (spec is not None) and (spec.loader is not None) and (spec.loader.__class__ is SourceFileLoader):
+        if (spec is not None) and ((loader := spec.loader) is not None) and (loader.__class__ is SourceFileLoader):
             config = _current_config.get()
             defer_whole_module = self._is_full_module_rewrite(fullname, config)
 
             # pyright doesn't respect the "obj.__class__ is ..." type guard pattern.
-            spec.loader = _DIFileLoader(spec.loader.name, spec.loader.path)  # pyright: ignore [reportUnknownMemberType, reportAttributeAccessIssue]
+            spec.loader = _DIFileLoader(loader.name, loader.path)  # pyright: ignore [reportUnknownMemberType, reportAttributeAccessIssue]
             spec.loader_state = {"defer_whole_module": defer_whole_module}
 
         return spec
@@ -774,7 +774,7 @@ class ImportHookContext:
                 msg = "No file-based path hook found to be superseded."
                 raise RuntimeError(msg)
 
-            # HACK: We monkeypatch the cached finders for sys.path entries to have the right finder class. This should
+            # HACK: Monkeypatch the cached finders for sys.path entries to have the right finder class. This should
             # be safe since _DeferredFinder is a subclass of FileFinder and has the same instance state.
             #
             # Alternatives:
