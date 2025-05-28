@@ -64,9 +64,7 @@ else:  # pragma: <3.11 cover
 if TYPE_CHECKING:
     from typing_extensions import Buffer as ReadableBuffer
 elif sys.version_info >= (3, 12):  # pragma: >=3.12 cover
-    with _lazy_load.until_module_use:
-        import collections.abc
-
+    # NOTE: collections always imports collections.abc, but typeshed isn't aware of that (yet).
     ReadableBuffer: t.TypeAlias = "collections.abc.Buffer"
 else:  # pragma: <3.12 cover
     ReadableBuffer: TypeAlias = "t.Union[bytes, bytearray, memoryview]"
@@ -92,11 +90,11 @@ else:
 
 
 if sys.version_info >= (3, 10):
-    _SyntaxErrorContext: TypeAlias = (
+    _SyntaxContext: TypeAlias = (
         "tuple[t.Optional[str], t.Optional[int], t.Optional[int], t.Optional[str], t.Optional[int], t.Optional[int]]"
     )
 else:
-    _SyntaxErrorContext: TypeAlias = "tuple[t.Optional[str], t.Optional[int], t.Optional[int], t.Optional[str]]"
+    _SyntaxContext: TypeAlias = "tuple[t.Optional[str], t.Optional[int], t.Optional[int], t.Optional[str]]"
 
 
 # compile()'s internals, and thus wrappers of it (e.g. ast.parse()), dropped support in 3.12 for non-bytes buffers as
@@ -109,6 +107,11 @@ else:
 
 # endregion
 
+
+# NOTE: Technically, something like ast.AST & LocationAttrsProtocol would be more accurate, but:
+# 1. Python doesn't have intersections yet, and
+# 2. Using a local protocol without eagerly importing typing or having another module isn't doable until 3.12.
+_ASTWithLocation: TypeAlias = "t.Union[ast.expr, ast.stmt]"
 
 _SourceData: TypeAlias = "t.Union[ReadableBuffer, str]"
 
@@ -189,22 +192,19 @@ def _decode_source(source_bytes: ReadableBuffer) -> str:  # pragma: no cover (te
     return newline_decoder.decode(source)  # pyright: ignore [reportUnknownArgumentType]
 
 
-# Adapted from ast.
+# Adapted from ast.get_source_segment().
 # Changes:
 # - Inline the helper functions.
 # - Use io.StringIO with newline=None instead of regex to parse lines ending with newlines; it's a bit faster and
 #   uses a module that we were importing anyway.
-#
-# NOTE: Technically, the type of `node` would be more accurately represented with something like
-# ast.AST & LocationAttrsProtocol, but Python doesn't have intersections yet and, for us, import-time typing usage bad.
-def get_source_segment(source: str, node: t.Union[ast.expr, ast.stmt], *, padded: bool = False) -> t.Optional[str]:
+def _get_source_segment(source: str, node: _ASTWithLocation, *, padded: bool = False) -> t.Optional[str]:
     """Get the source code segment of `source` that generated `node`.
 
     Parameters
     ----------
     source: str
         The source code.
-    node: ast.expr | ast.stmt
+    node: _ASTWithLocation
         An AST, with location information, corresponding to some code within `source`.
     padded: bool, default=False
         Whether to pad, with spaces, the first line of a multi-line statement to match its original position.
@@ -282,16 +282,38 @@ _AST_LOC_ATTRS = ("lineno", "col_offset", "end_lineno", "end_col_offset")
 def _is_until_use_node(node: ast.AST, /) -> bool:
     """Check if the node matches ``with defer_imports.until_use: ...``."""
 
-    return (
-        isinstance(node, ast.With)
-        and len(node.items) == 1
-        and (
-            isinstance(node.items[0].context_expr, ast.Attribute)
-            and node.items[0].context_expr.attr == "until_use"
-            and isinstance(node.items[0].context_expr.value, ast.Name)
-            and node.items[0].context_expr.value.id == "defer_imports"
-        )
-    )
+    if not (isinstance(node, ast.With) and len(node.items) == 1):
+        return False
+
+    context_expr = node.items[0].context_expr
+    if not (isinstance(context_expr, ast.Attribute) and context_expr.attr == "until_use"):
+        return False
+
+    expr_value = context_expr.value
+    return isinstance(expr_value, ast.Name) and expr_value.id == "defer_imports"
+
+
+def _get_syntax_context(filepath: _ModulePath, source: _SourceData, node: _ASTWithLocation) -> _SyntaxContext:
+    """Get a node's location context in a form compatible with `SyntaxError`'s constructor [1].
+
+    References
+    ----------
+    .. [1] https://docs.python.org/3.14/library/exceptions.html#SyntaxError
+    """
+
+    if not isinstance(filepath, (str, bytes, os.PathLike)):
+        filepath = bytes(filepath)
+    if not isinstance(source, str):
+        source = _decode_source(source)
+
+    text = _get_source_segment(source, node, padded=True)
+    context = (os.fsdecode(filepath), node.lineno, node.col_offset + 1, text)
+
+    if sys.version_info >= (3, 10):  # pragma: >=3.10 cover
+        end_col_offset = node.end_col_offset
+        context += (node.end_lineno, (end_col_offset + 1) if (end_col_offset is not None) else None)
+
+    return context
 
 
 class _ImportsInstrumenter(ast.NodeTransformer):
@@ -311,7 +333,6 @@ class _ImportsInstrumenter(ast.NodeTransformer):
         self.source: _SourceData = source
         self.filepath: _ModulePath = filepath
         self.rewrite_whole_module: bool = whole_module
-
         self.escape_hatch_depth: int = 0
         self.did_any_instrumentation: bool = False
 
@@ -435,27 +456,6 @@ class _ImportsInstrumenter(ast.NodeTransformer):
     if sys.version_info >= (3, 11):  # pragma: >=3.11 cover
         visit_TryStar = _visit_eager_import_block
 
-    def _get_error_context(self, node: t.Union[ast.expr, ast.stmt]) -> _SyntaxErrorContext:
-        """Get a node's location context in a form compatible with `SyntaxError`'s constructor [1].
-
-        References
-        ----------
-        .. [1] https://docs.python.org/3.14/library/exceptions.html#SyntaxError
-        """
-
-        filepath = self.filepath if isinstance(self.filepath, (str, bytes, os.PathLike)) else bytes(self.filepath)
-        source = self.source if isinstance(self.source, str) else _decode_source(self.source)
-        text = get_source_segment(source, node, padded=True)
-        context = (os.fsdecode(filepath), node.lineno, node.col_offset + 1, text)
-
-        if sys.version_info >= (3, 10):  # pragma: >=3.10 cover
-            end_col_offset = node.end_col_offset
-            if end_col_offset is not None:
-                end_col_offset += 1
-            context += (node.end_lineno, end_col_offset)
-
-        return context
-
     def _validate_until_use_body(self, nodes: list[ast.stmt]) -> list[t.Union[ast.Import, ast.ImportFrom]]:
         """Validate that the statements within a `defer_imports.until_use` block are instrumentable.
 
@@ -468,11 +468,11 @@ class _ImportsInstrumenter(ast.NodeTransformer):
         for node in nodes:
             if not isinstance(node, (ast.Import, ast.ImportFrom)):
                 msg = "with defer_imports.until_use blocks must only contain import statements"
-                raise SyntaxError(msg, self._get_error_context(node))  # noqa: TRY004 # Syntax error displays better.
+                raise SyntaxError(msg, _get_syntax_context(self.filepath, self.source, node))  # noqa: TRY004 # Syntax error displays better.
 
             if node.names[0].name == "*":
                 msg = "import * not allowed in with defer_imports.until_use blocks"
-                raise SyntaxError(msg, self._get_error_context(node))
+                raise SyntaxError(msg, _get_syntax_context(self.filepath, self.source, node))
 
         # Warning: Don't mutate the list from outside the function to invalidate our type guard.
         return nodes  # pyright: ignore [reportReturnType]
@@ -884,7 +884,7 @@ def _handle_import_key(import_name: str, nmsp: t.MutableMapping[str, t.Any], sta
             else:
                 nmsp[_DIKey(submod_name, (import_name, nmsp, nmsp, None))] = _DIProxy(import_name)
 
-        break
+        return
 
 
 class _DIProxy:

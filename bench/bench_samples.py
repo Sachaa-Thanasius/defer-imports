@@ -39,29 +39,35 @@ def bench_slothy() -> float:
 
 
 def bench_defer_imports_local() -> float:
-    with defer_imports.ast_rewrite.import_hook(uninstall_after=True), CatchTime() as ct:
-        import bench.sample_defer_local
+    with CatchTime() as ct:  # noqa: SIM117
+        with defer_imports.ast_rewrite.import_hook(uninstall_after=True):
+            import bench.sample_defer_local
     return ct.elapsed
 
 
 def bench_defer_imports_global() -> float:
-    with defer_imports.ast_rewrite.import_hook(module_names=["*"], uninstall_after=True), CatchTime() as ct:
-        import bench.sample_defer_global
+    with CatchTime() as ct:  # noqa: SIM117
+        with defer_imports.ast_rewrite.import_hook(module_names=["*"], uninstall_after=True):
+            import bench.sample_defer_global
     return ct.elapsed
 
 
 def remove_pycaches() -> None:
     """Remove all cached Python bytecode files from the current directory."""
 
-    for cache_dir in Path().rglob("__pycache__"):
+    curr_dir = Path()
+
+    for cache_dir in curr_dir.rglob("__pycache__"):
         shutil.rmtree(cache_dir)
 
-    for cache_file in Path().rglob("*.py[co]"):
+    for cache_file in curr_dir.rglob("*.py[co]"):
         cache_file.unlink()
 
 
 def pretty_print_results(results: dict[str, float], minimum: float) -> None:
     """Format and print results as an reST-style list table."""
+
+    sep = "  "
 
     impl_header = "Implementation"
     impl_len = len(impl_header)
@@ -79,8 +85,8 @@ def pretty_print_results(results: dict[str, float], minimum: float) -> None:
     time_header = "Time".ljust(time_len)
     time_divider = "=" * time_len
 
-    divider = "  ".join((impl_divider, version_divider, benchmark_divider, time_divider))
-    header = "  ".join((impl_header, version_header, benchmark_header, time_header))
+    divider = sep.join((impl_divider, version_divider, benchmark_divider, time_divider))
+    header = sep.join((impl_header, version_header, benchmark_header, time_header))
 
     impl = platform.python_implementation().ljust(impl_len)
     version = f"{sys.version_info.major}.{sys.version_info.minor}".ljust(version_len)
@@ -99,7 +105,7 @@ def pretty_print_results(results: dict[str, float], minimum: float) -> None:
         fmt_bench_type = bench_type.ljust(benchmark_len)
         fmt_result = f"{result:.5f}s ({result / minimum:.2f}x)".ljust(time_len)
 
-        print(impl, version, fmt_bench_type, fmt_result, sep="  ")
+        print(impl, version, fmt_bench_type, fmt_result, sep=sep)
 
     print(divider)
 

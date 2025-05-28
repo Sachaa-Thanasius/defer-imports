@@ -31,12 +31,6 @@ from defer_imports.ast_rewrite import (
 )
 
 
-# TODO: Add tests for lazy_load.
-# TODO: Write tests for ast_rewrite's configuration and its effects.
-# TODO: Write tests for ast_rewrite's finder.
-# TODO: Get closer to 100% coverage.
-
-
 # ============================================================================
 # region -------- Helpers --------
 # ============================================================================

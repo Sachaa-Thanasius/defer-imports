@@ -54,7 +54,7 @@ defer_imports = ["src", "*/site-packages"]
 
 [tool.ruff]
 include = ["src/defer_imports/*.py"]
-extend-exclude = ["bench/sample_*.py", "tests/sample_*.py"]  # Generated.
+extend-exclude = ["bench/sample_*.py", "tests/sample_*.py"] # Generated.
 line-length = 120
 
 [tool.ruff.lint]
@@ -174,18 +174,10 @@ convention = "numpy"
     "ANN202", # Don't need return annotations in tests.
     "S102",   # exec is used to test for NameError within a module's namespace.
 ]
-"tests/sample_stdlib_imports.py" = [
-    "F401",   # Unused imports are fine; we're testing import success.
-    "ERA001", # Plenty of imports are commented out with explanations next to them.
-    "T100",   # Importing pdb is fine.
-]
 "bench/**/*.py" = [
     "T201",   # Printing is fine.
     "F401",   # Unused imports are fine; we're testing import speed.
     "ERA001", # Plenty of imports are commented out with explanations next to them.
-]
-"bench/**/sample_*.py" = [
-    "T100", # Importing pdb is fine.
 ]
 
 
@@ -193,6 +185,8 @@ convention = "numpy"
 
 [tool.pyright]
 include = ["src/defer_imports", "tests"]
+ignore = ["tests/test_lazy_load.py"]
+
 pythonVersion = "3.9"
 pythonPlatform = "All"
 typeCheckingMode = "strict"

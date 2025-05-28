@@ -1,5 +1,5 @@
 requires = ["tox>=4.24.1"]
-env_list = ["coverage_clean", "3.9", "3.10", "3.11", "3.12", "3.13", "3.13t", "3.14", "3.14t", "pypy310", "coverage"]
+env_list = ["coverage_clean", "3.9", "3.10", "3.11", "3.12", "3.13", "3.13t", "3.14", "pypy310", "coverage"]
 skip_missing_interpreters = true
 
 [env_run_base]
@@ -20,5 +20,5 @@ description = "Run coverage and combine results."
 skip_install = true
 dependency_groups = ["cov"]
 # NOTE: Keep in sync with top-level env_list.
-depends = ["3.9", "3.10", "3.11", "3.12", "3.13", "3.13t", "3.14", "3.14t", "pypy310"]
+depends = ["3.9", "3.10", "3.11", "3.12", "3.13", "3.13t", "3.14", "pypy310"]
 commands = [["coverage", "combine"], ["coverage", "report"]]
