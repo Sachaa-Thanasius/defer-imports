@@ -835,6 +835,20 @@ _original_import = contextvars.ContextVar("_original_import", default=builtins._
 _is_deferred = contextvars.ContextVar[bool]("_is_deferred", default=False)
 
 
+# A CPython-specific fast path for getting the exact key from a dict without triggering __eq__ continuously.
+# This matters because of how expensive _DIKey.__eq__ is.
+# PYUPDATE: py3.14 - Check that this still works.
+if sys.implementation.name == "cpython" and (3, 14) > sys.version_info >= (3, 9):
+
+    def _get_exact_key(name: str, dct: t.MutableMapping[str, t.Any]) -> t.Optional[str]:
+        keys = {name}.intersection(dct)
+        return keys.pop() if keys else None
+else:
+
+    def _get_exact_key(name: str, dct: t.MutableMapping[str, t.Any]) -> t.Optional[str]:
+        return next(filter(name.__eq__, dct), None)
+
+
 def _handle_import_key(import_name: str, nmsp: t.MutableMapping[str, t.Any], start_idx: int = 0, /) -> None:
     # Precondition: import_name is a dotted name.
     # NOTE: We can't use setattr() on modules directly because PyPy normalizes the attr key type to `str` in setattr().
@@ -853,7 +867,7 @@ def _handle_import_key(import_name: str, nmsp: t.MutableMapping[str, t.Any], sta
         # Normal "==" semantics are triggered by most presence checks, e.g. nmsp.__contains__, and that causes a
         # performance issue because _DIKey's very slow __eq__ always take priority over str's. Thus, we avoid those
         # routes.
-        existing_key = next(filter(submod_name.__eq__, nmsp), None)
+        existing_key = _get_exact_key(submod_name, nmsp)
 
         if existing_key is not None:
             if not isinstance(existing_key, _DIKey):

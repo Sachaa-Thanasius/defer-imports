@@ -16,6 +16,7 @@ import types
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from typing import Any, cast
+from unittest import mock
 
 import pytest
 
@@ -37,13 +38,14 @@ from defer_imports.ast_rewrite import (
 
 
 @pytest.fixture(autouse=True)
-def better_key_repr(monkeypatch: pytest.MonkeyPatch):
+def better_key_repr():
     """Replace _DIKey.__repr__ with a more verbose version for all tests."""
 
     def verbose_repr(self: object) -> str:
         return f"<key for {super(type(self), self).__repr__()} import>"
 
-    monkeypatch.setattr("defer_imports.ast_rewrite._DIKey.__repr__", verbose_repr)
+    with mock.patch("defer_imports.ast_rewrite._DIKey.__repr__", verbose_repr):
+        yield
 
 
 SAMPLE_DOCSTRING = "Module docstring here"
@@ -75,8 +77,10 @@ asnames_templ = f"{_TEMP_ASNAMES} = {{!r}}".format
 def create_sample_module(
     path: Path,
     source: str,
-    loader_type: type = _DIFileLoader,
+    loader_type: type[SourceFileLoader] = _DIFileLoader,
     defer_whole_module: bool = False,
+    *,
+    exec_mod: bool = True,
 ):
     """Create a sample module based on the given attributes."""
 
@@ -88,11 +92,15 @@ def create_sample_module(
     loader = loader_type(module_name, str(module_path))
 
     # spec_from_file_location and module_from_spec won't automatically pass on loader_state.
-    loader.defer_whole_module = defer_whole_module
+    loader.defer_whole_module = defer_whole_module  # pyright: ignore [reportAttributeAccessIssue]
 
     spec = importlib.util.spec_from_file_location(module_name, module_path, loader=loader)
-    assert spec
+    assert spec is not None
+
     module = importlib.util.module_from_spec(spec)
+
+    if exec_mod:
+        loader.exec_module(module)
 
     return spec, module, module_path
 
@@ -483,18 +491,12 @@ def test_module_instrumentation(source: str, expected_rewrite: str):
 
 def test_empty(tmp_path: Path):
     source = ""
-
-    spec, module, _ = create_sample_module(tmp_path, source)
-    assert spec.loader
-    spec.loader.exec_module(module)
+    _ = create_sample_module(tmp_path, source)
 
 
 def test_without_until_use_local(tmp_path: Path):
     source = "import contextlib"
-
-    spec, module, _ = create_sample_module(tmp_path, source)
-    assert spec.loader
-    spec.loader.exec_module(module)
+    _, module, _ = create_sample_module(tmp_path, source)
 
     assert module.contextlib is sys.modules["contextlib"]
 
@@ -507,9 +509,7 @@ with defer_imports.until_use:
     import inspect
 """
 
-    spec, module, _ = create_sample_module(tmp_path, source, SourceFileLoader)
-    assert spec.loader
-    spec.loader.exec_module(module)
+    _, module, _ = create_sample_module(tmp_path, source, SourceFileLoader)
 
     expected_partial_inspect_repr = "'inspect': <module 'inspect' from"
     assert expected_partial_inspect_repr in repr(vars(module))
@@ -528,9 +528,7 @@ with defer_imports.until_use:
     import inspect
 """
 
-    spec, module, _ = create_sample_module(tmp_path, source)
-    assert spec.loader
-    spec.loader.exec_module(module)
+    _, module, _ = create_sample_module(tmp_path, source)
 
     expected_inspect_repr = "<key for 'inspect' import>: <proxy for 'inspect' import>"
     assert expected_inspect_repr in repr(vars(module))
@@ -552,9 +550,7 @@ with defer_imports.until_use:
     import inspect as gin
 """
 
-    spec, module, _ = create_sample_module(tmp_path, source)
-    assert spec.loader
-    spec.loader.exec_module(module)
+    _, module, _ = create_sample_module(tmp_path, source)
 
     expected_gin_repr = "<key for 'gin' import>: <proxy for 'inspect' import>"
 
@@ -585,9 +581,7 @@ with defer_imports.until_use:
     import importlib.abc
 """
 
-    spec, module, _ = create_sample_module(tmp_path, source)
-    assert spec.loader
-    spec.loader.exec_module(module)
+    _, module, _ = create_sample_module(tmp_path, source)
 
     expected_importlib_repr = "<key for 'importlib' import>: <proxy for 'importlib' import>"
     assert expected_importlib_repr in repr(vars(module))
@@ -607,9 +601,7 @@ with defer_imports.until_use:
     import collections.abc as xyz
 """
 
-    spec, module, _ = create_sample_module(tmp_path, source)
-    assert spec.loader
-    spec.loader.exec_module(module)
+    _, module, _ = create_sample_module(tmp_path, source)
 
     # Make sure the right proxy is in the namespace.
     expected_xyz_repr = "<key for 'xyz' import>: <proxy for 'collections.abc' import>"
@@ -656,9 +648,7 @@ with defer_imports.until_use:
     from inspect import isfunction, signature
 """
 
-    spec, module, _ = create_sample_module(tmp_path, source)
-    assert spec.loader
-    spec.loader.exec_module(module)
+    _, module, _ = create_sample_module(tmp_path, source)
 
     expected_isfunction_repr = "<key for 'isfunction' import>: <proxy for 'inspect.isfunction' import>"
     expected_signature_repr = "<key for 'signature' import>: <proxy for 'inspect.signature' import>"
@@ -687,9 +677,7 @@ with defer_imports.until_use:
     from inspect import Signature as MySignature
 """
 
-    spec, module, _ = create_sample_module(tmp_path, source)
-    assert spec.loader
-    spec.loader.exec_module(module)
+    _, module, _ = create_sample_module(tmp_path, source)
 
     expected_my_signature_repr = "<key for 'MySignature' import>: <proxy for 'inspect.Signature' import>"
     assert expected_my_signature_repr in repr(vars(module))
@@ -718,11 +706,9 @@ with defer_imports.until_use:
     import asyncio
 """
 
-    spec, module, path = create_sample_module(tmp_path, source)
-    assert spec.loader
-    spec.loader.exec_module(module)
+    _, _, module_path = create_sample_module(tmp_path, source)
 
-    expected_cache = Path(importlib.util.cache_from_source(str(path)))
+    expected_cache = Path(importlib.util.cache_from_source(str(module_path)))
     assert expected_cache.is_file()
 
     with expected_cache.open("rb") as fp:
@@ -738,8 +724,8 @@ with defer_imports.until_use:
     print("Hello world")
 """
 
-    spec, module, module_path = create_sample_module(tmp_path, source)
-    assert spec.loader
+    spec, module, module_path = create_sample_module(tmp_path, source, exec_mod=False)
+    assert spec.loader is not None
 
     with pytest.raises(SyntaxError) as exc_info:
         spec.loader.exec_module(module)
@@ -758,8 +744,8 @@ with defer_imports.until_use:
     from typing import *
 """
 
-    spec, module, module_path = create_sample_module(tmp_path, source)
-    assert spec.loader
+    spec, module, module_path = create_sample_module(tmp_path, source, exec_mod=False)
+    assert spec.loader is not None
 
     with pytest.raises(SyntaxError) as exc_info:
         spec.loader.exec_module(module)
@@ -779,9 +765,7 @@ with defer_imports.until_use:
     import importlib.abc
     import importlib.util
 """
-    spec, module, _ = create_sample_module(tmp_path, source)
-    assert spec.loader
-    spec.loader.exec_module(module)
+    _, module, _ = create_sample_module(tmp_path, source)
 
     # Prevent the caching of these from interfering with the test.
     for mod in ("importlib", "importlib.abc", "importlib.util"):
@@ -826,9 +810,7 @@ with defer_imports.until_use:
     import asyncio.events
 """
 
-    spec, module, _ = create_sample_module(tmp_path, source)
-    assert spec.loader
-    spec.loader.exec_module(module)
+    _ = create_sample_module(tmp_path, source)
 
 
 def test_mixed_from_same_module(tmp_path: Path):
@@ -841,9 +823,7 @@ with defer_imports.until_use:
     from asyncio import base_futures
 """
 
-    spec, module, _ = create_sample_module(tmp_path, source)
-    assert spec.loader
-    spec.loader.exec_module(module)
+    _, module, _ = create_sample_module(tmp_path, source)
 
     expected_asyncio_repr = "<key for 'asyncio' import>: <proxy for 'asyncio' import>"
     expected_asyncio_base_events_repr = "<key for 'base_events' import>: <proxy for 'asyncio.base_events' import>"
@@ -925,8 +905,8 @@ class B:
         loader=loader,
         submodule_search_locations=[],  # A signal that this is a package.
     )
-    assert spec
-    assert spec.loader
+    assert spec is not None
+    assert spec.loader is not None
 
     module = importlib.util.module_from_spec(spec)
 
@@ -1008,8 +988,8 @@ def Y2():
         loader=loader,
         submodule_search_locations=[],  # A signal that this is a package.
     )
-    assert spec
-    assert spec.loader
+    assert spec is not None
+    assert spec.loader is not None
 
     module = importlib.util.module_from_spec(spec)
 
@@ -1080,8 +1060,8 @@ mock_B = patcher.start()
         loader=loader,
         submodule_search_locations=[],  # A signal that this is a package.
     )
-    assert spec
-    assert spec.loader
+    assert spec is not None
+    assert spec.loader is not None
 
     module = importlib.util.module_from_spec(spec)
 
@@ -1127,8 +1107,8 @@ type ManyExpensive = tuple[Expensive, ...]
         loader=loader,
         submodule_search_locations=[],  # A signal that this is a package.
     )
-    assert spec
-    assert spec.loader
+    assert spec is not None
+    assert spec.loader is not None
 
     module = importlib.util.module_from_spec(spec)
 
@@ -1178,9 +1158,7 @@ with defer_imports.until_use:
     import inspect
 """
 
-    spec, module, _ = create_sample_module(tmp_path, source)
-    assert spec.loader
-    spec.loader.exec_module(module)
+    _, module, _ = create_sample_module(tmp_path, source)
 
     class _Missing:
         """Singleton sentinel."""
