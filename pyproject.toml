@@ -49,6 +49,9 @@ parallel = true
 [tool.coverage.paths]
 defer_imports = ["src", "*/site-packages"]
 
+[tool.coverage.report]
+fail_under = 90
+
 
 # -------- Linter config --------
 

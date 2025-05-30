@@ -195,8 +195,7 @@ def _decode_source(source_bytes: ReadableBuffer) -> str:  # pragma: no cover (te
 # Adapted from ast.get_source_segment().
 # Changes:
 # - Inline the helper functions.
-# - Use io.StringIO with newline=None instead of regex to parse lines ending with newlines; it's a bit faster and
-#   uses a module that we were importing anyway.
+# - Use io.StringIO with newline=None instead of regex to get newline-separated lines; it's faster and avoids an import.
 def _get_source_segment(source: str, node: _ASTWithLocation, *, padded: bool = False) -> t.Optional[str]:
     """Get the source code segment of `source` that generated `node`.
 
@@ -257,8 +256,7 @@ def _get_source_segment(source: str, node: _ASTWithLocation, *, padded: bool = F
 # ============================================================================
 
 
-# NOTE: We make our generated variables more hygienic by prefixing their names with "_@di_".
-# There are a few reasons for this specific prefix:
+# NOTE: Make our generated variables more hygienic by prefixing their names with "_@di_". A few reasons for this choice:
 #
 # 1. The "@" isn't a valid character for identifiers, so there won't be conflicts with "regular" user code.
 #    pytest does something similar.
@@ -268,7 +266,6 @@ def _get_source_segment(source: str, node: _ASTWithLocation, *, padded: bool = F
 #    during module execution but avoids symbols starting with an underscore.
 #     - An example of a common pattern in the standard library that does this:
 #       __all__ = [name for name in globals() if name[:1] != "_"]  # noqa: ERA001
-#    TODO: Do we actually want to do this one? Surely it's bound to backfire in converse use cases.
 _HYGIENE_PREFIX = "_@di_"
 
 _ACTUAL_CTX_NAME = "_actual_until_use"
@@ -661,15 +658,6 @@ class _DIFileLoader(SourceFileLoader):
         new_tree = instrumenter.visit(orig_tree)
         return super().source_to_code(new_tree, path, **kwargs)
 
-    def create_module(self, spec: ModuleSpec) -> t.Optional[types.ModuleType]:
-        """Use default semantics for module creation."""
-
-        # This state is needed for self.source_to_code(), which is eventually called by self.exec_module().
-        if spec.loader_state is not None:
-            self.defer_whole_module = spec.loader_state["defer_whole_module"]
-
-        return super().create_module(spec)
-
 
 class _DIFileFinder(FileFinder):
     def __repr__(self) -> str:
@@ -688,13 +676,7 @@ class _DIFileFinder(FileFinder):
     def find_spec(self, fullname: str, target: t.Optional[types.ModuleType] = None) -> t.Optional[ModuleSpec]:
         """Try to find a spec for the specified module.
 
-        If a spec is found, its loader may be overriden and some state may be passed on via `ModuleSpec.loader_state`
-        [1]_ [2]_.
-
-        References
-        ----------
-        .. [1] https://github.com/python/cpython/issues/89527
-        .. [2] https://docs.python.org/3/library/importlib.html#importlib.machinery.ModuleSpec.loader_state
+        If a spec is found, its loader may be replaced with a defer_imports-specific one.
         """
 
         spec = super().find_spec(fullname, target)
@@ -706,7 +688,7 @@ class _DIFileFinder(FileFinder):
 
             # pyright doesn't respect the "obj.__class__ is ..." type guard pattern.
             spec.loader = _DIFileLoader(loader.name, loader.path)  # pyright: ignore [reportUnknownMemberType, reportAttributeAccessIssue]
-            spec.loader_state = {"defer_whole_module": defer_whole_module}
+            spec.loader.defer_whole_module = defer_whole_module
 
         return spec
 
@@ -767,6 +749,7 @@ class ImportHookContext:
 
         if _PATH_HOOK not in sys.path_hooks:
             for i, hook in enumerate(sys.path_hooks):
+                # NOTE: This is a pretty fragile search criteria, but we don't have any good alternatives.
                 if hook.__name__ == "path_hook_for_FileFinder":
                     sys.path_hooks.insert(i, _PATH_HOOK)
                     break
@@ -780,7 +763,7 @@ class ImportHookContext:
             # Alternatives:
             # - Create and insert a new PathFinder subclass into sys.meta_path, or monkeypatch the existing one.
             #   That would be more extreme in some ways, but it's the route that typeguard takes.
-            # - Delete the sys.path_importer_cache entries instead of monkeypatching them.
+            # - Clear sys.path_importer_cache instead of monkeypatching its values.
             #   This is recommended by the docs and is technically more correct, but it can cause a big slowdown on
             #   startup.
             for finder in sys.path_importer_cache.values():
@@ -804,7 +787,7 @@ class ImportHookContext:
         except ValueError:
             pass
 
-        # Undo monkeypatching done by self.install(), and remove the presence of _DIFileFinder entirely.
+        # Undo any monkeypatching done by self.install().
         # We don't also have to invalidate each finder's cache, I think; FileFinder only caches potential module
         # locations, which the monkeypatch doesn't affect.
         for finder in sys.path_importer_cache.values():
@@ -835,15 +818,15 @@ _original_import = contextvars.ContextVar("_original_import", default=builtins._
 _is_deferred = contextvars.ContextVar[bool]("_is_deferred", default=False)
 
 
-# A CPython-specific fast path for getting the exact key from a dict without triggering __eq__ continuously.
-# This matters because of how expensive _DIKey.__eq__ is.
+# Ways to get the exact key from a dict without triggering the expensive _DIKey.__eq__ continuously.
 # PYUPDATE: py3.14 - Check that this still works.
-if sys.implementation.name == "cpython" and (3, 14) > sys.version_info >= (3, 9):
+if sys.implementation.name == "cpython" and (3, 9) <= sys.version_info < (3, 14):  # pragma: cpython cover
 
     def _get_exact_key(name: str, dct: t.MutableMapping[str, t.Any]) -> t.Optional[str]:
         keys = {name}.intersection(dct)
         return keys.pop() if keys else None
-else:
+
+else:  # pragma: cpython no cover
 
     def _get_exact_key(name: str, dct: t.MutableMapping[str, t.Any]) -> t.Optional[str]:
         return next(filter(name.__eq__, dct), None)
@@ -867,11 +850,8 @@ def _handle_import_key(import_name: str, nmsp: t.MutableMapping[str, t.Any], sta
         # Normal "==" semantics are triggered by most presence checks, e.g. nmsp.__contains__, and that causes a
         # performance issue because _DIKey's very slow __eq__ always take priority over str's. Thus, we avoid those
         # routes.
-        existing_key = _get_exact_key(submod_name, nmsp)
-
-        if existing_key is not None:
+        if (existing_key := _get_exact_key(submod_name, nmsp)) is not None:
             if not isinstance(existing_key, _DIKey):
-                # if existing_key.__class__ is not _DIKey:
                 # Keep looping, but with a more nested namespace.
                 nmsp = nmsp[submod_name].__dict__
                 start_idx = end_idx + 1
@@ -902,9 +882,6 @@ def _handle_import_key(import_name: str, nmsp: t.MutableMapping[str, t.Any], sta
 
 
 class _DIProxy:
-    # NOTE: Mangle instance attribute name(s) to help avoid further exposure if an instance leaks and a user tries to
-    # use it as a regular module.
-
     __slots__ = ("__import_name",)
 
     def __init__(self, import_name: str, /) -> None:
@@ -922,9 +899,6 @@ class _DIKey(str):
 
     When referenced, the key will replace itself in the namespace with the resolved import or the right name from it.
     """
-
-    # NOTE: Mangle instance attribute name(s) to help avoid further exposure if an instance leaks and a user tries to
-    # use it as a regular string.
 
     __slots__ = ("__import_args", "__is_resolving", "__lock", "_di_submod_names")
 

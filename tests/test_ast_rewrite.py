@@ -91,8 +91,8 @@ def create_sample_module(
 
     loader = loader_type(module_name, str(module_path))
 
-    # spec_from_file_location and module_from_spec won't automatically pass on loader_state.
-    loader.defer_whole_module = defer_whole_module  # pyright: ignore [reportAttributeAccessIssue]
+    if isinstance(loader, _DIFileLoader):
+        loader.defer_whole_module = defer_whole_module
 
     spec = importlib.util.spec_from_file_location(module_name, module_path, loader=loader)
     assert spec is not None
