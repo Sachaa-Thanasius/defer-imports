@@ -553,7 +553,7 @@ import test
 """
 
 _INDENTED_STDLIB_IMPORTS = "".join(
-    (f'{" " * 4}{line}' if line.strip() else line) for line in _STDLIB_IMPORTS.splitlines(keepends=True)
+    (f"{' ' * 4}{line}" if line.strip() else line) for line in _STDLIB_IMPORTS.splitlines(keepends=True)
 )
 
 _CONTEXT_MANAGER_TEMPLATE = f"""\

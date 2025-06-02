@@ -19,10 +19,10 @@ from importlib.machinery import BYTECODE_SUFFIXES, SOURCE_SUFFIXES, FileFinder, 
 __version__ = "0.1.1"
 
 __all__ = (
-    "install_import_hook",
-    "ImportHookContext",
-    "until_use",
     "DeferredContext",
+    "ImportHookContext",
+    "install_import_hook",
+    "until_use",
 )
 
 # NOTE: Defining TYPE_CHECKING locally only works with type-checkers as long as they continue to special-case that name.
@@ -153,7 +153,7 @@ if not TYPE_CHECKING and sys.version_info <= (3, 11):  # pragma: <=3.11 cover
 
     class _PlaceholderGenericAlias(type(list[int])):
         def __repr__(self) -> str:
-            name = f'typing.{super().__repr__().rpartition(".")[2]}'
+            name = f"typing.{super().__repr__().rpartition('.')[2]}"
             return f"<import placeholder for {name}>"
 
     class _PlaceholderMeta(type):
@@ -916,7 +916,7 @@ class _DeferConfig:
 
     def __repr__(self) -> str:
         attrs = ("apply_all", "module_names", "recursive", "loader_class")
-        return f'{type(self).__name__}({", ".join(f"{attr}={getattr(self, attr)!r}" for attr in attrs)})'
+        return f"{type(self).__name__}({', '.join(f'{attr}={getattr(self, attr)!r}' for attr in attrs)})"
 
 
 @_final
@@ -1189,7 +1189,7 @@ def _deferred___import__(
     # This technically repeats work since it recalculates level internally, but it's better for maintenance than keeping
     # a copy of importlib._bootstrap._resolve_name() around.
     if level > 0:
-        name = importlib.util.resolve_name(f'{"." * level}{name}', package)
+        name = importlib.util.resolve_name(f"{'.' * level}{name}", package)
         level = 0
 
     # Handle submodule imports if relevant top-level imports already occurred in the call site's module.
@@ -1238,7 +1238,7 @@ class DeferredContext:
     As part of its implementation, this temporarily replaces builtins.__import__.
     """
 
-    __slots__ = ("_is_active", "_import_ctx_token", "_defer_ctx_token")
+    __slots__ = ("_defer_ctx_token", "_import_ctx_token", "_is_active")
 
     def __enter__(self) -> None:
         with _is_executing_lock:
