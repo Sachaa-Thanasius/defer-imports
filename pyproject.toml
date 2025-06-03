@@ -33,7 +33,7 @@ Source = "https://github.com/Sachaa-Thanasius/defer-imports"
 dev = ["tox>=4.24.1", "typing-extensions"]
 test = ["pytest>=8", "pytest-rerunfailures"]
 cov = ["coverage>=7", "covdefaults"]
-bench = ["slothy==1.0.0"]
+profile = ["yelp-gprof2dot"]
 
 
 # -------- Test config --------

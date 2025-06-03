@@ -29,6 +29,7 @@ from defer_imports.lazy_load import _LazyFinder, _LazyLoader, _LazyModuleType, u
 # ============================================================================
 
 
+# PYUPDATE: Keep in sync with test.support.threading_helper._can_start_thread().
 def _can_start_thread() -> bool:
     """Detect whether Python can start new threads.
 
@@ -41,9 +42,9 @@ def _can_start_thread() -> bool:
     support (-s USE_PTHREADS / __EMSCRIPTEN_PTHREADS__).
     """
 
-    if sys.platform == "emscripten":
+    if sys.platform == "emscripten":  # pragma: no cover
         return sys._emscripten_info.pthreads
-    elif sys.platform == "wasi":
+    elif sys.platform == "wasi":  # pragma: no cover
         return False
     else:
         # assume all other platforms have working thread support.
@@ -130,6 +131,10 @@ class TestLazyLoader:
         assert loader.loaded is None
         return module
 
+    @pytest.fixture
+    def module(self) -> types.ModuleType:
+        return self.new_module()
+
     def test_init(self):
         with pytest.raises(TypeError):
             # Classes that don't define exec_module() trigger TypeError.
@@ -147,40 +152,34 @@ class TestLazyLoader:
         assert importer.loaded is not None
         assert module == importer.loaded
 
-    def test_attr_unchanged(self):
+    def test_attr_unchanged(self, module: types.ModuleType):
         # An attribute only mutated as a side-effect of import should not be
         # changed needlessly.
-        module = self.new_module()
         assert TestingImporter.mutated_name == module.__name__
 
-    def test_new_attr(self):
+    def test_new_attr(self, module: types.ModuleType):
         # A new attribute should persist.
-        module = self.new_module()
         module.new_attr = 42
         assert module.new_attr == 42
 
-    def test_mutated_preexisting_attr(self):
+    def test_mutated_preexisting_attr(self, module: types.ModuleType):
         # Changing an attribute that already existed on the module --
         # e.g. __name__ -- should persist.
-        module = self.new_module()
         module.__name__ = "bogus"
         assert module.__name__ == "bogus"
 
-    def test_mutated_attr(self):
+    def test_mutated_attr(self, module: types.ModuleType):
         # Changing an attribute that comes into existence after an import
         # should persist.
-        module = self.new_module()
         module.attr = 6
         assert module.attr == 6
 
-    def test_delete_eventual_attr(self):
+    def test_delete_eventual_attr(self, module: types.ModuleType):
         # Deleting an attribute should stay deleted.
-        module = self.new_module()
         del module.attr
         assert not hasattr(module, "attr")
 
-    def test_delete_preexisting_attr(self):
-        module = self.new_module()
+    def test_delete_preexisting_attr(self, module: types.ModuleType):
         del module.__name__
         assert not hasattr(module, "__name__")
 
@@ -191,8 +190,7 @@ class TestLazyLoader:
         with pytest.raises(ValueError, match="substituted"):
             _ = module.__name__
 
-    def test_module_already_in_sys(self):
-        module = self.new_module()
+    def test_module_already_in_sys(self, module: types.ModuleType):
         sys.modules[TestingImporter.module_name] = module
         # Force the load; just care that no exception is raised.
         _ = module.__name__
@@ -283,15 +281,11 @@ sys.modules[__name__].__class__ = ImmutableModule
         with pytest.raises(AttributeError):
             del module.CONSTANT
 
-    def test_special_case___spec__(self):
+    def test_special_case___spec__(self, module: types.ModuleType):
         # Verify that getting/modifying module.__spec__ doesn't trigger the load.
-
-        module = self.new_module()
         assert object.__getattribute__(module, "__class__") is _LazyModuleType
-
         _ = module.__spec__
         assert object.__getattribute__(module, "__class__") is _LazyModuleType
-
         module.__spec__.name = "blahblahblah"
         assert object.__getattribute__(module, "__class__") is _LazyModuleType
 
@@ -325,8 +319,8 @@ sys.modules[__name__].__class__ = ImmutableModule
 
 
 class TestLazyFinder:
-    @pytest.mark.parametrize(("mod_type", "mod_name"), [("builtin", "sys"), ("frozen", "zipimport")])
-    def test_doesnt_wrap_non_source_file_loaders(self, mod_type: str, mod_name: str):
+    @pytest.mark.parametrize("mod_name", ["sys", "zipimport"])
+    def test_doesnt_wrap_non_source_file_loaders(self, mod_name: str):
         spec = _LazyFinder.find_spec(mod_name)
         assert spec is not None
         assert not isinstance(spec.loader, _LazyLoader)

@@ -13,7 +13,6 @@ from __future__ import annotations
 import ast
 import builtins
 import contextvars
-import io
 import sys
 import types
 from importlib.machinery import BYTECODE_SUFFIXES, SOURCE_SUFFIXES, FileFinder, ModuleSpec, SourceFileLoader
@@ -23,6 +22,7 @@ from . import __version__, lazy_load as _lazy_load
 
 with _lazy_load.until_module_use:
     import collections
+    import io
     import os
     import threading
     import tokenize
@@ -140,7 +140,7 @@ def _resolve_name(name: str, package: str, level: int) -> str:  # pragma: no cov
 
 
 # Adapted from importlib._bootstrap.
-def _calc___package__(globals: t.MutableMapping[str, t.Any]) -> t.Optional[str]:  # pragma: no cover (tested in stdlib)
+def _calc___package__(globals: t.Mapping[str, t.Any]) -> t.Optional[str]:  # pragma: no cover (tested in stdlib)
     """Calculate what __package__ should be.
 
     __package__ is not guaranteed to be defined or could be set to None
@@ -562,17 +562,14 @@ _current_config = contextvars.ContextVar[tuple[str, ...]]("_current_config", def
 def _walk_globals(node: ast.AST) -> t.Generator[ast.AST, None, None]:
     """Recursively yield descendent nodes of a tree starting at `node`, including `node` itself.
 
-    Nodes that introduce a new scope, such as class and function definitions, are skipped entirely.
+    *Child* nodes that introduce a new scope, such as class and function definitions, are skipped entirely.
     """
 
     scope_node_types = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
-    if isinstance(node, scope_node_types):
-        return
-
-    todo = collections.deque([node])
-    while todo:
-        node = todo.popleft()
-        todo.extend(child for child in ast.iter_child_nodes(node) if not isinstance(child, scope_node_types))
+    unvisited = collections.deque([node])
+    while unvisited:
+        node = unvisited.popleft()
+        unvisited.extend(child for child in ast.iter_child_nodes(node) if not isinstance(child, scope_node_types))
         yield node
 
 
@@ -819,7 +816,7 @@ _is_deferred = contextvars.ContextVar[bool]("_is_deferred", default=False)
 
 
 # Ways to get the exact key from a dict without triggering the expensive _DIKey.__eq__ continuously.
-# PYUPDATE: py3.14 - Check that this still works.
+# PYUPDATE: py3.14 - Check that this fast path still works.
 if sys.implementation.name == "cpython" and (3, 9) <= sys.version_info < (3, 14):  # pragma: cpython cover
 
     def _get_exact_key(name: str, dct: t.MutableMapping[str, t.Any]) -> t.Optional[str]:
@@ -948,7 +945,9 @@ class _DIKey(str):
         # 2. Create nested keys and proxies as needed in the resolved module.
         if self._di_submod_names:
             starting_point = len(imp_name) + 1
+
             # Avoid triggering our __eq__ again.
+            # PYUPDATE: py3.14 - Use token as context manager. Ref: https://github.com/python/cpython/issues/129889
             _is_deferred_tok = _is_deferred.set(True)
             try:
                 for submod_name in self._di_submod_names:
@@ -960,6 +959,7 @@ class _DIKey(str):
 
         # 3. Replace the deferred version of the key in the relevant namespace to avoid it sticking around.
         # Avoid triggering our __eq__ again (would be a recursive trigger too).
+        # PYUPDATE: py3.14 - Use token as context manager. Ref: https://github.com/python/cpython/issues/129889
         _is_deferred_tok = _is_deferred.set(True)
         try:
             imp_locals[raw_asname] = imp_locals.pop(raw_asname)
@@ -1080,7 +1080,7 @@ class _DIContext:
     As part of its implementation, this temporarily replaces `builtins.__import__`.
     """
 
-    __slots__ = ("_import_ctx_token", "_defer_ctx_token")
+    __slots__ = ("_defer_ctx_token", "_import_ctx_token")
 
     def __enter__(self, /) -> None:
         self._defer_ctx_token = _is_deferred.set(True)

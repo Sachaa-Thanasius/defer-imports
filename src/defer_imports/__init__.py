@@ -5,7 +5,7 @@ __version__ = "1.0.0.dev0"
 __all__ = ("until_use",)
 
 
-class _DummyContext:
+class _NullContext:
     """A placeholder context manager that does nothing on its own.
 
     Should not be manually constructed: use through `defer_imports.until_use`.
@@ -18,4 +18,4 @@ class _DummyContext:
         pass
 
 
-until_use: _DummyContext = _DummyContext()
+until_use: _NullContext = _NullContext()

@@ -7,6 +7,8 @@ expected proxy repr, as that's the only way to inspect it without causing it to 
 """
 
 import ast
+import collections
+import collections.abc
 import contextlib
 import importlib.util
 import sys
@@ -15,7 +17,7 @@ import time
 import types
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Union, cast
 from unittest import mock
 
 import pytest
@@ -37,41 +39,7 @@ from defer_imports.ast_rewrite import (
 # ============================================================================
 
 
-@pytest.fixture(autouse=True)
-def better_key_repr():
-    """Replace _DIKey.__repr__ with a more verbose version for all tests."""
-
-    def verbose_repr(self: object) -> str:
-        return f"<key for {super(type(self), self).__repr__()} import>"
-
-    with mock.patch("defer_imports.ast_rewrite._DIKey.__repr__", verbose_repr):
-        yield
-
-
-SAMPLE_DOCSTRING = "Module docstring here"
-
-MODULE_TEMPLATE = f"""\
-from defer_imports.ast_rewrite import {_ACTUAL_CTX_NAME} as {_ACTUAL_CTX_ASNAME}
-{{}}
-del {_ACTUAL_CTX_ASNAME}
-""".rstrip()
-
-IMPORT_TEMPLATE = f"""\
-with {_ACTUAL_CTX_ASNAME}:
-    {{}}
-    del {_TEMP_ASNAMES}
-""".rstrip()
-
-
-def module_template(*lines: str) -> str:
-    return MODULE_TEMPLATE.format("\n".join(lines))
-
-
-def import_template(*lines: str) -> str:
-    return IMPORT_TEMPLATE.format("\n    ".join(lines))
-
-
-asnames_templ = f"{_TEMP_ASNAMES} = {{!r}}".format
+NestedMapping = collections.abc.Mapping[str, Union["NestedMapping", str]]
 
 
 def create_sample_module(
@@ -100,9 +68,67 @@ def create_sample_module(
     module = importlib.util.module_from_spec(spec)
 
     if exec_mod:
-        loader.exec_module(module)
+        # NOTE: Use spec.loader instead of loader because of potential create_module() side-effects.
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
 
     return spec, module, module_path
+
+
+def create_dir_tree(tmp_path: Path, dir_contents: NestedMapping) -> None:
+    """Create a tree of files based on a recursive dict of file/directory names and (source) contents.
+
+    Warning: Be careful when using escape sequences. Either escape them or use raw strings.
+    """
+
+    queue = collections.deque((tmp_path / filename, v) for filename, v in dir_contents.items())
+    while queue:
+        filepath, value = queue.popleft()
+        if isinstance(value, dict):
+            filepath.mkdir()
+            queue.extend((filepath / filename, v) for filename, v in value.items())
+        elif isinstance(value, str):
+            filepath.write_text(value, encoding="utf-8")
+        else:  # pragma: no cover
+            msg = f"expected a dict or a string, got {value!r}"
+            raise TypeError(msg)
+
+
+SAMPLE_DOCSTRING = "Module docstring here"
+
+MODULE_TEMPLATE = f"""\
+from defer_imports.ast_rewrite import {_ACTUAL_CTX_NAME} as {_ACTUAL_CTX_ASNAME}
+{{}}
+del {_ACTUAL_CTX_ASNAME}
+""".rstrip()
+
+IMPORT_TEMPLATE = f"""\
+with {_ACTUAL_CTX_ASNAME}:
+    {{}}
+    del {_TEMP_ASNAMES}
+""".rstrip()
+
+
+def module_template(*lines: str) -> str:
+    return MODULE_TEMPLATE.format("\n".join(lines))
+
+
+def import_template(*lines: str) -> str:
+    return IMPORT_TEMPLATE.format("\n    ".join(lines))
+
+
+asnames_templ = f"{_TEMP_ASNAMES} = {{!r}}".format
+
+
+@pytest.fixture(autouse=True)
+def better_key_repr():
+    """Replace _DIKey.__repr__ with a more verbose version for all tests."""
+
+    def verbose_repr(self: object) -> str:
+        return f"<key for {super(type(self), self).__repr__()} import>"
+
+    with mock.patch("defer_imports.ast_rewrite._DIKey.__repr__", verbose_repr):
+        yield
 
 
 @contextlib.contextmanager
@@ -855,49 +881,40 @@ with defer_imports.until_use:
 
 
 def test_relative_imports(tmp_path: Path):
-    """Test a synthetic package that uses relative imports within defer_imports.until_use blocks.
-
-    The package has the following structure:
-        .
-        └───sample_pkg
-            ├───__init__.py
-            ├───a.py
-            └───b.py
-    """
-
-    sample_pkg_path = tmp_path / "sample_pkg"
-    sample_pkg_path.mkdir()
-    sample_pkg_path.joinpath("__init__.py").write_text(
-        """\
-import defer_imports
-
-with defer_imports.until_use:
-    from . import a
-    from .a import A
-    from .b import B
-""",
-        encoding="utf-8",
-    )
-    sample_pkg_path.joinpath("a.py").write_text(
-        """\
-class A:
-    def __init__(self, val: object):
-        self.val = val
-""",
-        encoding="utf-8",
-    )
-    sample_pkg_path.joinpath("b.py").write_text(
-        """\
-class B:
-    def __init__(self, val: object):
-        self.val = val
-""",
-        encoding="utf-8",
-    )
+    """Test a synthetic package that uses relative imports within defer_imports.until_use blocks."""
 
     package_name = "sample_pkg"
-    package_init_path = str(sample_pkg_path / "__init__.py")
+    dir_contents = {
+        package_name: {
+            "__init__.py": "\n".join(
+                (
+                    "import defer_imports",
+                    "",
+                    "with defer_imports.until_use:",
+                    "    from . import a",
+                    "    from .a import A",
+                    "    from .b import B",
+                )
+            ),
+            "a.py": "\n".join(
+                (
+                    "class A:",
+                    "    def __init__(self, val: object):",
+                    "        self.val = val",
+                )
+            ),
+            "b.py": "\n".join(
+                (
+                    "class B:",
+                    "    def __init__(self, val: object):",
+                    "        self.val = val",
+                )
+            ),
+        }
+    }
+    create_dir_tree(tmp_path, dir_contents)
 
+    package_init_path = str(tmp_path / package_name / "__init__.py")
     loader = _DIFileLoader(package_name, package_init_path)
     spec = importlib.util.spec_from_file_location(
         package_name,
@@ -923,64 +940,47 @@ class B:
 
 
 def test_circular_imports(tmp_path: Path):
-    """Test a synthetic package that does circular imports.
-
-    The package has the following structure:
-        .
-        └───circular_pkg
-            ├───__init__.py
-            ├───main.py
-            ├───x.py
-            └───y.py
-    """
-
-    circular_pkg_path = tmp_path / "circular_pkg"
-    circular_pkg_path.mkdir()
-    circular_pkg_path.joinpath("__init__.py").write_text(
-        """\
-import defer_imports
-
-with defer_imports.until_use:
-    import circular_pkg.main
-""",
-        encoding="utf-8",
-    )
-    circular_pkg_path.joinpath("main.py").write_text(
-        """\
-from .x import X2
-X2()
-""",
-        encoding="utf-8",
-    )
-    circular_pkg_path.joinpath("x.py").write_text(
-        """\
-def X1():
-    return "X"
-
-from .y import Y1
-
-def X2():
-    return Y1()
-""",
-        encoding="utf-8",
-    )
-
-    circular_pkg_path.joinpath("y.py").write_text(
-        """\
-def Y1():
-    return "Y"
-
-from .x import X2
-
-def Y2():
-    return X2()
-""",
-        encoding="utf-8",
-    )
+    """Test a synthetic package that does circular imports."""
 
     package_name = "circular_pkg"
-    package_init_path = str(circular_pkg_path / "__init__.py")
+    dir_contents = {
+        package_name: {
+            "__init__.py": "\n".join(
+                (
+                    "import defer_imports",
+                    "",
+                    "with defer_imports.until_use:",
+                    "    import circular_pkg.main",
+                )
+            ),
+            "main.py": "\n".join(("from .x import X2", "X2()")),
+            "x.py": "\n".join(
+                (
+                    "def X1():",
+                    '    return "X"',
+                    "",
+                    "from .y import Y1",
+                    "",
+                    "def X2():",
+                    "    return Y1()",
+                )
+            ),
+            "y.py": "\n".join(
+                (
+                    "def Y1():",
+                    "    return 'Y'",
+                    "",
+                    "from .x import X2",
+                    "",
+                    "def Y2():",
+                    "    return X2()",
+                )
+            ),
+        }
+    }
+    create_dir_tree(tmp_path, dir_contents)
 
+    package_init_path = str(tmp_path / package_name / "__init__.py")
     loader = _DIFileLoader(package_name, package_init_path)
     spec = importlib.util.spec_from_file_location(
         package_name,
@@ -1017,42 +1017,34 @@ def test_leaking_patch(tmp_path: Path):
     """Test a synthetic package that demonstrates the "leaking patch" problem.
 
     Source: https://github.com/bswck/slothy/tree/bd0828a8dd9af63ca5c85340a70a14a76a6b714f/tests/leaking_patch
-
-    The package has the following structure:
-        .
-        └───leaking_patch_pkg
-            ├───__init__.py
-            ├───a.py
-            ├───b.py
-            └───patcher.py
     """
 
-    leaking_patch_pkg_path = tmp_path / "leaking_patch_pkg"
-    leaking_patch_pkg_path.mkdir()
-    leaking_patch_pkg_path.joinpath("__init__.py").touch()
-    leaking_patch_pkg_path.joinpath("a.py").write_text(
-        """\
-import defer_imports
-
-with defer_imports.until_use:
-    from .b import B
-""",
-        encoding="utf-8",
-    )
-    leaking_patch_pkg_path.joinpath("b.py").write_text('B = "original thing"', encoding="utf-8")
-    leaking_patch_pkg_path.joinpath("patching.py").write_text(
-        """\
-from unittest import mock
-
-patcher = mock.patch("leaking_patch_pkg.b.B", "patched thing", create=True)
-mock_B = patcher.start()
-""",
-        encoding="utf-8",
-    )
-
     package_name = "leaking_patch_pkg"
-    package_init_path = str(leaking_patch_pkg_path / "__init__.py")
+    dir_contents = {
+        package_name: {
+            "__init__.py": "",
+            "a.py": "\n".join(
+                (
+                    "import defer_imports",
+                    "",
+                    "with defer_imports.until_use:",
+                    "    from .b import B",
+                )
+            ),
+            "b.py": 'B = "original thing"',
+            "patching.py": "\n".join(
+                (
+                    "from unittest import mock",
+                    "",
+                    'patcher = mock.patch("leaking_patch_pkg.b.B", "patched thing", create=True)',
+                    "mock_B = patcher.start()",
+                )
+            ),
+        }
+    }
+    create_dir_tree(tmp_path, dir_contents)
 
+    package_init_path = str(tmp_path / package_name / "__init__.py")
     loader = _DIFileLoader(package_name, package_init_path)
     spec = importlib.util.spec_from_file_location(
         package_name,
@@ -1073,33 +1065,27 @@ mock_B = patcher.start()
 
 @pytest.mark.skipif(sys.version_info < (3, 12), reason="type statements are only valid in 3.12+")
 def test_3_12_type_statement(tmp_path: Path):
-    """Test that a proxy within a type statement doesn't resolve until accessed via .__value__.
-
-    The package has the following structure:
-        .
-        └───type_stmt_pkg
-            ├───__init__.py
-            └───exp.py
-    """
-
-    type_stmt_pkg_path = tmp_path / "type_stmt_pkg"
-    type_stmt_pkg_path.mkdir()
-    type_stmt_pkg_path.joinpath("__init__.py").write_text(
-        """\
-import defer_imports
-
-with defer_imports.until_use:
-    from .exp import Expensive
-
-type ManyExpensive = tuple[Expensive, ...]
-""",
-        encoding="utf-8",
-    )
-    type_stmt_pkg_path.joinpath("exp.py").write_text("class Expensive: ...", encoding="utf-8")
+    """Test that a proxy within a type statement doesn't resolve until accessed via .__value__."""
 
     package_name = "type_stmt_pkg"
-    package_init_path = str(type_stmt_pkg_path / "__init__.py")
+    dir_contents = {
+        package_name: {
+            "__init__.py": "\n".join(
+                (
+                    "import defer_imports",
+                    "",
+                    "with defer_imports.until_use:",
+                    "    from .exp import Expensive",
+                    "",
+                    "type ManyExpensive = tuple[Expensive, ...]",
+                )
+            ),
+            "exp.py": "class Expensive: ...",
+        }
+    }
+    create_dir_tree(tmp_path, dir_contents)
 
+    package_init_path = str(tmp_path / package_name / "__init__.py")
     loader = _DIFileLoader(package_name, package_init_path)
     spec = importlib.util.spec_from_file_location(
         package_name,
