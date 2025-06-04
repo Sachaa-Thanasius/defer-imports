@@ -848,17 +848,17 @@ def _handle_import_key(import_name: str, nmsp: t.MutableMapping[str, t.Any], sta
         # performance issue because _DIKey's very slow __eq__ always take priority over str's. Thus, we avoid those
         # routes.
         if (existing_key := _get_exact_key(submod_name, nmsp)) is not None:
-            if not isinstance(existing_key, _DIKey):
-                # Keep looping, but with a more nested namespace.
-                nmsp = nmsp[submod_name].__dict__
-                start_idx = end_idx + 1
-                continue
-
-            else:
+            if isinstance(existing_key, _DIKey):
                 if existing_key._di_submod_names:
                     existing_key._di_submod_names.add(import_name)
                 else:
                     existing_key._di_submod_names = {import_name}
+
+            else:
+                # Keep looping, but with a more nested namespace.
+                nmsp = nmsp[submod_name].__dict__
+                start_idx = end_idx + 1
+                continue
 
         else:
             if not at_final_part_of_name:
@@ -991,8 +991,10 @@ def _deferred___import__(  # noqa: PLR0912
     # 1. Only invoked by syntactic import statements; cannot be called manually via __import__().
     #     - Allows a stricter signature and less input validation because we have a more limited range of inputs and
     #       can depend on the builtin parser to handle some validation, e.g. making sure level >= 0.
-    # 2. Only called within the context of "with _actual_until_use: ...".
+    # 2. Only invoked within the context of "with _actual_until_use: ...".
     #     - _is_deferred is set to True and thus _DIKey instances won't trigger resolution.
+    # 3. Only invoked by Python code that's been instrumented by our AST transformer.
+    #     - locals[_TEMP_ASNAMES] must exist as tuple[str | None, ...] | str | None.
 
     # Do minimal input validation on top of the parser's work.
     if level > 0:  # pragma: no cover (tested in stdlib)
@@ -1010,10 +1012,7 @@ def _deferred___import__(  # noqa: PLR0912
 
         name = _resolve_name(name, package, level)
 
-    # Invariant: locals[_TEMP_ASNAMES] must exist.
-    #
-    # The AST transformer guarantees that it exists as `tuple[str | None, ...]` when fromlist is populated, or as
-    # `str | None` otherwise.
+    # asname exists as tuple[str | None, ...] when fromlist is populated, or as str | None otherwise.
     # Since we can't dependently annotate it that way, and annotating it as a union would require isinstance checks to
     # satisfy the type checker, leaving it as Any "satisfies" the type checker with less runtime cost.
     asname: t.Any = locals[_TEMP_ASNAMES]
@@ -1040,7 +1039,7 @@ def _deferred___import__(  # noqa: PLR0912
                     locals[_DIKey(parent_name, (parent_name, globals, locals, None), {name})] = None
                     result = _DIProxy(parent_name)
                 else:
-                    # Heuristic: If locals[parent_name] is not a module or proxy, pretend it didn't exist and clobber it.
+                    # Heuristic: If locals[parent_name] is not a module or proxy, treat it like it didn't exist.
                     if not isinstance(preexisting, (types.ModuleType, _DIProxy)):
                         locals[_DIKey(parent_name, (parent_name, globals, locals, None), {name})] = None
                         result = _DIProxy(parent_name)

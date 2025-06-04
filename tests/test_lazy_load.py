@@ -15,18 +15,13 @@ import sys
 import threading
 import time
 import types
+import unittest.mock
 from collections.abc import Sequence
 from importlib.machinery import ModuleSpec
-from unittest import mock
 
 import pytest
 
 from defer_imports.lazy_load import _LazyFinder, _LazyLoader, _LazyModuleType, until_module_use
-
-
-# ============================================================================
-# region -------- Helpers --------
-# ============================================================================
 
 
 # PYUPDATE: Keep in sync with test.support.threading_helper._can_start_thread().
@@ -53,15 +48,6 @@ def _can_start_thread() -> bool:
 
 #: Skip tests that require threading to work.
 requires_working_threading = pytest.mark.skipif(not _can_start_thread(), reason="requires threading support")
-
-
-@pytest.fixture
-def preserve_sys_modules():
-    with mock.patch.dict(sys.modules):
-        yield
-
-
-# endregion
 
 
 class CollectInit:
@@ -144,7 +130,7 @@ class TestLazyLoader:
         # End-to-end test to verify the load is in fact lazy.
         importer = TestingImporter()
         assert importer.loaded is None
-        with mock.patch.object(sys, "meta_path", [importer]):
+        with unittest.mock.patch.object(sys, "meta_path", [importer]):
             module = importlib.import_module(importer.module_name)
         assert importer.loaded is None
         # Trigger load.
@@ -331,16 +317,17 @@ class TestLazyFinder:
         assert isinstance(spec.loader, _LazyLoader)
 
     def test_warning_if_missing_from_meta_path(self, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.delitem(sys.modules, "inspect", raising=False)
+        with unittest.mock.patch.object(sys, "meta_path", list(sys.meta_path)):
+            monkeypatch.delitem(sys.modules, "inspect", raising=False)
 
-        with pytest.warns(ImportWarning) as record:  # noqa: SIM117
-            with until_module_use:
-                import inspect  # noqa: F401
+            with pytest.warns(ImportWarning) as record:  # noqa: SIM117
+                with until_module_use:
+                    import inspect  # noqa: F401
 
-                sys.meta_path.remove(_LazyFinder)
+                    sys.meta_path.remove(_LazyFinder)
 
-        assert len(record) == 1
-        assert record[0].message.args[0] == "_LazyFinder unexpectedly missing from sys.meta_path"
+            assert len(record) == 1
+            assert record[0].message.args[0] == "_LazyFinder unexpectedly missing from sys.meta_path"
 
     def test_e2e(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.delitem(sys.modules, "inspect", raising=False)

@@ -170,12 +170,13 @@ convention = "numpy"
 ]
 
 # ---- Test code
-"tests/**/test_*.py" = [
+"tests/**/*.py" = [
     "T201",   # Printing is fine.
     "T203",   # Pretty-printing is fine.
     "ANN201", # Don't need return annotations in tests.
     "ANN202", # Don't need return annotations in tests.
     "S102",   # exec is used to test for NameError within a module's namespace.
+    "RUF012", # Mutable classvars annotated ClassVar.
 ]
 "bench/**/*.py" = [
     "T201",   # Printing is fine.
