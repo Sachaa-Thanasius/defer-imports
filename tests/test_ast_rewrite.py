@@ -9,12 +9,10 @@ expected proxy repr, as that's the only way to inspect it without causing it to 
 import ast
 import collections
 import collections.abc
-import contextlib
 import importlib.util
 import sys
 import threading
 import time
-import types
 import unittest.mock
 from importlib.abc import Loader
 from importlib.machinery import SourceFileLoader
@@ -107,32 +105,6 @@ def create_dir_tree(path: Path, dir_contents: NestedMapping) -> None:
         else:  # pragma: no cover
             msg = f"expected a dict or a string, got {value!r}"
             raise TypeError(msg)
-
-
-@contextlib.contextmanager
-def temp_cache_module(name: str, module: types.ModuleType):
-    """Add a module to sys.modules and then attempt to remove it on exit."""
-
-    sys.modules[name] = module
-    try:
-        yield
-    finally:
-        sys.modules.pop(name, None)
-
-
-@contextlib.contextmanager
-def temp_uncache_tests_path_importer():
-    """Temporarily reset the cached path finder for the tests directory."""
-
-    _missing: Any = object()
-
-    tests_path = str(Path(__file__).parent)
-    cached_path = sys.path_importer_cache.pop(str(Path(__file__).parent), _missing)
-    try:
-        yield
-    finally:
-        if cached_path is not _missing:  # pragma: no cover
-            sys.path_importer_cache[tests_path] = cached_path
 
 
 # endregion
@@ -891,17 +863,16 @@ with defer_imports.until_use:
         assert spec.loader is not None
 
         module = importlib.util.module_from_spec(spec)
+        sys.modules[package_name] = module
+        spec.loader.exec_module(module)
 
-        with temp_cache_module(package_name, module):
-            spec.loader.exec_module(module)
+        module_locals_repr = repr(vars(module))
+        assert "<key for 'a' import>: <proxy for 'sample_pkg.a' import>" in module_locals_repr
+        assert "<key for 'A' import>: <proxy for 'sample_pkg.a.A' import>" in module_locals_repr
+        assert "<key for 'B' import>: <proxy for 'sample_pkg.b.B' import>" in module_locals_repr
 
-            module_locals_repr = repr(vars(module))
-            assert "<key for 'a' import>: <proxy for 'sample_pkg.a' import>" in module_locals_repr
-            assert "<key for 'A' import>: <proxy for 'sample_pkg.a.A' import>" in module_locals_repr
-            assert "<key for 'B' import>: <proxy for 'sample_pkg.b.B' import>" in module_locals_repr
-
-            assert module.A
-            assert repr(module.A("hello")).startswith("<sample_pkg.a.A object at")
+        assert module.A
+        assert repr(module.A("hello")).startswith("<sample_pkg.a.A object at")
 
     def test_circular_imports(self, tmp_path: Path):
         """Test a synthetic package that does circular imports."""
@@ -956,17 +927,18 @@ with defer_imports.until_use:
         assert spec.loader is not None
 
         module = importlib.util.module_from_spec(spec)
+        sys.modules[package_name] = module
+        spec.loader.exec_module(module)
 
-        with temp_cache_module(package_name, module):
-            spec.loader.exec_module(module)
-
-            assert module
+        assert module
 
     def test_import_stdlib(self):
         """Test that defer_imports.until_use works when wrapping imports for most of the stdlib."""
 
         # The path finder for the tests directory is already cached, so we need to temporarily reset that entry.
-        with temp_uncache_tests_path_importer():
+        with unittest.mock.patch.dict(sys.path_importer_cache):
+            sys.path_importer_cache.pop(str(Path(__file__).parent), None)
+
             with import_hook(uninstall_after=True):
                 import tests.sample_stdlib_imports
 
@@ -1019,10 +991,11 @@ with defer_imports.until_use:
 
         module = importlib.util.module_from_spec(spec)
 
-        with temp_cache_module(package_name, module):
-            spec.loader.exec_module(module)
-            exec(f"import {package_name}.patching; from {package_name}.b import B", vars(module))
-            assert module.B == "original thing"
+        sys.modules[package_name] = module
+        spec.loader.exec_module(module)
+
+        exec(f"import {package_name}.patching; from {package_name}.b import B", vars(module))
+        assert module.B == "original thing"
 
     @pytest.mark.skipif(sys.version_info < (3, 12), reason="type statements are only valid in 3.12+")
     def test_3_12_type_statement(self, tmp_path: Path):
@@ -1058,18 +1031,18 @@ with defer_imports.until_use:
         assert spec.loader is not None
 
         module = importlib.util.module_from_spec(spec)
+        sys.modules[package_name] = module
+        spec.loader.exec_module(module)
 
-        with temp_cache_module(package_name, module):
-            spec.loader.exec_module(module)
-            expected_proxy_repr = "<key for 'Expensive' import>: <proxy for 'type_stmt_pkg.exp.Expensive' import>"
+        expected_proxy_repr = "<key for 'Expensive' import>: <proxy for 'type_stmt_pkg.exp.Expensive' import>"
 
-            assert expected_proxy_repr in repr(vars(module))
+        assert expected_proxy_repr in repr(vars(module))
 
-            assert str(module.ManyExpensive) == "ManyExpensive"
-            assert expected_proxy_repr in repr(vars(module))
+        assert str(module.ManyExpensive) == "ManyExpensive"
+        assert expected_proxy_repr in repr(vars(module))
 
-            assert str(module.ManyExpensive.__value__) == "tuple[type_stmt_pkg.exp.Expensive, ...]"
-            assert expected_proxy_repr not in repr(vars(module))
+        assert str(module.ManyExpensive.__value__) == "tuple[type_stmt_pkg.exp.Expensive, ...]"
+        assert expected_proxy_repr not in repr(vars(module))
 
 
 @pytest.mark.flaky(reruns=3)

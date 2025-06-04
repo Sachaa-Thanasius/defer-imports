@@ -213,14 +213,14 @@ class TestLazyLoader:
         # Or multiple load attempts
         assert loader.load_count == 1
 
-    def test_lazy_self_referential_modules(self, monkeypatch: pytest.MonkeyPatch):
+    def test_lazy_self_referential_modules(self):
         # Directory modules with submodules that reference the parent can attempt to access
         # the parent module during a load. Verify that this common pattern works with lazy loading.
         # json is a good example in the stdlib.
 
         for name in list(sys.modules):
             if name.startswith("json"):
-                monkeypatch.delitem(sys.modules, name, raising=False)
+                sys.modules.pop(name, None)
 
         # Standard lazy loading, unwrapped
         spec = importlib.util.find_spec("json")
@@ -276,8 +276,8 @@ sys.modules[__name__].__class__ = ImmutableModule
         assert object.__getattribute__(module, "__class__") is _LazyModuleType
 
     @requires_working_threading
-    def test_module_find_race(self, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.delitem(sys.modules, "inspect", raising=False)
+    def test_module_find_race(self):
+        sys.modules.pop("inspect", None)
 
         class RaisingThread(threading.Thread):
             exc = None
@@ -316,9 +316,10 @@ class TestLazyFinder:
         assert spec is not None
         assert isinstance(spec.loader, _LazyLoader)
 
-    def test_warning_if_missing_from_meta_path(self, monkeypatch: pytest.MonkeyPatch):
+    @pytest.mark.usefixtures("preserve_sys_modules")
+    def test_warning_if_missing_from_meta_path(self):
         with unittest.mock.patch.object(sys, "meta_path", list(sys.meta_path)):
-            monkeypatch.delitem(sys.modules, "inspect", raising=False)
+            sys.modules.pop("inspect", None)
 
             with pytest.warns(ImportWarning) as record:  # noqa: SIM117
                 with until_module_use:
@@ -329,8 +330,9 @@ class TestLazyFinder:
             assert len(record) == 1
             assert record[0].message.args[0] == "_LazyFinder unexpectedly missing from sys.meta_path"
 
-    def test_e2e(self, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.delitem(sys.modules, "inspect", raising=False)
+    @pytest.mark.usefixtures("preserve_sys_modules")
+    def test_e2e(self):
+        sys.modules.pop("inspect", None)
 
         # Lazily imported.
         with until_module_use:
