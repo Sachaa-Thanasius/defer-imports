@@ -1,13 +1,12 @@
 # pyright: reportUnusedImport=none
 
-"""Simple benchark script for comparing the import time of the Python standard library when using regular imports,
-defer_imports-influence imports, and slothy-influenced imports.
+"""Simple benchark script for comparing the import time of the Python standard library when using regular imports and
+defer_imports-influence imports.
 
-The sample scripts being imported are generated with bench/generate_samples.py.
+The sample scripts being imported were generated with bench/generate_samples.py.
 """
 
 import platform
-import shutil
 import sys
 import time
 from pathlib import Path
@@ -54,6 +53,8 @@ def bench_defer_imports_global() -> float:
 
 def remove_pycaches() -> None:
     """Remove all cached Python bytecode files from the current directory."""
+
+    import shutil
 
     curr_dir = Path()
 

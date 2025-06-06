@@ -192,62 +192,6 @@ def _decode_source(source_bytes: ReadableBuffer) -> str:  # pragma: no cover (te
     return newline_decoder.decode(source)  # pyright: ignore [reportUnknownArgumentType]
 
 
-# Adapted from ast.get_source_segment().
-# Changes:
-# - Inline the helper functions.
-# - Use io.StringIO with newline=None instead of regex to get newline-separated lines; it's faster and avoids an import.
-def _get_source_segment(source: str, node: _ASTWithLocation, *, padded: bool = False) -> t.Optional[str]:
-    """Get the source code segment of `source` that generated `node`.
-
-    Parameters
-    ----------
-    source: str
-        The source code.
-    node: _ASTWithLocation
-        An AST, with location information, corresponding to some code within `source`.
-    padded: bool, default=False
-        Whether to pad, with spaces, the first line of a multi-line statement to match its original position.
-
-    Returns
-    -------
-    str | None
-        The found source segment, or None if some location information (`lineno`, `end_lineno`, `col_offset`, or
-        `end_col_offset`) is missing.
-    """
-
-    try:
-        if (node.end_lineno is None) or (node.end_col_offset is None):
-            return None
-
-        col_offset = node.col_offset
-        end_col_offset = node.end_col_offset
-
-        # Convert from 1-indexed to 0-indexed.
-        lineno = node.lineno - 1
-        end_lineno = node.end_lineno - 1
-    except AttributeError:
-        return None
-
-    # Split a string into lines while ignoring form feed and other chars.
-    # This mimics how the Python parser splits source code.
-    with io.StringIO(source, newline=None) as source_buffer:
-        # NOTE: We could use itertools.islice() here to avoid materializing a potentially much larger list of lines.
-        lines = list(source_buffer)[lineno : end_lineno + 1]
-
-    if lineno == end_lineno:
-        return lines[0].encode()[col_offset:end_col_offset].decode()
-
-    if padded:
-        # Replace all chars, except '\f\t', with spaces before the node's start on its starting line.
-        padding = "".join((c if (c in "\f\t") else " ") for c in lines[lineno].encode()[:col_offset].decode())
-    else:
-        padding = ""
-
-    lines[lineno] = padding + lines[lineno].encode()[col_offset:].decode()
-    lines[end_lineno] = lines[end_lineno].encode()[:end_col_offset].decode()
-    return "".join(lines)
-
-
 # endregion
 
 
@@ -290,6 +234,28 @@ def _is_until_use_node(node: ast.AST, /) -> bool:
     return isinstance(expr_value, ast.Name) and expr_value.id == "defer_imports"
 
 
+def _get_joined_source_lines(source: str, node: _ASTWithLocation) -> t.Optional[str]:
+    """Get the source code lines of `source` that generated `node`, or None if `node`'s location information is missing."""
+
+    try:
+        (lineno, end_lineno) = (node.lineno, node.end_lineno)
+    except AttributeError:
+        return None
+
+    if end_lineno is None:
+        return None
+
+    # Convert from 1-indexed to 0-indexed.
+    lineno -= 1
+    end_lineno -= 1
+
+    # Split a string into lines while ignoring form feed and other chars.
+    # This mimics how the Python parser splits source code.
+    with io.StringIO(source, newline=None) as source_buffer:
+        # NOTE: We could use itertools.islice() here to avoid materializing a potentially much larger list of lines.
+        return "".join(list(source_buffer)[lineno : end_lineno + 1])
+
+
 def _get_syntax_context(filepath: _ModulePath, source: _SourceData, node: _ASTWithLocation) -> _SyntaxContext:
     """Get a node's location context in a form compatible with `SyntaxError`'s constructor [1].
 
@@ -303,7 +269,7 @@ def _get_syntax_context(filepath: _ModulePath, source: _SourceData, node: _ASTWi
     if not isinstance(source, str):
         source = _decode_source(source)
 
-    text = _get_source_segment(source, node, padded=True)
+    text = _get_joined_source_lines(source, node)
     context = (os.fsdecode(filepath), node.lineno, node.col_offset + 1, text)
 
     if sys.version_info >= (3, 10):  # pragma: >=3.10 cover
@@ -680,11 +646,14 @@ class _DIFileFinder(FileFinder):
 
         # Be precise so that we don't replace user-defined loader classes.
         if (spec is not None) and ((loader := spec.loader) is not None) and (loader.__class__ is SourceFileLoader):
+            # Lock in the config between finding and loading.
             config = _current_config.get()
             defer_whole_module = self._is_full_module_rewrite(fullname, config)
 
             # pyright doesn't respect the "obj.__class__ is ..." type guard pattern.
             spec.loader = _DIFileLoader(loader.name, loader.path)  # pyright: ignore [reportUnknownMemberType, reportAttributeAccessIssue]
+            # NOTE: We could use spec.loader_state to transfer the info, but our types and use case are private and
+            # specific enough that we don't currently need to use that generic mechanism, I think.
             spec.loader.defer_whole_module = defer_whole_module
 
         return spec
@@ -695,14 +664,16 @@ _PATH_HOOK = _DIFileFinder.path_hook((_DIFileLoader, SOURCE_SUFFIXES))
 
 @_final
 class ImportHookContext:
-    """An installer and configurer for defer_imports's import hook. Must be called before using
-    `defer_imports.until_use` to make it work, otherwise it will be a no-op.
+    """An installer and configurer for defer_imports's import hook.
 
-    The configuration knobs are for determining which modules should be "globally" instrumented, i.e. having all their
-    global imports rewritten. Imports within `defer_imports.until_use` blocks are always instrumented.
+    Before this is called, `defer_imports.until_use` will be a no-op.
 
-    This should be run before the code it is meant to affect is executed. One place to put do that is ``__init__.py``
-    of a package or application.
+    Installation ensures that imports within `defer_imports.until_use` blocks are always instrumented within modules
+    imported *afterwards*. The configuration knobs are only for determining which modules should be "globally"
+    instrumented, having *all* their global imports rewritten.
+
+    Install *before* importing modules this is meant to affect. One place to do that is ``__init__.py`` of a package
+    or application.
 
     Parameters
     ----------
@@ -723,12 +694,12 @@ class ImportHookContext:
         msg = f"Type {cls.__name__!r} is not an acceptable base type."
         raise TypeError(msg)
 
-    def __init__(self, *, module_names: t.Sequence[str] = (), uninstall_after: bool = False) -> None:
+    def __init__(self, /, *, module_names: t.Sequence[str] = (), uninstall_after: bool = False) -> None:
         if isinstance(module_names, str):
             msg = "module_names should be a sequence of strings, not a string."
             raise TypeError(msg)
 
-        self._config = tuple(module_names)
+        self._config: tuple[str, ...] = tuple(module_names)
         self._uninstall_after: bool = uninstall_after
         self._config_token: contextvars.Token[tuple[str, ...]] | None = None
 
@@ -742,7 +713,7 @@ class ImportHookContext:
             self.uninstall()
 
     def install(self, /) -> None:
-        """Add a custom path hook to `sys.path_hooks`."""
+        """Install the custom import hook that allows `defer_imports.until_use` to work."""
 
         if _PATH_HOOK not in sys.path_hooks:
             for i, hook in enumerate(sys.path_hooks):
@@ -761,8 +732,7 @@ class ImportHookContext:
             # - Create and insert a new PathFinder subclass into sys.meta_path, or monkeypatch the existing one.
             #   That would be more extreme in some ways, but it's the route that typeguard takes.
             # - Clear sys.path_importer_cache instead of monkeypatching its values.
-            #   This is recommended by the docs and is technically more correct, but it can cause a big slowdown on
-            #   startup.
+            #   This is recommended by the docs and is more "correct", but it can cause a big slowdown on startup.
             for finder in sys.path_importer_cache.values():
                 if (finder is not None) and (finder.__class__ is FileFinder):
                     finder.__class__ = _DIFileFinder
@@ -777,7 +747,7 @@ class ImportHookContext:
             self._config_token = None
 
     def uninstall(self, /) -> None:
-        """Attempt to uninstall the custom path hook from `sys.path_hooks`. If already uninstalled, does nothing."""
+        """Attempt to uninstall the custom import hook. If already uninstalled, does nothing."""
 
         try:
             sys.path_hooks.remove(_PATH_HOOK)
@@ -805,7 +775,7 @@ import_hook = ImportHookContext
 # ============================================================================
 
 
-_ImportArgs: TypeAlias = "tuple[str, t.MutableMapping[str, t.Any], t.MutableMapping[str, t.Any], t.Optional[str]]"
+_ImportArgs: TypeAlias = "tuple[str, dict[str, t.Any], dict[str, t.Any], t.Optional[str]]"
 
 
 #: What builtins.__import__ last pointed to.
@@ -819,17 +789,17 @@ _is_deferred = contextvars.ContextVar[bool]("_is_deferred", default=False)
 # PYUPDATE: py3.14 - Check that this fast path still works.
 if sys.implementation.name == "cpython" and (3, 9) <= sys.version_info < (3, 14):  # pragma: cpython cover
 
-    def _get_exact_key(name: str, dct: t.MutableMapping[str, t.Any]) -> t.Optional[str]:
+    def _get_exact_key(name: str, dct: dict[str, t.Any]) -> t.Optional[str]:
         keys = {name}.intersection(dct)
         return keys.pop() if keys else None
 
 else:  # pragma: cpython no cover
 
-    def _get_exact_key(name: str, dct: t.MutableMapping[str, t.Any]) -> t.Optional[str]:
+    def _get_exact_key(name: str, dct: dict[str, t.Any]) -> t.Optional[str]:
         return next(filter(name.__eq__, dct), None)
 
 
-def _handle_import_key(import_name: str, nmsp: t.MutableMapping[str, t.Any], start_idx: int = 0, /) -> None:
+def _handle_import_key(import_name: str, nmsp: dict[str, t.Any], start_idx: int = 0, /) -> None:
     # Precondition: import_name is a dotted name.
     # NOTE: We can't use setattr() on modules directly because PyPy normalizes the attr key type to `str` in setattr().
     # Instead, we assign into the module dict.
@@ -853,13 +823,12 @@ def _handle_import_key(import_name: str, nmsp: t.MutableMapping[str, t.Any], sta
                     existing_key._di_submod_names.add(import_name)
                 else:
                     existing_key._di_submod_names = {import_name}
-
+                return
             else:
                 # Keep looping, but with a more nested namespace.
                 nmsp = nmsp[submod_name].__dict__
                 start_idx = end_idx + 1
                 continue
-
         else:
             if not at_final_part_of_name:
                 full_submod_name = import_name[:end_idx]
@@ -871,11 +840,10 @@ def _handle_import_key(import_name: str, nmsp: t.MutableMapping[str, t.Any], sta
                 sub_names.add(import_name)
 
                 nmsp[_DIKey(submod_name, (full_submod_name, nmsp, nmsp, None), sub_names)] = _DIProxy(full_submod_name)
-
+                return
             else:
                 nmsp[_DIKey(submod_name, (import_name, nmsp, nmsp, None))] = _DIProxy(import_name)
-
-        return
+                return
 
 
 class _DIProxy:
@@ -980,8 +948,8 @@ class _DIKey(str):
 
 def _deferred___import__(  # noqa: PLR0912
     name: str,
-    globals: t.MutableMapping[str, t.Any],
-    locals: t.MutableMapping[str, t.Any],
+    globals: dict[str, t.Any],
+    locals: dict[str, t.Any],
     fromlist: t.Optional[t.Sequence[str]] = None,
     level: int = 0,
 ) -> t.Any:
@@ -997,9 +965,9 @@ def _deferred___import__(  # noqa: PLR0912
     #     - locals[_TEMP_ASNAMES] must exist as tuple[str | None, ...] | str | None.
 
     # Do minimal input validation on top of the parser's work.
+    # This is adapted and inlined from importlib.__import__() and importlib._bootstrap._sanity_check() since we don't
+    # need all of the checks and transformations.
     if level > 0:  # pragma: no cover (tested in stdlib)
-        # These checks are adapted and inlined from importlib.__import__() and importlib._bootstrap._sanity_check()
-        # since we don't need all of them.
         package = _calc___package__(globals)
 
         if not isinstance(package, str):

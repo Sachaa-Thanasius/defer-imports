@@ -1,11 +1,3 @@
-"""Tests for defer_imports.
-
-Notes
------
-A proxy's presence in a namespace is checked via stringifying the namespace and then substring matching with the
-expected proxy repr, as that's the only way to inspect it without causing it to resolve.
-"""
-
 import ast
 import collections
 import collections.abc
@@ -28,14 +20,10 @@ from defer_imports.ast_rewrite import (
     _PATH_HOOK,
     _TEMP_ASNAMES,
     _DIFileLoader,
+    _DIKey,
     _ImportsInstrumenter,
     import_hook,
 )
-
-
-# ============================================================================
-# region -------- Helpers --------
-# ============================================================================
 
 
 NestedMapping = collections.abc.Mapping[str, Union["NestedMapping", str]]
@@ -77,7 +65,6 @@ def create_sample_module(path: Path, source: str, loader_type: type[Loader] = _D
     loader = loader_type(module_name, str(module_path))  # pyright: ignore [reportCallIssue]
     spec = importlib.util.spec_from_file_location(module_name, module_path, loader=loader)
     assert spec is not None
-
     module = importlib.util.module_from_spec(spec)
 
     if exec_mod:
@@ -91,7 +78,8 @@ def create_sample_module(path: Path, source: str, loader_type: type[Loader] = _D
 def create_dir_tree(path: Path, dir_contents: NestedMapping) -> None:
     """Create a tree of files based on a (nested) dict of file/directory names and (source) contents.
 
-    Warning: Be careful when using escape sequences in file contents. Consider escaping them or using raw strings.
+    Warning: Be careful when using escape sequences in file contents strings. Consider escaping them or using raw
+    strings.
     """
 
     queue = collections.deque((path / filename, v) for filename, v in dir_contents.items())
@@ -103,11 +91,8 @@ def create_dir_tree(path: Path, dir_contents: NestedMapping) -> None:
         elif isinstance(value, str):
             filepath.write_text(value, encoding="utf-8")
         else:  # pragma: no cover
-            msg = f"expected a dict or a string, got {value!r}"
+            msg = f"Expected a dict or a string, got {value!r}."
             raise TypeError(msg)
-
-
-# endregion
 
 
 def test_path_hook_installation():
@@ -459,6 +444,9 @@ import bar
 
 @pytest.mark.usefixtures("preserve_sys_modules")
 class TestImport:
+    # NOTE: A proxy's presence in a namespace is checked via stringifying the namespace and then substring matching
+    # with the expected proxy repr, as that's one of the few ways to inspect it without causing it to resolve.
+
     @pytest.fixture(autouse=True)
     def better_key_repr(self):
         """Replace _DIKey.__repr__ with a more verbose version for all tests."""
@@ -466,7 +454,7 @@ class TestImport:
         def verbose_repr(self: object) -> str:
             return f"<key for {super(type(self), self).__repr__()} import>"
 
-        with unittest.mock.patch("defer_imports.ast_rewrite._DIKey.__repr__", verbose_repr):
+        with unittest.mock.patch.object(_DIKey, "__repr__", verbose_repr):
             yield
 
     def test_empty(self, tmp_path: Path):
@@ -699,7 +687,7 @@ with defer_imports.until_use:
         assert exc_info.value.filename == str(module.__spec__.origin)
         assert exc_info.value.lineno == 4
         assert exc_info.value.offset == 5
-        assert exc_info.value.text == 'print("Hello world")'
+        assert exc_info.value.text == '    print("Hello world")\n'
 
     def test_error_if_wildcard_import(self, tmp_path: Path):
         source = """\
@@ -720,7 +708,30 @@ with defer_imports.until_use:
         assert exc_info.value.filename == str(module.__spec__.origin)
         assert exc_info.value.lineno == 4
         assert exc_info.value.offset == 5
-        assert exc_info.value.text == "from typing import *"
+        assert exc_info.value.text == "    from typing import *\n"
+
+    def test_error_if_multiline_non_import(self, tmp_path: Path):
+        source = """\
+import defer_imports
+
+with defer_imports.until_use:
+    a = 1 + \
+        2 + \
+        3; b = 2
+"""
+        module = create_sample_module(tmp_path, source, exec_mod=False)
+        spec = module.__spec__
+        assert spec is not None
+        assert spec.loader is not None
+
+        with pytest.raises(SyntaxError) as exc_info:
+            spec.loader.exec_module(module)
+
+        assert module.__spec__ is not None
+        assert exc_info.value.filename == str(module.__spec__.origin)
+        assert exc_info.value.lineno == 4
+        assert exc_info.value.offset == 5
+        assert exc_info.value.text == "    a = 1 +         2 +         3; b = 2\n"
 
     def test_top_level_and_submodules_1(self, tmp_path: Path):
         source = """\
