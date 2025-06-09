@@ -15,7 +15,16 @@ import builtins
 import contextvars
 import sys
 import types
-from importlib.machinery import BYTECODE_SUFFIXES, SOURCE_SUFFIXES, FileFinder, ModuleSpec, SourceFileLoader
+from importlib.machinery import (
+    BYTECODE_SUFFIXES,
+    EXTENSION_SUFFIXES,
+    SOURCE_SUFFIXES,
+    ExtensionFileLoader,
+    FileFinder,
+    ModuleSpec,
+    SourceFileLoader,
+    SourcelessFileLoader,
+)
 
 from . import __version__, lazy_load as _lazy_load
 
@@ -235,7 +244,7 @@ def _is_until_use_node(node: ast.AST, /) -> bool:
 
 
 def _get_joined_source_lines(source: str, node: _ASTWithLocation) -> t.Optional[str]:
-    """Get the source code lines of `source` that generated `node`, or None if `node`'s location information is missing."""
+    """Get the source code lines of `source` that generated `node`, or None if `node` lacks location information."""
 
     try:
         (lineno, end_lineno) = (node.lineno, node.end_lineno)
@@ -600,7 +609,7 @@ class _DIFileLoader(SourceFileLoader):
     # NOTE: The signatures of SourceFileLoader.source_to_code at runtime and in typeshed aren't currently consistent.
     # Ref: https://github.com/python/typeshed/pull/13880
     # Ref: https://github.com/python/typeshed/issues/13881
-    def source_to_code(self, data: _SourceData, path: _ModulePath, **kwargs: t.Any) -> types.CodeType:  # pyright: ignore [reportIncompatibleMethodOverride]
+    def source_to_code(self, data: _SourceData, path: _ModulePath, *, _optimize: int = -1) -> types.CodeType:  # pyright: ignore [reportIncompatibleMethodOverride]
         """Compile the source `data` into a code object, possibly instrumenting it along the way.
 
         Parameters
@@ -610,16 +619,22 @@ class _DIFileLoader(SourceFileLoader):
         """
 
         if not data:
-            return super().source_to_code(data, path, **kwargs)
+            return super().source_to_code(data, path, _optimize=_optimize)  # pyright: ignore [reportUnknownVariableType, reportCallIssue]
 
-        orig_tree = ast.parse(data, path, "exec")
+        orig_tree = compile(data, path, "exec", flags=ast.PyCF_ONLY_AST, dont_inherit=True, optimize=_optimize)
 
         if not (self.defer_whole_module or any(map(_is_until_use_node, _walk_globals(orig_tree)))):
-            return super().source_to_code(orig_tree, path, **kwargs)
+            return super().source_to_code(orig_tree, path, _optimize=_optimize)  # pyright: ignore [reportUnknownVariableType, reportCallIssue]
 
         instrumenter = _ImportsInstrumenter(data, path, whole_module=self.defer_whole_module)
         new_tree = instrumenter.visit(orig_tree)
-        return super().source_to_code(new_tree, path, **kwargs)
+        return super().source_to_code(new_tree, path, _optimize=_optimize)  # pyright: ignore [reportUnknownVariableType, reportCallIssue]
+
+    def create_module(self, spec: ModuleSpec) -> t.Optional[types.ModuleType]:
+        """Use default semantics for module creation."""
+
+        self.defer_whole_module = spec.loader_state["defer_whole_module"]
+        return super().create_module(spec)
 
 
 class _DIFileFinder(FileFinder):
@@ -639,27 +654,30 @@ class _DIFileFinder(FileFinder):
     def find_spec(self, fullname: str, target: t.Optional[types.ModuleType] = None) -> t.Optional[ModuleSpec]:
         """Try to find a spec for the specified module.
 
-        If a spec is found, its loader may be replaced with a defer_imports-specific one.
+        If a spec is found, some loader-specific state may be attached.
         """
 
         spec = super().find_spec(fullname, target)
-
-        # Be precise so that we don't replace user-defined loader classes.
-        if (spec is not None) and ((loader := spec.loader) is not None) and (loader.__class__ is SourceFileLoader):
+        if (spec is not None) and ((loader := spec.loader) is not None) and (loader.__class__ is _DIFileLoader):
             # Lock in the config between finding and loading.
             config = _current_config.get()
-            defer_whole_module = self._is_full_module_rewrite(fullname, config)
-
-            # pyright doesn't respect the "obj.__class__ is ..." type guard pattern.
-            spec.loader = _DIFileLoader(loader.name, loader.path)  # pyright: ignore [reportUnknownMemberType, reportAttributeAccessIssue]
-            # NOTE: We could use spec.loader_state to transfer the info, but our types and use case are private and
-            # specific enough that we don't currently need to use that generic mechanism, I think.
-            spec.loader.defer_whole_module = defer_whole_module
-
+            spec.loader_state = {"defer_whole_module": self._is_full_module_rewrite(fullname, config)}
         return spec
 
 
-_PATH_HOOK = _DIFileFinder.path_hook((_DIFileLoader, SOURCE_SUFFIXES))
+_ORIG_LOADER_DETAILS = (
+    (ExtensionFileLoader, EXTENSION_SUFFIXES),
+    (SourceFileLoader, SOURCE_SUFFIXES),
+    (SourcelessFileLoader, BYTECODE_SUFFIXES),
+)
+
+_DI_LOADER_DETAILS = (
+    (ExtensionFileLoader, EXTENSION_SUFFIXES),
+    (_DIFileLoader, SOURCE_SUFFIXES),
+    (SourcelessFileLoader, BYTECODE_SUFFIXES),
+)
+
+_PATH_HOOK = _DIFileFinder.path_hook(*_DI_LOADER_DETAILS)
 
 
 @_final
@@ -725,17 +743,16 @@ class ImportHookContext:
                 msg = "No file-based path hook found to be superseded."
                 raise RuntimeError(msg)
 
-            # HACK: Monkeypatch the cached finders for sys.path entries to have the right finder class. This should
-            # be safe since _DeferredFinder is a subclass of FileFinder and has the same instance state.
+            # Replace the cached finders for sys.path entries.
             #
             # Alternatives:
             # - Create and insert a new PathFinder subclass into sys.meta_path, or monkeypatch the existing one.
             #   That would be more extreme in some ways, but it's the route that typeguard takes.
             # - Clear sys.path_importer_cache instead of monkeypatching its values.
             #   This is recommended by the docs and is more "correct", but it can cause a big slowdown on startup.
-            for finder in sys.path_importer_cache.values():
+            for path_entry, finder in sys.path_importer_cache.items():
                 if (finder is not None) and (finder.__class__ is FileFinder):
-                    finder.__class__ = _DIFileFinder
+                    sys.path_importer_cache[path_entry] = _DIFileFinder(path_entry, *_DI_LOADER_DETAILS)
 
         self._config_token = _current_config.set(self._config)
 
@@ -754,12 +771,10 @@ class ImportHookContext:
         except ValueError:
             pass
 
-        # Undo any monkeypatching done by self.install().
-        # We don't also have to invalidate each finder's cache, I think; FileFinder only caches potential module
-        # locations, which the monkeypatch doesn't affect.
-        for finder in sys.path_importer_cache.values():
+        # Undo the replacements done by self.install().
+        for path_entry, finder in sys.path_importer_cache.items():
             if (finder is not None) and (finder.__class__ is _DIFileFinder):
-                finder.__class__ = FileFinder
+                sys.path_importer_cache[path_entry] = FileFinder(path_entry, *_ORIG_LOADER_DETAILS)
 
 
 import_hook = ImportHookContext
@@ -813,7 +828,7 @@ def _handle_import_key(import_name: str, nmsp: dict[str, t.Any], start_idx: int 
         else:
             submod_name = import_name[start_idx:]
 
-        # NOTE: Finding the key takes ~60% of this function's time, at minimum.
+        # NOTE: Finding the key takes a significant amount of time.
         # Normal "==" semantics are triggered by most presence checks, e.g. nmsp.__contains__, and that causes a
         # performance issue because _DIKey's very slow __eq__ always take priority over str's. Thus, we avoid those
         # routes.

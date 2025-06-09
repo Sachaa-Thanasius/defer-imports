@@ -9,6 +9,7 @@ The sample scripts being imported were generated with bench/generate_samples.py.
 import platform
 import sys
 import time
+import unittest.mock
 from pathlib import Path
 
 import defer_imports.ast_rewrite
@@ -26,29 +27,33 @@ class CatchTime:
 
 
 def bench_regular() -> float:
-    with CatchTime() as ct:
-        import bench.sample_regular
-    return ct.elapsed
+    with unittest.mock.patch.dict(sys.modules):
+        with CatchTime() as ct:
+            import bench.sample_regular
+        return ct.elapsed
 
 
 def bench_slothy() -> float:
-    with CatchTime() as ct:
-        import bench.sample_slothy
-    return ct.elapsed
+    with unittest.mock.patch.dict(sys.modules):
+        with CatchTime() as ct:
+            import bench.sample_slothy
+        return ct.elapsed
 
 
 def bench_defer_imports_local() -> float:
-    with CatchTime() as ct:  # noqa: SIM117
-        with defer_imports.ast_rewrite.import_hook(uninstall_after=True):
-            import bench.sample_defer_local
-    return ct.elapsed
+    with unittest.mock.patch.dict(sys.modules):
+        with CatchTime() as ct:  # noqa: SIM117
+            with defer_imports.ast_rewrite.import_hook(uninstall_after=True):
+                import bench.sample_defer_local
+        return ct.elapsed
 
 
 def bench_defer_imports_global() -> float:
-    with CatchTime() as ct:  # noqa: SIM117
-        with defer_imports.ast_rewrite.import_hook(module_names=["*"], uninstall_after=True):
-            import bench.sample_defer_global
-    return ct.elapsed
+    with unittest.mock.patch.dict(sys.modules):
+        with CatchTime() as ct:  # noqa: SIM117
+            with defer_imports.ast_rewrite.import_hook(module_names=["*"], uninstall_after=True):
+                import bench.sample_defer_global
+        return ct.elapsed
 
 
 def remove_pycaches() -> None:

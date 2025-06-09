@@ -55,26 +55,6 @@ def import_template(*lines: str) -> str:
 asnames_template = f"{_TEMP_ASNAMES} = {{!r}}".format
 
 
-def create_sample_module(path: Path, source: str, loader_type: type[Loader] = _DIFileLoader, *, exec_mod: bool = True):
-    """Create a sample module based on the given attributes."""
-
-    module_name = "sample"
-    module_path = path / f"{module_name}.py"
-    module_path.write_text(source, encoding="utf-8")
-
-    loader = loader_type(module_name, str(module_path))  # pyright: ignore [reportCallIssue]
-    spec = importlib.util.spec_from_file_location(module_name, module_path, loader=loader)
-    assert spec is not None
-    module = importlib.util.module_from_spec(spec)
-
-    if exec_mod:
-        # NOTE: Use spec.loader instead of loader because of potential create_module() side-effects.
-        assert spec.loader is not None
-        spec.loader.exec_module(module)
-
-    return module
-
-
 def create_dir_tree(path: Path, dir_contents: NestedMapping) -> None:
     """Create a tree of files based on a (nested) dict of file/directory names and (source) contents.
 
@@ -93,6 +73,50 @@ def create_dir_tree(path: Path, dir_contents: NestedMapping) -> None:
         else:  # pragma: no cover
             msg = f"Expected a dict or a string, got {value!r}."
             raise TypeError(msg)
+
+
+def create_sample_module(path: Path, source: str, loader_type: type[Loader] = _DIFileLoader, *, exec_mod: bool = True):
+    """Create a sample module based on the given attributes."""
+
+    module_name = "sample"
+    module_path = path / f"{module_name}.py"
+    module_path.write_text(source, encoding="utf-8")
+
+    loader = loader_type(module_name, str(module_path))  # pyright: ignore [reportCallIssue]
+    spec = importlib.util.spec_from_file_location(module_name, module_path, loader=loader)
+    assert spec is not None
+    spec.loader_state = {"defer_whole_module": False}
+    module = importlib.util.module_from_spec(spec)
+
+    if exec_mod:
+        # NOTE: Use spec.loader instead of loader because of potential create_module() side-effects.
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+
+    return module
+
+
+def create_sample_package(path: Path, package_name: str, dir_contents: NestedMapping):
+    create_dir_tree(path, dir_contents)
+
+    package_init_path = str(path / package_name / "__init__.py")
+    loader = _DIFileLoader(package_name, package_init_path)
+    spec = importlib.util.spec_from_file_location(
+        package_name,
+        package_init_path,
+        loader=loader,
+        submodule_search_locations=[],  # A signal that this is a package.
+    )
+    assert spec is not None
+
+    spec.loader_state = {"defer_whole_module": False}
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[package_name] = module
+
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+
+    return module
 
 
 def test_path_hook_installation():
@@ -860,22 +884,7 @@ with defer_imports.until_use:
                 ),
             }
         }
-        create_dir_tree(tmp_path, dir_contents)
-
-        package_init_path = str(tmp_path / package_name / "__init__.py")
-        loader = _DIFileLoader(package_name, package_init_path)
-        spec = importlib.util.spec_from_file_location(
-            package_name,
-            package_init_path,
-            loader=loader,
-            submodule_search_locations=[],  # A signal that this is a package.
-        )
-        assert spec is not None
-        assert spec.loader is not None
-
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[package_name] = module
-        spec.loader.exec_module(module)
+        module = create_sample_package(tmp_path, package_name, dir_contents)
 
         module_locals_repr = repr(vars(module))
         assert "<key for 'a' import>: <proxy for 'sample_pkg.a' import>" in module_locals_repr
@@ -924,22 +933,7 @@ with defer_imports.until_use:
                 ),
             }
         }
-        create_dir_tree(tmp_path, dir_contents)
-
-        package_init_path = str(tmp_path / package_name / "__init__.py")
-        loader = _DIFileLoader(package_name, package_init_path)
-        spec = importlib.util.spec_from_file_location(
-            package_name,
-            package_init_path,
-            loader=loader,
-            submodule_search_locations=[],  # A signal that this is a package.
-        )
-        assert spec is not None
-        assert spec.loader is not None
-
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[package_name] = module
-        spec.loader.exec_module(module)
+        module = create_sample_package(tmp_path, package_name, dir_contents)
 
         assert module
 
@@ -987,23 +981,7 @@ with defer_imports.until_use:
                 ),
             }
         }
-        create_dir_tree(tmp_path, dir_contents)
-
-        package_init_path = str(tmp_path / package_name / "__init__.py")
-        loader = _DIFileLoader(package_name, package_init_path)
-        spec = importlib.util.spec_from_file_location(
-            package_name,
-            package_init_path,
-            loader=loader,
-            submodule_search_locations=[],  # A signal that this is a package.
-        )
-        assert spec is not None
-        assert spec.loader is not None
-
-        module = importlib.util.module_from_spec(spec)
-
-        sys.modules[package_name] = module
-        spec.loader.exec_module(module)
+        module = create_sample_package(tmp_path, package_name, dir_contents)
 
         exec(f"import {package_name}.patching; from {package_name}.b import B", vars(module))
         assert module.B == "original thing"
@@ -1028,22 +1006,7 @@ with defer_imports.until_use:
                 "exp.py": "class Expensive: ...",
             }
         }
-        create_dir_tree(tmp_path, dir_contents)
-
-        package_init_path = str(tmp_path / package_name / "__init__.py")
-        loader = _DIFileLoader(package_name, package_init_path)
-        spec = importlib.util.spec_from_file_location(
-            package_name,
-            package_init_path,
-            loader=loader,
-            submodule_search_locations=[],  # A signal that this is a package.
-        )
-        assert spec is not None
-        assert spec.loader is not None
-
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[package_name] = module
-        spec.loader.exec_module(module)
+        module = create_sample_package(tmp_path, package_name, dir_contents)
 
         expected_proxy_repr = "<key for 'Expensive' import>: <proxy for 'type_stmt_pkg.exp.Expensive' import>"
 
