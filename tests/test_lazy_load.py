@@ -17,11 +17,12 @@ import time
 import types
 import unittest.mock
 from collections.abc import Sequence
-from importlib.machinery import ModuleSpec
+from importlib.abc import MetaPathFinder
+from importlib.machinery import BuiltinImporter, FrozenImporter, ModuleSpec, PathFinder
 
 import pytest
 
-from defer_imports.lazy_load import _LazyFinder, _LazyLoader, _LazyModuleType, until_module_use
+from defer_imports.lazy_load import LazyLoader, _LazyFinder, _LazyModuleType, until_module_use
 
 
 # PYUPDATE: Keep in sync with test.support.threading_helper._can_start_thread().
@@ -60,7 +61,7 @@ class CollectInit:
 
 class TestLazyLoaderFactory:
     def test_init(self):
-        factory = _LazyLoader.factory(CollectInit)
+        factory = LazyLoader.factory(CollectInit)
         # E.g. what importlib.machinery.FileFinder instantiates loaders with
         # plus keyword arguments.
         lazy_loader = factory("module name", "module path", kw="kw")
@@ -71,7 +72,7 @@ class TestLazyLoaderFactory:
     def test_validation(self):
         # No exec_module(), no lazy loading.
         with pytest.raises(TypeError):
-            _LazyLoader.factory(object)
+            LazyLoader.factory(object)
 
 
 class TestingImporter(importlib.abc.MetaPathFinder, importlib.abc.Loader):
@@ -89,7 +90,7 @@ class TestingImporter(importlib.abc.MetaPathFinder, importlib.abc.Loader):
     ) -> ModuleSpec | None:
         if name != self.module_name:  # pragma: no cover
             return None
-        return importlib.util.spec_from_loader(name, _LazyLoader(self))
+        return importlib.util.spec_from_loader(name, LazyLoader(self))
 
     def exec_module(self, module: types.ModuleType) -> None:
         time.sleep(0.01)  # Simulate a slow load.
@@ -106,7 +107,7 @@ class TestLazyLoader:
         if source_code is not None:
             loader.source_code = source_code
 
-        spec = importlib.util.spec_from_loader(TestingImporter.module_name, _LazyLoader(loader))
+        spec = importlib.util.spec_from_loader(TestingImporter.module_name, LazyLoader(loader))
         assert spec is not None
         assert spec.loader is not None
 
@@ -124,7 +125,7 @@ class TestLazyLoader:
     def test_init(self):
         with pytest.raises(TypeError):
             # Classes that don't define exec_module() trigger TypeError.
-            _LazyLoader(object)
+            LazyLoader(object)
 
     def test_e2e(self):
         # End-to-end test to verify the load is in fact lazy.
@@ -227,7 +228,7 @@ class TestLazyLoader:
         assert spec is not None
         assert spec.loader is not None
 
-        loader = _LazyLoader(spec.loader)
+        loader = LazyLoader(spec.loader)
         spec.loader = loader
         module = importlib.util.module_from_spec(spec)
         sys.modules["json"] = module
@@ -305,30 +306,35 @@ sys.modules[__name__].__class__ = ImmutableModule
 
 
 class TestLazyFinder:
-    @pytest.mark.parametrize("mod_name", ["sys", "zipimport"])
-    def test_doesnt_wrap_non_source_file_loaders(self, mod_name: str):
-        spec = _LazyFinder.find_spec(mod_name)
+    def test_init(self):
+        _LazyFinder(BuiltinImporter)
+        _LazyFinder(FrozenImporter)
+        _LazyFinder(PathFinder)
+
+        with pytest.raises(TypeError) as exc_info:
+            _LazyFinder(object)
+
+        assert exc_info.value.args[0] == "finder must define find_spec()"
+
+    @pytest.mark.parametrize(
+        ("module_name", "module_finder"),
+        [
+            ("sys", BuiltinImporter),
+            ("zipimport", FrozenImporter),
+        ],
+    )
+    def test_doesnt_wrap_non_source_file_loaders(self, module_name: str, module_finder: MetaPathFinder):
+        spec = _LazyFinder(module_finder).find_spec(module_name)
+
         assert spec is not None
-        assert not isinstance(spec.loader, _LazyLoader)
+        assert not isinstance(spec.loader, LazyLoader)
 
-    def test_wraps_source_file_loader(self):
-        spec = _LazyFinder.find_spec("inspect")
+    @pytest.mark.parametrize(("module_name", "module_finder"), [("inspect", PathFinder)])
+    def test_wraps_source_file_loader(self, module_name: str, module_finder: MetaPathFinder):
+        spec = _LazyFinder(module_finder).find_spec(module_name)
+
         assert spec is not None
-        assert isinstance(spec.loader, _LazyLoader)
-
-    @pytest.mark.usefixtures("preserve_sys_modules")
-    def test_warning_if_missing_from_meta_path(self):
-        with unittest.mock.patch.object(sys, "meta_path", list(sys.meta_path)):
-            sys.modules.pop("inspect", None)
-
-            with pytest.warns(ImportWarning) as record:  # noqa: SIM117
-                with until_module_use:
-                    import inspect  # noqa: F401
-
-                    sys.meta_path.remove(_LazyFinder)
-
-            assert len(record) == 1
-            assert record[0].message.args[0] == "_LazyFinder unexpectedly missing from sys.meta_path"
+        assert isinstance(spec.loader, LazyLoader)
 
     @pytest.mark.usefixtures("preserve_sys_modules")
     def test_e2e(self):

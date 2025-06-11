@@ -6,7 +6,9 @@ defer_imports-influence imports.
 The sample scripts being imported were generated with bench/generate_samples.py.
 """
 
+import argparse
 import platform
+import shutil
 import sys
 import time
 import unittest.mock
@@ -15,51 +17,46 @@ from pathlib import Path
 import defer_imports.ast_rewrite
 
 
-class CatchTime:
+class TimeCatcher:
     """A context manager that measures the time taken to execute its body."""
 
     def __enter__(self):
         self.elapsed = time.perf_counter()
         return self
 
-    def __exit__(self, *_dont_care: object):
+    def __exit__(self, *exc_info: object):
         self.elapsed = time.perf_counter() - self.elapsed
 
 
 def bench_regular() -> float:
-    with unittest.mock.patch.dict(sys.modules):
-        with CatchTime() as ct:
-            import bench.sample_regular
-        return ct.elapsed
-
-
-def bench_slothy() -> float:
-    with unittest.mock.patch.dict(sys.modules):
-        with CatchTime() as ct:
-            import bench.sample_slothy
-        return ct.elapsed
+    with TimeCatcher() as tc:
+        import bench.sample_regular
+    return tc.elapsed
 
 
 def bench_defer_imports_local() -> float:
-    with unittest.mock.patch.dict(sys.modules):
-        with CatchTime() as ct:  # noqa: SIM117
-            with defer_imports.ast_rewrite.import_hook(uninstall_after=True):
-                import bench.sample_defer_local
-        return ct.elapsed
+    with TimeCatcher() as tc:  # noqa: SIM117
+        with defer_imports.ast_rewrite.import_hook(uninstall_after=True):
+            import bench.sample_defer_local
+    return tc.elapsed
 
 
 def bench_defer_imports_global() -> float:
-    with unittest.mock.patch.dict(sys.modules):
-        with CatchTime() as ct:  # noqa: SIM117
-            with defer_imports.ast_rewrite.import_hook(module_names=["*"], uninstall_after=True):
-                import bench.sample_defer_global
-        return ct.elapsed
+    with TimeCatcher() as tc:  # noqa: SIM117
+        with defer_imports.ast_rewrite.import_hook(["*"], uninstall_after=True):
+            import bench.sample_defer_global
+    return tc.elapsed
+
+
+BENCH_FUNCS = {
+    "regular": bench_regular,
+    "defer_imports (local)": bench_defer_imports_local,
+    "defer_imports (global)": bench_defer_imports_global,
+}
 
 
 def remove_pycaches() -> None:
     """Remove all cached Python bytecode files from the current directory."""
-
-    import shutil
 
     curr_dir = Path()
 
@@ -116,18 +113,7 @@ def pretty_print_results(results: dict[str, float], minimum: float) -> None:
     print(divider)
 
 
-BENCH_FUNCS = {
-    "regular": bench_regular,
-    # NOTE: slothy's been removed from PyPI and GitHub entirely.
-    # "slothy": bench_slothy,
-    "defer_imports (local)": bench_defer_imports_local,
-    "defer_imports (global)": bench_defer_imports_global,
-}
-
-
 def main() -> None:
-    import argparse
-
     parser = argparse.ArgumentParser()
 
     default_exec_order = list(BENCH_FUNCS)
@@ -152,7 +138,11 @@ def main() -> None:
 
     exec_order: list[str] = args.exec_order or default_exec_order
 
-    results = {type_: BENCH_FUNCS[type_]() for type_ in exec_order}
+    results: dict[str, float] = {}
+    for type_ in exec_order:
+        with unittest.mock.patch.dict(sys.modules):
+            results[type_] = BENCH_FUNCS[type_]()
+
     minimum = min(results.values())
 
     pretty_print_results(results, minimum)

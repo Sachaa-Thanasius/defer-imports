@@ -14,7 +14,7 @@ class _NullContext:
     def __enter__(self, /) -> None:
         pass
 
-    def __exit__(self, *_dont_care: object) -> None:
+    def __exit__(self, *exc_info: object) -> None:
         pass
 
 

@@ -15,16 +15,7 @@ import builtins
 import contextvars
 import sys
 import types
-from importlib.machinery import (
-    BYTECODE_SUFFIXES,
-    EXTENSION_SUFFIXES,
-    SOURCE_SUFFIXES,
-    ExtensionFileLoader,
-    FileFinder,
-    ModuleSpec,
-    SourceFileLoader,
-    SourcelessFileLoader,
-)
+from importlib.machinery import BYTECODE_SUFFIXES, SOURCE_SUFFIXES, FileFinder, ModuleSpec, SourceFileLoader
 
 from . import __version__, lazy_load as _lazy_load
 
@@ -260,8 +251,8 @@ def _get_joined_source_lines(source: str, node: _ASTWithLocation) -> t.Optional[
 
     # Split a string into lines while ignoring form feed and other chars.
     # This mimics how the Python parser splits source code.
+    # NOTE: We could use itertools.islice() here to avoid materializing a potentially much larger list of lines.
     with io.StringIO(source, newline=None) as source_buffer:
-        # NOTE: We could use itertools.islice() here to avoid materializing a potentially much larger list of lines.
         return "".join(list(source_buffer)[lineno : end_lineno + 1])
 
 
@@ -642,7 +633,7 @@ class _DIFileFinder(FileFinder):
         return f"{self.__class__.__name__}({self.path!r})"
 
     @staticmethod
-    def _is_full_module_rewrite(fullname: str, config: t.Optional[tuple[str, ...]]) -> bool:
+    def _is_full_module_rewrite(config: t.Optional[tuple[str, ...]], fullname: str) -> bool:
         """Determine whether all global imports should be instrumented *in addition to* `until_use`-wrapped imports."""
 
         return bool(config) and (
@@ -654,30 +645,26 @@ class _DIFileFinder(FileFinder):
     def find_spec(self, fullname: str, target: t.Optional[types.ModuleType] = None) -> t.Optional[ModuleSpec]:
         """Try to find a spec for the specified module.
 
-        If a spec is found, some loader-specific state may be attached.
+        If found, attach some loader-specific state and potentially replace the loader.
         """
 
         spec = super().find_spec(fullname, target)
-        if (spec is not None) and ((loader := spec.loader) is not None) and (loader.__class__ is _DIFileLoader):
+
+        if (spec is not None) and ((loader := spec.loader) is not None):
             # Lock in the config between finding and loading.
             config = _current_config.get()
-            spec.loader_state = {"defer_whole_module": self._is_full_module_rewrite(fullname, config)}
+            spec.loader_state = {"defer_whole_module": self._is_full_module_rewrite(config, fullname)}
+
+            # If this finder was created via our singleton path hook, the super call above should only return specs with
+            # _DIFileLoader as the loader. However, the finders patched in import_hook.install() are a different story.
+            # Account for those with a very specific check so that we don't override user-defined loaders.
+            if loader.__class__ is SourceFileLoader:
+                spec.loader = _DIFileLoader(loader.name, loader.path)  # pyright: ignore [reportUnknownMemberType, reportAttributeAccessIssue]
+
         return spec
 
 
-_ORIG_LOADER_DETAILS = (
-    (ExtensionFileLoader, EXTENSION_SUFFIXES),
-    (SourceFileLoader, SOURCE_SUFFIXES),
-    (SourcelessFileLoader, BYTECODE_SUFFIXES),
-)
-
-_DI_LOADER_DETAILS = (
-    (ExtensionFileLoader, EXTENSION_SUFFIXES),
-    (_DIFileLoader, SOURCE_SUFFIXES),
-    (SourcelessFileLoader, BYTECODE_SUFFIXES),
-)
-
-_PATH_HOOK = _DIFileFinder.path_hook(*_DI_LOADER_DETAILS)
+_PATH_HOOK = _DIFileFinder.path_hook((_DIFileLoader, SOURCE_SUFFIXES))
 
 
 @_final
@@ -698,8 +685,8 @@ class ImportHookContext:
     module_names: t.Sequence[str], default=()
         A set of modules to apply global-scope import statement instrumentation to.
 
-        - If passed ``["*"]``, global-scope import statement instrumentation will occur in all modules imported henceforth.
-        (Better suited for applications than libraries.)
+        - If passed ``["*"]``, global-scope import statement instrumentation will occur in all modules imported
+        henceforth. (Better suited for applications than libraries.)
         - If one of the module names ends with ".*", global-scope import statement instrumentation will occur in that
         module and its submodules recursively. (Better suited for libraries than applications.)
     uninstall_after: bool, default=False
@@ -712,7 +699,7 @@ class ImportHookContext:
         msg = f"Type {cls.__name__!r} is not an acceptable base type."
         raise TypeError(msg)
 
-    def __init__(self, /, *, module_names: t.Sequence[str] = (), uninstall_after: bool = False) -> None:
+    def __init__(self, /, module_names: t.Sequence[str] = (), *, uninstall_after: bool = False) -> None:
         if isinstance(module_names, str):
             msg = "module_names should be a sequence of strings, not a string."
             raise TypeError(msg)
@@ -725,7 +712,7 @@ class ImportHookContext:
         self.install()
         return self
 
-    def __exit__(self, *_dont_care: object) -> None:
+    def __exit__(self, *exc_info: object) -> None:
         self.reset()
         if self._uninstall_after:
             self.uninstall()
@@ -743,16 +730,16 @@ class ImportHookContext:
                 msg = "No file-based path hook found to be superseded."
                 raise RuntimeError(msg)
 
-            # Replace the cached finders for sys.path entries.
+            # HACK: Patch cached finders for sys.path entries to have the right finder class.
             #
             # Alternatives:
             # - Create and insert a new PathFinder subclass into sys.meta_path, or monkeypatch the existing one.
             #   That would be more extreme in some ways, but it's the route that typeguard takes.
             # - Clear sys.path_importer_cache instead of monkeypatching its values.
             #   This is recommended by the docs and is more "correct", but it can cause a big slowdown on startup.
-            for path_entry, finder in sys.path_importer_cache.items():
+            for finder in sys.path_importer_cache.values():
                 if (finder is not None) and (finder.__class__ is FileFinder):
-                    sys.path_importer_cache[path_entry] = _DIFileFinder(path_entry, *_DI_LOADER_DETAILS)
+                    finder.__class__ = _DIFileFinder
 
         self._config_token = _current_config.set(self._config)
 
@@ -771,10 +758,10 @@ class ImportHookContext:
         except ValueError:
             pass
 
-        # Undo the replacements done by self.install().
-        for path_entry, finder in sys.path_importer_cache.items():
+        # Undo the patching done in self.install().
+        for finder in sys.path_importer_cache.values():
             if (finder is not None) and (finder.__class__ is _DIFileFinder):
-                sys.path_importer_cache[path_entry] = FileFinder(path_entry, *_ORIG_LOADER_DETAILS)
+                finder.__class__ = FileFinder
 
 
 import_hook = ImportHookContext
@@ -794,7 +781,7 @@ _ImportArgs: TypeAlias = "tuple[str, dict[str, t.Any], dict[str, t.Any], t.Optio
 
 
 #: What builtins.__import__ last pointed to.
-_original_import = contextvars.ContextVar("_original_import", default=builtins.__import__)
+_previous___import__ = contextvars.ContextVar("_previous___import__", default=builtins.__import__)
 
 #: Whether imports in import statements should be deferred.
 _is_deferred = contextvars.ContextVar[bool]("_is_deferred", default=False)
@@ -923,7 +910,7 @@ class _DIKey(str):
 
         # 1. Perform the original __import__ and pray.
         from_list = (from_name,) if (from_name is not None) else ()
-        module: types.ModuleType = _original_import.get()(imp_name, imp_globals, imp_locals, from_list, 0)
+        module: types.ModuleType = _previous___import__.get()(imp_name, imp_globals, imp_locals, from_list, 0)
 
         # 2. Create nested keys and proxies as needed in the resolved module.
         if self._di_submod_names:
@@ -968,20 +955,22 @@ def _deferred___import__(  # noqa: PLR0912
     fromlist: t.Optional[t.Sequence[str]] = None,
     level: int = 0,
 ) -> t.Any:
-    """An limited replacement for `__import__` that supports deferred imports by returning proxies."""
+    """An limited replacement for `__import__` that supports deferred imports by returning proxies.
 
-    # Preconditions:
-    # 1. Only invoked by syntactic import statements; cannot be called manually via __import__().
-    #     - Allows a stricter signature and less input validation because we have a more limited range of inputs and
-    #       can depend on the builtin parser to handle some validation, e.g. making sure level >= 0.
-    # 2. Only invoked within the context of "with _actual_until_use: ...".
-    #     - _is_deferred is set to True and thus _DIKey instances won't trigger resolution.
-    # 3. Only invoked by Python code that's been instrumented by our AST transformer.
-    #     - locals[_TEMP_ASNAMES] must exist as tuple[str | None, ...] | str | None.
+    Refer to `__import__` for more information on the expected arguments.
 
-    # Do minimal input validation on top of the parser's work.
-    # This is adapted and inlined from importlib.__import__() and importlib._bootstrap._sanity_check() since we don't
-    # need all of the checks and transformations.
+    Other preconditions:
+    1. Only invoked by syntactic import statements; cannot be called manually via `__import__`.
+        - Allows a stricter signature and less input validation because we have a more limited range of inputs and
+          can depend on the builtin parser to handle some validation, e.g. making sure level >= 0.
+    2. Only invoked within the context of ``with _actual_until_use: ...``.
+        - `_is_deferred` is set to True and thus `_DIKey` instances won't trigger resolution.
+    3. Only invoked by Python code that's been instrumented by our AST transformer.
+        - ``locals[_TEMP_ASNAMES]`` must exist as tuple[str | None, ...] | str | None.
+    """
+
+    # This minimal input validation and transformation is adapted and inlined from importlib.__import__() and
+    # importlib._bootstrap._sanity_check().
     if level > 0:  # pragma: no cover (tested in stdlib)
         package = _calc___package__(globals)
 
@@ -995,9 +984,9 @@ def _deferred___import__(  # noqa: PLR0912
 
         name = _resolve_name(name, package, level)
 
-    # asname exists as tuple[str | None, ...] when fromlist is populated, or as str | None otherwise.
+    # asname is a tuple[str | None, ...] when fromlist is populated, or a str | None otherwise.
     # Since we can't dependently annotate it that way, and annotating it as a union would require isinstance checks to
-    # satisfy the type checker, leaving it as Any "satisfies" the type checker with less runtime cost.
+    # satisfy the type checker later on, keeping it as Any "satisfies" the type checker with less runtime cost.
     asname: t.Any = locals[_TEMP_ASNAMES]
 
     if not fromlist:
@@ -1066,13 +1055,13 @@ class _DIContext:
 
     def __enter__(self, /) -> None:
         self._defer_ctx_token = _is_deferred.set(True)
-        self._import_ctx_token = _original_import.set(builtins.__import__)
+        self._import_ctx_token = _previous___import__.set(builtins.__import__)
         builtins.__import__ = _deferred___import__
 
-    def __exit__(self, *_dont_care: object) -> None:
-        _original_import.reset(self._import_ctx_token)
+    def __exit__(self, *exc_info: object) -> None:
+        _previous___import__.reset(self._import_ctx_token)
         _is_deferred.reset(self._defer_ctx_token)
-        builtins.__import__ = _original_import.get()
+        builtins.__import__ = _previous___import__.get()
 
 
 #: The context manager that replaces until_use after instrumentation.

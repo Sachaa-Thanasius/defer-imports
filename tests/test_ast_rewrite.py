@@ -85,11 +85,12 @@ def create_sample_module(path: Path, source: str, loader_type: type[Loader] = _D
     loader = loader_type(module_name, str(module_path))  # pyright: ignore [reportCallIssue]
     spec = importlib.util.spec_from_file_location(module_name, module_path, loader=loader)
     assert spec is not None
+
     spec.loader_state = {"defer_whole_module": False}
     module = importlib.util.module_from_spec(spec)
 
     if exec_mod:
-        # NOTE: Use spec.loader instead of loader because of potential create_module() side-effects.
+        # Use spec.loader instead of loader because of potential create_module() side-effects.
         assert spec.loader is not None
         spec.loader.exec_module(module)
 
@@ -670,6 +671,7 @@ with defer_imports.until_use:
         assert expected_my_signature_repr not in repr(vars(module))
         assert module.MySignature is sys.modules["inspect"].Signature
 
+    @pytest.mark.skipif(sys.dont_write_bytecode, reason="Bytecode caching is needed.")
     def test_deferred_header_in_instrumented_pycache(self, tmp_path: Path):
         """Test that the defer_imports-specific bytecode header is being prepended to the bytecode cache files of
         defer_imports-instrumented modules.
@@ -986,7 +988,7 @@ with defer_imports.until_use:
         exec(f"import {package_name}.patching; from {package_name}.b import B", vars(module))
         assert module.B == "original thing"
 
-    @pytest.mark.skipif(sys.version_info < (3, 12), reason="type statements are only valid in 3.12+")
+    @pytest.mark.skipif(sys.version_info < (3, 12), reason="type statements are only valid in 3.12+.")
     def test_3_12_type_statement(self, tmp_path: Path):
         """Test that a proxy within a type statement doesn't resolve until accessed via .__value__."""
 

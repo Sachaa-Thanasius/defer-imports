@@ -1,6 +1,5 @@
 # Some of the code and comments below is adapted from
-# https://github.com/python/cpython/blob/49234c065cf2b1ea32c5a3976d834b1d07b9b831/Lib/importlib/_bootstrap.py
-# and https://github.com/python/cpython/blob/49234c065cf2b1ea32c5a3976d834b1d07b9b831/Lib/importlib/util.py
+# https://github.com/python/cpython/blob/49234c065cf2b1ea32c5a3976d834b1d07b9b831/Lib/importlib/util.py
 # with the original copyright being:
 # Copyright (c) 2001 Python Software Foundation; All Rights Reserved
 #
@@ -10,11 +9,9 @@
 
 from __future__ import annotations
 
-import _imp
 import sys
 import threading
 import types
-import warnings
 from importlib.machinery import ModuleSpec, SourceFileLoader
 
 
@@ -50,11 +47,19 @@ else:  # pragma: <3.11 cover
         """Placeholder for typing.Self."""
 
 
+if TYPE_CHECKING:
+    from _typeshed.importlib import MetaPathFinderProtocol
+else:
+
+    class MetaPathFinderProtocol:
+        """Placeholder for _typeshed.importlib.MetaPathFinderProtocol."""
+
+
 # endregion
 
 
 # ============================================================================
-# region -------- Module loader and finder --------
+# region -------- Module loader --------
 #
 # Much of this is adapted from standard library modules to avoid depending on
 # private APIs and allow changes.
@@ -174,13 +179,13 @@ class _LazyModuleType(types.ModuleType):
 #     a. This may cause issues when this module is used in emscripten or wasi.
 #     b. This may cause issues when this module is used with gevent.
 # - Do some slight personalization.
-class _LazyLoader(Loader):
+class LazyLoader(Loader):
     """A loader that creates a module which defers loading until attribute access."""
 
     # PYUPDATE: py3.12 - Use an accurate protocol instead of Loader in the annotations of these duck-typed methods.
 
     @staticmethod
-    def __check_eager_loader(loader: t.Union[Loader, type[Loader]]) -> None:
+    def __check_eager_loader(loader: object) -> None:
         if not hasattr(loader, "exec_module"):
             msg = "loader must define exec_module()"
             raise TypeError(msg)
@@ -221,106 +226,53 @@ class _LazyLoader(Loader):
         module.__class__ = _LazyModuleType
 
 
-# NOTE: We depend on the global import lock being reentrant.
-# Adapted from importlib._bootstrap.
-class _ImportLockContext:
-    """Context manager for the import lock."""
-
-    def __enter__(self, /) -> None:
-        """Acquire the import lock."""
-
-        _imp.acquire_lock()
-
-    def __exit__(self, *_dont_care: object) -> None:
-        """Release the import lock regardless of any raised exceptions."""
-
-        _imp.release_lock()
+# endregion
 
 
-# Adapted from importlib._bootstrap._find_spec.
-# Changes:
-# - Backport bugfixes (gh-130094).
-# - Skip _LazyFinder when trying finders on sys.meta_path.
-def _find_spec_without_lazyfinder(  # noqa: PLR0912
-    name: str,
-    path: t.Optional[t.Sequence[str]],
-    target: t.Optional[types.ModuleType] = None,
-) -> t.Optional[ModuleSpec]:  # pragma: no cover (mostly tested in stdlib)
-    """Find a module's spec.
-
-    Ignore the presence of `_LazyFinder` on `sys.meta_path`.
-    """
-
-    meta_path = sys.meta_path
-    if meta_path is None:  # pyright: ignore [reportUnnecessaryComparison]
-        # PyImport_Cleanup() is running or has been called.
-        msg = "sys.meta_path is None, Python is likely shutting down"
-        raise ImportError(msg)
-
-    # gh-130094: Copy sys.meta_path so that we have a consistent view of the
-    # list while iterating over it.
-    meta_path = list(meta_path)
-    if not meta_path:
-        warnings.warn("sys.meta_path is empty", ImportWarning)  # noqa: B028
-
-    # We check sys.modules here for the reload case.  While a passed-in
-    # target will usually indicate a reload there is no guarantee, whereas
-    # sys.modules provides one.
-    is_reload = name in sys.modules
-    for finder in meta_path:
-        # NOTE: Just skip _LazyFinder.
-        if finder is _LazyFinder:
-            continue
-
-        with _ImportLockContext():
-            try:
-                find_spec = finder.find_spec
-            except AttributeError:
-                continue
-            else:
-                spec = find_spec(name, path, target)
-
-        if spec is not None:
-            # The parent import may have already imported this module.
-            if not is_reload and name in sys.modules:
-                module = sys.modules[name]
-                try:
-                    __spec__ = module.__spec__
-                except AttributeError:
-                    # We use the found spec since that is the one that
-                    # we would have used if the parent module hadn't
-                    # beaten us to the punch.
-                    return spec
-                else:
-                    if __spec__ is None:
-                        return spec
-                    else:
-                        return __spec__
-            else:
-                return spec
-
-    return None
+# ============================================================================
+# region -------- Module finder --------
+# ============================================================================
 
 
 class _LazyFinder:
-    """A finder that wraps loaders for source modules with `_LazyLoader`."""
+    """A finder that wraps loaders with `_LazyLoader` for source module specs."""
 
-    @classmethod
+    def __init__(self, finder: MetaPathFinderProtocol) -> None:
+        if not hasattr(finder, "find_spec"):
+            msg = "finder must define find_spec()"
+            raise TypeError(msg)
+
+        object.__setattr__(self, "_finder", finder)
+
     def find_spec(
-        cls,
+        self,
         name: str,
         path: t.Optional[t.Sequence[str]] = None,
         target: t.Optional[types.ModuleType] = None,
     ) -> t.Optional[ModuleSpec]:
-        spec = _find_spec_without_lazyfinder(name, path, target)
+        spec = self._finder.find_spec(name, path, target)
 
-        # Skip being lazy for non-source modules to avoid issues with extension modules having
-        # uninitialized state, especially since loading can't currently be triggered by PyModule_GetState.
+        # Only be lazy for source modules to avoid issues with extension modules having uninitialized state,
+        # especially since loading can't currently be triggered by the C APIs that interact with that state,
+        # e.g. PyModule_GetState.
         # Ref: https://github.com/python/cpython/issues/85963
         if (spec is not None) and ((loader := spec.loader) is not None) and isinstance(loader, SourceFileLoader):
-            spec.loader = _LazyLoader(loader)
+            spec.loader = LazyLoader(loader)
 
         return spec
+
+    def __getattribute__(self, name: str, /) -> t.Any:
+        if name in {"_finder", "find_spec"}:
+            return object.__getattribute__(self, name)
+
+        original_finder = object.__getattribute__(self, "_finder")
+        return getattr(original_finder, name)
+
+    def __setattr__(self, name: str, value: t.Any, /) -> None:
+        return setattr(self._finder, name, value)
+
+    def __delattr__(self, name: str, /) -> None:
+        return delattr(self._finder, name)
 
 
 #: A lock for preventing our code from data-racing itself when modifying sys.meta_path.
@@ -332,14 +284,15 @@ class _LazyFinderContext:
 
     def __enter__(self, /) -> None:
         with _meta_path_lock:
-            sys.meta_path.insert(0, _LazyFinder)
+            for i, finder in enumerate(sys.meta_path):
+                if not isinstance(finder, _LazyFinder):
+                    sys.meta_path[i] = _LazyFinder(finder)
 
-    def __exit__(self, *_dont_care: object) -> None:
-        try:
-            with _meta_path_lock:
-                sys.meta_path.remove(_LazyFinder)
-        except ValueError:
-            warnings.warn("_LazyFinder unexpectedly missing from sys.meta_path", ImportWarning, stacklevel=2)
+    def __exit__(self, *exc_info: object) -> None:
+        with _meta_path_lock:
+            for i, finder in enumerate(sys.meta_path):
+                if isinstance(finder, _LazyFinder):
+                    sys.meta_path[i] = finder._finder
 
 
 # Ensure our type annotations are valid if evaluated at runtime.
@@ -351,7 +304,7 @@ with _LazyFinderContext():
 
 
 until_module_use: t.Final[_LazyFinderContext] = _LazyFinderContext()
-"""A context manager within which some imports of modules will occur "lazily".
+"""A context manager within which some imports of modules will occur "lazily". Not re-entrant.
 
 Caveats:
 - The modules being imported must be written in pure Python. Anything else will be imported eagerly.
