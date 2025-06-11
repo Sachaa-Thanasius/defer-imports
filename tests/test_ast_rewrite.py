@@ -120,6 +120,12 @@ def create_sample_package(path: Path, package_name: str, dir_contents: NestedMap
     return module
 
 
+def normalize_ws(text: str) -> str:
+    """Remove empty lines and normalize line endings to "\\n"."""
+
+    return "\n".join(filter(str.strip, text.splitlines()))
+
+
 def test_path_hook_installation():
     """Test the API for putting/removing the defer_imports path hook on/from sys.path_hooks."""
 
@@ -294,7 +300,7 @@ with defer_imports.until_use:
         new_tree = transformer.visit(ast.parse(source))
         actual_rewrite = ast.unparse(new_tree)
 
-        assert actual_rewrite == expected_rewrite
+        assert normalize_ws(actual_rewrite) == normalize_ws(expected_rewrite)
 
     @pytest.mark.parametrize(
         ("source", "expected_rewrite"),
@@ -460,11 +466,7 @@ import bar
         new_tree = transformer.visit(ast.parse(source))
         actual_rewrite = ast.unparse(new_tree)
 
-        # We can't and shouldn't depend on ast.unparse() matching our expected whitespace.
-        actual_no_empty_lines = "\n".join(filter(str.strip, actual_rewrite.splitlines()))
-        expected_no_empty_lines = "\n".join(filter(str.strip, expected_rewrite.splitlines()))
-
-        assert actual_no_empty_lines == expected_no_empty_lines
+        assert normalize_ws(actual_rewrite) == normalize_ws(expected_rewrite)
 
 
 @pytest.mark.usefixtures("preserve_sys_modules")

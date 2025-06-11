@@ -956,10 +956,24 @@ def _deferred___import__(  # noqa: PLR0912
 ) -> t.Any:
     """An limited replacement for `__import__` that supports deferred imports by returning proxies.
 
-    Should only be invoked via ``import`` statements.
+    Should only be invoked by ``import`` statements.
 
     Refer to `__import__` for more information on the expected arguments.
     """
+
+    # Ensure _DIKey instances won't resolve while we're creating/examining them in here.
+    if not _is_deferred.get():
+        msg = "attempted deferred import outside the context of a ``with defer_imports.until_use: ...`` block"
+        raise ImportError(msg)
+
+    # asname is a tuple[str | None, ...] when fromlist is populated, or a str | None otherwise.
+    # Since we can't dependently annotate it that way, and annotating it as a union would require isinstance checks to
+    # satisfy the type checker later on, keeping it as Any "satisfies" the type checker with less runtime cost.
+    try:
+        asname: t.Any = locals[_TEMP_ASNAMES]
+    except KeyError:
+        msg = "attempted deferred import in module not instrumented by defer_imports"
+        raise ImportError(msg) from None
 
     # Depend on the parser for some input validation of import statements. It should ensure that fromlist is all
     # strings, level >= 0, that kind of thing. The remaining validation and transformation below is adapted from
@@ -976,20 +990,6 @@ def _deferred___import__(  # noqa: PLR0912
             raise ImportError(msg)
 
         name = _resolve_name(name, package, level)
-
-    # Ensure _DIKey instances won't resolve while we're creating/examining them in here.
-    if not _is_deferred.get():
-        msg = "attempted deferred import outside the context of a ``with defer_imports.until_use: ...`` block"
-        raise ImportError(msg)
-
-    # asname is a tuple[str | None, ...] when fromlist is populated, or a str | None otherwise.
-    # Since we can't dependently annotate it that way, and annotating it as a union would require isinstance checks to
-    # satisfy the type checker later on, keeping it as Any "satisfies" the type checker with less runtime cost.
-    try:
-        asname: t.Any = locals[_TEMP_ASNAMES]
-    except KeyError:
-        msg = "attempted deferred import in module not instrumented by defer_imports"
-        raise ImportError(msg) from None
 
     if not fromlist:
         if asname:
