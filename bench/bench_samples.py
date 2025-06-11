@@ -120,7 +120,7 @@ def main() -> None:
     parser.add_argument(
         "--exec-order",
         action="extend",
-        nargs=4,
+        nargs=len(default_exec_order),
         choices=default_exec_order,
         type=str,
         help="The order in which the influenced (or not influenced) imports are run",

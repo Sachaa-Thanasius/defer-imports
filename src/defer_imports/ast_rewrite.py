@@ -655,8 +655,7 @@ class _DIFileFinder(FileFinder):
             config = _current_config.get()
             spec.loader_state = {"defer_whole_module": self._is_full_module_rewrite(config, fullname)}
 
-            # If this finder was created via our singleton path hook, the super call above should only return specs with
-            # _DIFileLoader as the loader. However, the finders patched in import_hook.install() are a different story.
+            # NOTE: The finders patched in import_hook.install() won't return a spec with a _DIFileLoader loader.
             # Account for those with a very specific check so that we don't override user-defined loaders.
             if loader.__class__ is SourceFileLoader:
                 spec.loader = _DIFileLoader(loader.name, loader.path)  # pyright: ignore [reportUnknownMemberType, reportAttributeAccessIssue]
@@ -957,20 +956,14 @@ def _deferred___import__(  # noqa: PLR0912
 ) -> t.Any:
     """An limited replacement for `__import__` that supports deferred imports by returning proxies.
 
-    Refer to `__import__` for more information on the expected arguments.
+    Should only be invoked via ``import`` statements.
 
-    Other preconditions:
-    1. Only invoked by syntactic import statements; cannot be called manually via `__import__`.
-        - Allows a stricter signature and less input validation because we have a more limited range of inputs and
-          can depend on the builtin parser to handle some validation, e.g. making sure level >= 0.
-    2. Only invoked within the context of ``with _actual_until_use: ...``.
-        - `_is_deferred` is set to True and thus `_DIKey` instances won't trigger resolution.
-    3. Only invoked by Python code that's been instrumented by our AST transformer.
-        - ``locals[_TEMP_ASNAMES]`` must exist as tuple[str | None, ...] | str | None.
+    Refer to `__import__` for more information on the expected arguments.
     """
 
-    # This minimal input validation and transformation is adapted and inlined from importlib.__import__() and
-    # importlib._bootstrap._sanity_check().
+    # Depend on the parser for some input validation of import statements. It should ensure that fromlist is all
+    # strings, level >= 0, that kind of thing. The remaining validation and transformation below is adapted from
+    # importlib.__import__() and importlib._bootstrap._sanity_check().
     if level > 0:  # pragma: no cover (tested in stdlib)
         package = _calc___package__(globals)
 
@@ -984,10 +977,19 @@ def _deferred___import__(  # noqa: PLR0912
 
         name = _resolve_name(name, package, level)
 
+    # Ensure _DIKey instances won't resolve while we're creating/examining them in here.
+    if not _is_deferred.get():
+        msg = "attempted deferred import outside the context of a ``with defer_imports.until_use: ...`` block"
+        raise ImportError(msg)
+
     # asname is a tuple[str | None, ...] when fromlist is populated, or a str | None otherwise.
     # Since we can't dependently annotate it that way, and annotating it as a union would require isinstance checks to
     # satisfy the type checker later on, keeping it as Any "satisfies" the type checker with less runtime cost.
-    asname: t.Any = locals[_TEMP_ASNAMES]
+    try:
+        asname: t.Any = locals[_TEMP_ASNAMES]
+    except KeyError:
+        msg = "attempted deferred import in module not instrumented by defer_imports"
+        raise ImportError(msg) from None
 
     if not fromlist:
         if asname:
