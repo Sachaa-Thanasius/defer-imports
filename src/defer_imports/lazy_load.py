@@ -55,6 +55,27 @@ else:
         """Placeholder for _typeshed.importlib.MetaPathFinderProtocol."""
 
 
+if TYPE_CHECKING:
+    import typing as _typing
+
+    _final = _typing.final
+else:
+
+    def final(f: object) -> object:  # pragma: no cover (tested in stdlib)
+        """Decorator to indicate final methods and final classes."""
+        try:
+            f.__final__ = True
+        except (AttributeError, TypeError):
+            # Skip the attribute silently if it is not writable.
+            # AttributeError happens if the object has __slots__ or a
+            # read-only property, TypeError if it's a builtin class.
+            pass
+        return f
+
+    _final = final
+    del final
+
+
 # endregion
 
 
@@ -275,12 +296,30 @@ class _LazyFinder:
         return delattr(self._finder, name)
 
 
+# endregion
+
+
 #: A lock for preventing our code from data-racing itself when modifying sys.meta_path.
 _meta_path_lock = threading.Lock()
 
 
-class _LazyFinderContext:
-    """The type of `defer_imports.until_module_use`. Should not be manually constructed."""
+@_final
+class LazyFinderContext:
+    """A context manager within which some imports of modules will occur "lazily". Not re-entrant.
+
+    Caveats:
+    - The modules being imported must be written in pure Python. Anything else will be imported eagerly.
+    - ``from`` imports may be evaluated eagerly.
+    - In a nested import such as ``import a.b.c``, only ``c`` will be lazily imported. ``a`` and ``a.b`` will be eagerly
+    imported. This may change in the future.
+    - Modules that perform their own import hacks might not cooperate with this. For instance, at one point, `collections`
+    put `collections.abc` in `sys.modules` in an unusual way at import time, so attempting to lazy-load `collections.abc`
+    would just break.
+    """
+
+    def __init_subclass__(cls, *args: object, **kwargs: object) -> t.NoReturn:
+        msg = f"Type {cls.__name__!r} is not an acceptable base type."
+        raise TypeError(msg)
 
     def __enter__(self, /) -> None:
         with _meta_path_lock:
@@ -295,23 +334,9 @@ class _LazyFinderContext:
                     sys.meta_path[i] = finder._finder
 
 
+until_module_use = LazyFinderContext
+
+
 # Ensure our type annotations are valid if evaluated at runtime.
-with _LazyFinderContext():
+with until_module_use():
     import typing as t
-
-
-# endregion
-
-
-until_module_use: t.Final[_LazyFinderContext] = _LazyFinderContext()
-"""A context manager within which some imports of modules will occur "lazily". Not re-entrant.
-
-Caveats:
-- The modules being imported must be written in pure Python. Anything else will be imported eagerly.
-- ``from`` imports may be evaluated eagerly.
-- In a nested import such as ``import a.b.c``, only ``c`` will be lazily imported. ``a`` and ``a.b`` will be eagerly
-  imported. This may change in the future.
-- Modules that perform their own import hacks might not cooperate with this. For instance, at one point, `collections`
-  put `collections.abc` in `sys.modules` in an unusual way at import time, so attempting to lazy-load `collections.abc`
-  would just break.
-"""

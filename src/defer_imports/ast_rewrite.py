@@ -20,9 +20,10 @@ from importlib.machinery import BYTECODE_SUFFIXES, SOURCE_SUFFIXES, FileFinder, 
 from . import __version__, lazy_load as _lazy_load
 
 
-with _lazy_load.until_module_use:
+with _lazy_load.until_module_use():
     import collections
     import io
+    import itertools
     import os
     import threading
     import tokenize
@@ -251,9 +252,8 @@ def _get_joined_source_lines(source: str, node: _ASTWithLocation) -> t.Optional[
 
     # Split a string into lines while ignoring form feed and other chars.
     # This mimics how the Python parser splits source code.
-    # NOTE: We could use itertools.islice() here to avoid materializing a potentially much larger list of lines.
     with io.StringIO(source, newline=None) as source_buffer:
-        return "".join(list(source_buffer)[lineno : end_lineno + 1])
+        return "".join(itertools.islice(source_buffer, lineno, end_lineno + 1))
 
 
 def _get_syntax_context(filepath: _ModulePath, source: _SourceData, node: _ASTWithLocation) -> _SyntaxContext:
@@ -362,17 +362,17 @@ class _ImportsInstrumenter(ast.NodeTransformer):
         for field, old_value in ast.iter_fields(node):
             if isinstance(old_value, list):
                 new_values: list[t.Any] = []
-                start_idx = 0
+                imports_counter = 0
 
                 for value in old_value:  # pyright: ignore [reportUnknownVariableType]
                     if isinstance(value, ast.AST):
                         # DI addition: This if block.
                         if self.rewrite_whole_module:
                             if self._is_instrumentable_import(value):
-                                start_idx += 1
-                            elif start_idx > 0:
-                                new_values[-start_idx:] = [self._wrap_imports_list(new_values[-start_idx:])]
-                                start_idx = 0
+                                imports_counter += 1
+                            elif imports_counter > 0:
+                                new_values[-imports_counter:] = [self._wrap_imports_list(new_values[-imports_counter:])]
+                                imports_counter = 0
 
                         value = self.visit(value)  # noqa: PLW2901
 
@@ -385,8 +385,8 @@ class _ImportsInstrumenter(ast.NodeTransformer):
                     new_values.append(value)
 
                 # DI addition: This if block.
-                if self.rewrite_whole_module and start_idx > 0:
-                    new_values[-start_idx:] = [self._wrap_imports_list(new_values[-start_idx:])]
+                if self.rewrite_whole_module and imports_counter > 0:
+                    new_values[-imports_counter:] = [self._wrap_imports_list(new_values[-imports_counter:])]
 
                 old_value[:] = new_values
 
@@ -596,10 +596,9 @@ class _DIFileLoader(SourceFileLoader):
 
         return super().set_data(path, data, _mode=_mode)
 
-    # NOTE: We're purposefully not supporting data being an AST object, as that's not the use case for this method.
-    # NOTE: The signatures of SourceFileLoader.source_to_code at runtime and in typeshed aren't currently consistent.
-    # Ref: https://github.com/python/typeshed/pull/13880
+    # NOTE: In 3.12+, the path parameter should only accept bytes, not any buffer.
     # Ref: https://github.com/python/typeshed/issues/13881
+    # NOTE: We're purposefully not supporting data being an AST object, as that's not the use case for this method.
     def source_to_code(self, data: _SourceData, path: _ModulePath, *, _optimize: int = -1) -> types.CodeType:  # pyright: ignore [reportIncompatibleMethodOverride]
         """Compile the source `data` into a code object, possibly instrumenting it along the way.
 
@@ -610,16 +609,16 @@ class _DIFileLoader(SourceFileLoader):
         """
 
         if not data:
-            return super().source_to_code(data, path, _optimize=_optimize)  # pyright: ignore [reportUnknownVariableType, reportCallIssue]
+            return super().source_to_code(data, path, _optimize=_optimize)
 
-        orig_tree = compile(data, path, "exec", flags=ast.PyCF_ONLY_AST, dont_inherit=True, optimize=_optimize)
+        orig_tree: ast.Module = compile(data, path, "exec", ast.PyCF_ONLY_AST, dont_inherit=True, optimize=_optimize)
 
         if not (self.defer_whole_module or any(map(_is_until_use_node, _walk_globals(orig_tree)))):
-            return super().source_to_code(orig_tree, path, _optimize=_optimize)  # pyright: ignore [reportUnknownVariableType, reportCallIssue]
+            return super().source_to_code(orig_tree, path, _optimize=_optimize)
 
         instrumenter = _ImportsInstrumenter(data, path, whole_module=self.defer_whole_module)
         new_tree = instrumenter.visit(orig_tree)
-        return super().source_to_code(new_tree, path, _optimize=_optimize)  # pyright: ignore [reportUnknownVariableType, reportCallIssue]
+        return super().source_to_code(new_tree, path, _optimize=_optimize)
 
     def create_module(self, spec: ModuleSpec) -> t.Optional[types.ModuleType]:
         """Use default semantics for module creation."""
@@ -801,7 +800,10 @@ else:  # pragma: cpython no cover
 
 
 def _handle_import_key(import_name: str, nmsp: dict[str, t.Any], start_idx: int = 0, /) -> None:
-    # Precondition: import_name is a dotted name.
+    """Ensure that a dotted import name (e.g., "a.b.c") is represented as a chain of deferred proxies
+    in the target namespace.
+    """
+
     # NOTE: We can't use setattr() on modules directly because PyPy normalizes the attr key type to `str` in setattr().
     # Instead, we assign into the module dict.
 
@@ -995,7 +997,7 @@ def _deferred___import__(  # noqa: PLR0912
         if asname:
             if "." in name:
                 # Case 1: import a.b as c
-                # NOTE: Pretending it's a "from" import is cheaper than the alternative.
+                # NOTE: Treating it as a "from" import is cheaper than the alternative.
                 parent_name, _, submod_name = name.rpartition(".")
                 locals[_DIKey(asname, (parent_name, globals, locals, submod_name))] = None
                 result = _DIProxy(parent_name)
@@ -1025,7 +1027,6 @@ def _deferred___import__(  # noqa: PLR0912
                 # Case 4: import a
                 locals[_DIKey(name, (name, globals, locals, None))] = None
                 result = _DIProxy(name)
-
     else:
         # Case 5: from ... import ... [as ...]
         from_asname: str | None
@@ -1038,7 +1039,7 @@ def _deferred___import__(  # noqa: PLR0912
 
 
 class _DIContext:
-    """A context manager within which imports occur lazily. Not reentrant. Use via `defer_imports.until_use`.
+    """A context manager within which imports occur lazily. Not re-entrant. Use via `defer_imports.until_use`.
 
     If defer_imports isn't set up properly, e.g. `import_hook().install()` is not called first elsewhere, this should be
     a no-op equivalent to `contextlib.nullcontext`.

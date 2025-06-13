@@ -290,7 +290,7 @@ sys.modules[__name__].__class__ = ImmutableModule
                     self.exc = exc
 
         def find_spec():
-            with until_module_use:
+            with until_module_use():
                 return importlib.util.find_spec("inspect")
 
         threads: list[RaisingThread] = []
@@ -341,12 +341,12 @@ class TestLazyFinder:
         sys.modules.pop("inspect", None)
 
         # Lazily imported.
-        with until_module_use:
+        with until_module_use():
             import inspect
         assert object.__getattribute__(inspect, "__class__") is _LazyModuleType
 
         # When lazily imported again, still unloaded.
-        with until_module_use:
+        with until_module_use():
             import inspect
         assert object.__getattribute__(inspect, "__class__") is _LazyModuleType
 
