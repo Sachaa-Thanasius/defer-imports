@@ -1,18 +1,9 @@
-# Some of the code and comments below is adapted from
-# https://github.com/python/cpython/blob/49234c065cf2b1ea32c5a3976d834b1d07b9b831/Lib/importlib/util.py
-# with the original copyright being:
-# Copyright (c) 2001 Python Software Foundation; All Rights Reserved
-#
-# The license in its original form may be found at
-# https://github.com/python/cpython/blob/49234c065cf2b1ea32c5a3976d834b1d07b9b831/LICENSE
-# and in this repository at ``LICENSE_cpython``.
-
 from __future__ import annotations
 
-import sys
-import threading
-import types
-from importlib.machinery import ModuleSpec, SourceFileLoader
+import sys as _sys
+import threading as _threading
+import types as _types
+from importlib.machinery import ModuleSpec as _ModuleSpec, SourceFileLoader as _SourceFileLoader
 
 
 __all__ = ("until_module_use",)
@@ -28,31 +19,37 @@ TYPE_CHECKING = False
 
 # importlib.abc.Loader changed location in 3.10 to become cheaper to import,
 # but importlib.abc became cheap again in 3.14.
-if TYPE_CHECKING or sys.version_info >= (3, 14):  # pragma: >=3.14 cover
-    from importlib.abc import Loader
+if TYPE_CHECKING or _sys.version_info >= (3, 14):  # pragma: >=3.14 cover
+    from importlib.abc import Loader as _Loader
 else:
     try:  # pragma: >=3.10 cover
-        from importlib._abc import Loader
+        from importlib._abc import Loader as _Loader
     except ImportError:  # pragma: <3.10 cover
-        from importlib.abc import Loader
+        from importlib.abc import Loader as _Loader
 
 
 if TYPE_CHECKING:
-    from typing_extensions import Self
-elif sys.version_info >= (3, 11):  # pragma: >=3.11 cover
-    Self: t.TypeAlias = "t.Self"
+    from typing_extensions import Self as _Self
+elif _sys.version_info >= (3, 11):  # pragma: >=3.11 cover
+    _Self: _t.TypeAlias = "_t.Self"
 else:  # pragma: <3.11 cover
 
     class Self:
         """Placeholder for typing.Self."""
 
+    _Self = Self
+    del Self
+
 
 if TYPE_CHECKING:
-    from _typeshed.importlib import MetaPathFinderProtocol
+    from _typeshed.importlib import MetaPathFinderProtocol as _MetaPathFinderProtocol
 else:
 
     class MetaPathFinderProtocol:
         """Placeholder for _typeshed.importlib.MetaPathFinderProtocol."""
+
+    _MetaPathFinderProtocol = MetaPathFinderProtocol
+    del MetaPathFinderProtocol
 
 
 if TYPE_CHECKING:
@@ -83,10 +80,24 @@ else:
 # region -------- Module loader --------
 #
 # Much of this is adapted from standard library modules to avoid depending on
-# private APIs and allow changes.
+# private APIs and/or allow changes.
 #
 # PYUPDATE: Ensure these are consistent with upstream, aside from our
 # customizations.
+#
+# License info
+# ------------
+# The original sources are
+# https://github.com/python/cpython/blob/49234c065cf2b1ea32c5a3976d834b1d07b9b831/Lib/importlib/util.py
+# with the original copyright being:
+# Copyright (c) 2001 Python Software Foundation; All Rights Reserved
+#
+# The license in its original form may be found at
+# https://github.com/python/cpython/blob/49234c065cf2b1ea32c5a3976d834b1d07b9b831/LICENSE
+# and in this repository at ``LICENSE_cpython``.
+#
+# If any changes are made to the adapted constructs, a short summary of those
+# changes accompanies their definitions.
 # ============================================================================
 
 
@@ -96,13 +107,13 @@ else:
 #   machinery.
 # - Adjust method signatures slightly to be more in line with ModuleType's.
 # - Do some slight personalization.
-class _LazyModuleType(types.ModuleType):
+class _LazyModuleType(_types.ModuleType):
     """A subclass of the module type which triggers loading upon attribute access."""
 
-    def __getattribute__(self, name: str, /) -> t.Any:
+    def __getattribute__(self, name: str, /) -> _t.Any:
         """Trigger the load of the module and return the attribute."""
 
-        __spec__: ModuleSpec = object.__getattribute__(self, "__spec__")
+        __spec__: _ModuleSpec = object.__getattribute__(self, "__spec__")
 
         # HACK: Prevent internal import machinery from triggering the load early, but with a tradeoff.
         #
@@ -144,7 +155,7 @@ class _LazyModuleType(types.ModuleType):
                     return __class__.__getattribute__(self, name)
                 loader_state["is_loading"] = True
 
-                __dict__: dict[str, t.Any] = __class__.__getattribute__(self, "__dict__")
+                __dict__: dict[str, _t.Any] = __class__.__getattribute__(self, "__dict__")
 
                 # All module metadata must be gathered from __spec__ in order to avoid
                 # using mutated values.
@@ -154,7 +165,7 @@ class _LazyModuleType(types.ModuleType):
 
                 # Figure out exactly what attributes were mutated between the creation
                 # of the module and now.
-                attrs_then: dict[str, t.Any] = loader_state["__dict__"]
+                attrs_then: dict[str, _t.Any] = loader_state["__dict__"]
                 attrs_now = __dict__
                 attrs_updated = {
                     key: value
@@ -169,7 +180,7 @@ class _LazyModuleType(types.ModuleType):
 
                 # If exec_module() was used directly there is no guarantee the module
                 # object was put into sys.modules.
-                original_mod = sys.modules.get(original_name, None)
+                original_mod = _sys.modules.get(original_name, None)
                 if (original_mod is not None) and (self is not original_mod):
                     msg = f"module object for {original_name!r} substituted in sys.modules during a lazy load"
                     raise ValueError(msg)
@@ -200,7 +211,7 @@ class _LazyModuleType(types.ModuleType):
 #     a. This may cause issues when this module is used in emscripten or wasi.
 #     b. This may cause issues when this module is used with gevent.
 # - Do some slight personalization.
-class LazyLoader(Loader):
+class LazyLoader(_Loader):
     """A loader that creates a module which defers loading until attribute access."""
 
     # PYUPDATE: py3.12 - Use an accurate protocol instead of Loader in the annotations of these duck-typed methods.
@@ -212,20 +223,20 @@ class LazyLoader(Loader):
             raise TypeError(msg)
 
     @classmethod
-    def factory(cls, loader: type[Loader]) -> t.Callable[..., Self]:
+    def factory(cls, loader: type[_Loader]) -> _t.Callable[..., _Self]:
         """Construct a callable which returns the eager loader made lazy."""
 
         cls.__check_eager_loader(loader)
         return lambda *args, **kwargs: cls(loader(*args, **kwargs))
 
-    def __init__(self, loader: Loader) -> None:
+    def __init__(self, loader: _Loader) -> None:
         self.__check_eager_loader(loader)
         self.loader = loader
 
-    def create_module(self, spec: ModuleSpec) -> t.Optional[types.ModuleType]:
+    def create_module(self, spec: _ModuleSpec) -> _t.Optional[_types.ModuleType]:
         return self.loader.create_module(spec)
 
-    def exec_module(self, module: types.ModuleType) -> None:
+    def exec_module(self, module: _types.ModuleType) -> None:
         """Make the module load lazily."""
 
         assert module.__spec__ is not None, "The module should have been initialized with a spec."
@@ -240,7 +251,7 @@ class LazyLoader(Loader):
         loader_state = {
             "__dict__": module.__dict__.copy(),
             "__class__": module.__class__,
-            "lock": threading.RLock(),
+            "lock": _threading.RLock(),
             "is_loading": False,
         }
         module.__spec__.loader_state = loader_state
@@ -256,9 +267,9 @@ class LazyLoader(Loader):
 
 
 class _LazyFinder:
-    """A finder that wraps loaders with `_LazyLoader` for source module specs."""
+    """A finder that uses `_LazyLoader` to wrap loaders of source module specs."""
 
-    def __init__(self, finder: MetaPathFinderProtocol) -> None:
+    def __init__(self, finder: _MetaPathFinderProtocol) -> None:
         if not hasattr(finder, "find_spec"):
             msg = "finder must define find_spec()"
             raise TypeError(msg)
@@ -268,28 +279,28 @@ class _LazyFinder:
     def find_spec(
         self,
         name: str,
-        path: t.Optional[t.Sequence[str]] = None,
-        target: t.Optional[types.ModuleType] = None,
-    ) -> t.Optional[ModuleSpec]:
+        path: _t.Optional[_t.Sequence[str]] = None,
+        target: _t.Optional[_types.ModuleType] = None,
+    ) -> _t.Optional[_ModuleSpec]:
         spec = self._finder.find_spec(name, path, target)
 
         # Only be lazy for source modules to avoid issues with extension modules having uninitialized state,
         # especially since loading can't currently be triggered by the C APIs that interact with that state,
         # e.g. PyModule_GetState.
         # Ref: https://github.com/python/cpython/issues/85963
-        if (spec is not None) and ((loader := spec.loader) is not None) and isinstance(loader, SourceFileLoader):
+        if (spec is not None) and ((loader := spec.loader) is not None) and isinstance(loader, _SourceFileLoader):
             spec.loader = LazyLoader(loader)
 
         return spec
 
-    def __getattribute__(self, name: str, /) -> t.Any:
+    def __getattribute__(self, name: str, /) -> _t.Any:
         if name in {"_finder", "find_spec"}:
             return object.__getattribute__(self, name)
 
         original_finder = object.__getattribute__(self, "_finder")
         return getattr(original_finder, name)
 
-    def __setattr__(self, name: str, value: t.Any, /) -> None:
+    def __setattr__(self, name: str, value: _t.Any, /) -> None:
         return setattr(self._finder, name, value)
 
     def __delattr__(self, name: str, /) -> None:
@@ -300,7 +311,7 @@ class _LazyFinder:
 
 
 #: A lock for preventing our code from data-racing itself when modifying sys.meta_path.
-_meta_path_lock = threading.Lock()
+_meta_path_lock = _threading.Lock()
 
 
 @_final
@@ -317,21 +328,21 @@ class LazyFinderContext:
     would just break.
     """
 
-    def __init_subclass__(cls, *args: object, **kwargs: object) -> t.NoReturn:
+    def __init_subclass__(cls, *args: object, **kwargs: object) -> _t.NoReturn:
         msg = f"Type {cls.__name__!r} is not an acceptable base type."
         raise TypeError(msg)
 
     def __enter__(self, /) -> None:
         with _meta_path_lock:
-            for i, finder in enumerate(sys.meta_path):
+            for i, finder in enumerate(_sys.meta_path):
                 if not isinstance(finder, _LazyFinder):
-                    sys.meta_path[i] = _LazyFinder(finder)
+                    _sys.meta_path[i] = _LazyFinder(finder)
 
     def __exit__(self, *exc_info: object) -> None:
         with _meta_path_lock:
-            for i, finder in enumerate(sys.meta_path):
+            for i, finder in enumerate(_sys.meta_path):
                 if isinstance(finder, _LazyFinder):
-                    sys.meta_path[i] = finder._finder
+                    _sys.meta_path[i] = finder._finder
 
 
 until_module_use = LazyFinderContext
@@ -339,4 +350,4 @@ until_module_use = LazyFinderContext
 
 # Ensure our type annotations are valid if evaluated at runtime.
 with until_module_use():
-    import typing as t
+    import typing as _t

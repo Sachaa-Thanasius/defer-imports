@@ -1,13 +1,3 @@
-# Some of the code and comments below is adapted from
-# https://github.com/python/cpython/blob/49234c065cf2b1ea32c5a3976d834b1d07b9b831/Lib/importlib/_bootstrap.py
-# and https://github.com/python/cpython/blob/49234c065cf2b1ea32c5a3976d834b1d07b9b831/Lib/importlib/_bootstrap_external.py
-# with the original copyright being:
-# Copyright (c) 2001 Python Software Foundation; All Rights Reserved
-#
-# The license in its original form may be found at
-# https://github.com/python/cpython/blob/49234c065cf2b1ea32c5a3976d834b1d07b9b831/LICENSE
-# and in this repository at ``LICENSE_cpython``.
-
 from __future__ import annotations
 
 import ast
@@ -17,7 +7,7 @@ import sys
 import types
 from importlib.machinery import BYTECODE_SUFFIXES, SOURCE_SUFFIXES, FileFinder, ModuleSpec, SourceFileLoader
 
-from . import __version__, lazy_load as _lazy_load
+from . import __version__ as _version, lazy_load as _lazy_load
 
 
 with _lazy_load.until_module_use():
@@ -125,6 +115,21 @@ _SourceData: TypeAlias = "t.Union[ReadableBuffer, str]"
 #
 # PYUPDATE: Ensure these are consistent with upstream, aside from our
 # customizations.
+#
+# License info
+# ------------
+# The original sources are
+# https://github.com/python/cpython/blob/49234c065cf2b1ea32c5a3976d834b1d07b9b831/Lib/importlib/_bootstrap.py
+# and https://github.com/python/cpython/blob/49234c065cf2b1ea32c5a3976d834b1d07b9b831/Lib/importlib/_bootstrap_external.py
+# with the original copyright being:
+# Copyright (c) 2001 Python Software Foundation; All Rights Reserved
+#
+# The license in its original form may be found at
+# https://github.com/python/cpython/blob/49234c065cf2b1ea32c5a3976d834b1d07b9b831/LICENSE
+# and in this repository at ``LICENSE_cpython``.
+#
+# If any changes are made to the adapted constructs, a short summary of those
+# changes accompanies their definitions.
 # ============================================================================
 
 
@@ -254,29 +259,6 @@ def _get_joined_source_lines(source: str, node: _ASTWithLocation) -> t.Optional[
     # This mimics how the Python parser splits source code.
     with io.StringIO(source, newline=None) as source_buffer:
         return "".join(itertools.islice(source_buffer, lineno, end_lineno + 1))
-
-
-def _get_syntax_context(filepath: _ModulePath, source: _SourceData, node: _ASTWithLocation) -> _SyntaxContext:
-    """Get a node's location context in a form compatible with `SyntaxError`'s constructor [1].
-
-    References
-    ----------
-    .. [1] https://docs.python.org/3.14/library/exceptions.html#SyntaxError
-    """
-
-    if not isinstance(filepath, (str, bytes, os.PathLike)):
-        filepath = bytes(filepath)
-    if not isinstance(source, str):
-        source = _decode_source(source)
-
-    text = _get_joined_source_lines(source, node)
-    context = (os.fsdecode(filepath), node.lineno, node.col_offset + 1, text)
-
-    if sys.version_info >= (3, 10):  # pragma: >=3.10 cover
-        end_col_offset = node.end_col_offset
-        context += (node.end_lineno, (end_col_offset + 1) if (end_col_offset is not None) else None)
-
-    return context
 
 
 class _ImportsInstrumenter(ast.NodeTransformer):
@@ -419,6 +401,25 @@ class _ImportsInstrumenter(ast.NodeTransformer):
     if sys.version_info >= (3, 11):  # pragma: >=3.11 cover
         visit_TryStar = _visit_eager_import_block
 
+    def _get_syntax_context(self, node: _ASTWithLocation) -> _SyntaxContext:
+        """Get a node's location context in a form compatible with `SyntaxError`'s constructor [1].
+
+        References
+        ----------
+        .. [1] https://docs.python.org/3.14/library/exceptions.html#SyntaxError
+        """
+
+        filepath = self.filepath if isinstance(self.filepath, (str, bytes, os.PathLike)) else bytes(self.filepath)
+        source = self.source if isinstance(self.source, str) else _decode_source(self.source)
+        text = _get_joined_source_lines(source, node)
+        context = (os.fsdecode(filepath), node.lineno, node.col_offset + 1, text)
+
+        if sys.version_info >= (3, 10):  # pragma: >=3.10 cover
+            end_col_offset = node.end_col_offset
+            context += (node.end_lineno, (end_col_offset + 1) if (end_col_offset is not None) else None)
+
+        return context
+
     def _validate_until_use_body(self, nodes: list[ast.stmt]) -> list[t.Union[ast.Import, ast.ImportFrom]]:
         """Validate that the statements within a `defer_imports.until_use` block are instrumentable.
 
@@ -431,11 +432,11 @@ class _ImportsInstrumenter(ast.NodeTransformer):
         for node in nodes:
             if not isinstance(node, (ast.Import, ast.ImportFrom)):
                 msg = "with defer_imports.until_use blocks must only contain import statements"
-                raise SyntaxError(msg, _get_syntax_context(self.filepath, self.source, node))  # noqa: TRY004 # Syntax error displays better.
+                raise SyntaxError(msg, self._get_syntax_context(node))  # noqa: TRY004 # Syntax error displays better.
 
             if node.names[0].name == "*":
                 msg = "import * not allowed in with defer_imports.until_use blocks"
-                raise SyntaxError(msg, _get_syntax_context(self.filepath, self.source, node))
+                raise SyntaxError(msg, self._get_syntax_context(node))
 
         # Warning: Don't mutate the list from outside the function to invalidate our type guard.
         return nodes  # pyright: ignore [reportReturnType]
@@ -518,7 +519,7 @@ class _ImportsInstrumenter(ast.NodeTransformer):
 
 
 #: Custom header for defer_imports-instrumented bytecode files. Differs for every version.
-_BYTECODE_HEADER = f"defer_imports{__version__}".encode()
+_BYTECODE_HEADER = f"defer_imports{_version}".encode()
 
 
 #: The current configuration for defer_imports's instrumentation.
@@ -875,8 +876,8 @@ class _DIKey(str):
     __lock: threading.RLock
     _di_submod_names: t.Optional[set[str]]
 
-    def __new__(cls, asname: str, import_args: _ImportArgs, submod_names: t.Optional[set[str]] = None, /) -> Self:
-        self = super().__new__(cls, asname)
+    def __new__(cls, obj: object, import_args: _ImportArgs, submod_names: t.Optional[set[str]] = None, /) -> Self:
+        self = super().__new__(cls, obj)
         self.__import_args = import_args
         self.__is_resolving = False
         self.__lock = threading.RLock()
