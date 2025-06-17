@@ -146,6 +146,8 @@ def _resolve_name(name: str, package: str, level: int) -> str:  # pragma: no cov
 
 
 # Adapted from importlib._bootstrap.
+# Changes:
+# - Account for warnings being different across versions.
 def _calc___package__(globals: t.Mapping[str, t.Any]) -> t.Optional[str]:  # pragma: no cover (tested in stdlib)
     """Calculate what __package__ should be.
 
@@ -544,10 +546,6 @@ def _walk_globals(node: ast.AST) -> t.Generator[ast.AST, None, None]:
 class _DIFileLoader(SourceFileLoader):
     """A file loader that instruments ``.py`` files which use ``with defer_imports.until_use: ...``."""
 
-    def __init__(self, *args: t.Any, **kwargs: t.Any) -> None:
-        super().__init__(*args, **kwargs)
-        self.defer_whole_module: bool = False
-
     def get_data(self, path: str) -> bytes:
         """Return the data from `path` as raw bytes.
 
@@ -622,9 +620,9 @@ class _DIFileLoader(SourceFileLoader):
         return super().source_to_code(new_tree, path, _optimize=_optimize)
 
     def create_module(self, spec: ModuleSpec) -> t.Optional[types.ModuleType]:
-        """Use default semantics for module creation."""
+        """Use default semantics for module creation. Also, get some state from the spec."""
 
-        self.defer_whole_module = spec.loader_state["defer_whole_module"]
+        self.defer_whole_module: bool = spec.loader_state["defer_whole_module"]
         return super().create_module(spec)
 
 
@@ -655,10 +653,12 @@ class _DIFileFinder(FileFinder):
             config = _current_config.get()
             spec.loader_state = {"defer_whole_module": self._is_full_module_rewrite(config, fullname)}
 
-            # NOTE: The finders patched in import_hook.install() won't return a spec with a _DIFileLoader loader.
+            # HACK: Support for monkeypatch in import_hook.install().
+            #
+            # Those patched finders won't return a spec with a _DIFileLoader loader due to preset instance state.
             # Account for those with a very specific check so that we don't override user-defined loaders.
             if loader.__class__ is SourceFileLoader:
-                spec.loader = _DIFileLoader(loader.name, loader.path)  # pyright: ignore [reportUnknownMemberType, reportAttributeAccessIssue]
+                loader.__class__ = _DIFileLoader
 
         return spec
 
@@ -729,7 +729,9 @@ class ImportHookContext:
                 msg = "No file-based path hook found to be superseded."
                 raise RuntimeError(msg)
 
-            # HACK: Patch cached finders for sys.path entries to have the right finder class.
+            # HACK: Monkeypatch cached finders for sys.path entries to have the right finder class.
+            # Safe as long as the instances have the same class layout and state. The latter isn't true, but it's
+            # accomodated for in _DiFileFinder.find_spec().
             #
             # Alternatives:
             # - Create and insert a new PathFinder subclass into sys.meta_path, or monkeypatch the existing one.
@@ -757,7 +759,9 @@ class ImportHookContext:
         except ValueError:
             pass
 
-        # Undo the patching done in self.install().
+        # Undo the monkeypatching done in self.install().
+        # We don't have to invalidate the finder caches, which only contain potential module locations, because the
+        # patch doesn't affect them.
         for finder in sys.path_importer_cache.values():
             if (finder is not None) and (finder.__class__ is _DIFileFinder):
                 finder.__class__ = FileFinder
@@ -782,6 +786,7 @@ _ImportArgs: TypeAlias = "tuple[str, dict[str, t.Any], dict[str, t.Any], t.Optio
 #: What builtins.__import__ last pointed to.
 _previous___import__ = contextvars.ContextVar("_previous___import__", default=builtins.__import__)
 
+# FIXME: This should probably be a boolean with a regular threading lock guarding it.
 #: Whether imports in import statements should be deferred.
 _is_deferred = contextvars.ContextVar[bool]("_is_deferred", default=False)
 
@@ -873,6 +878,7 @@ class _DIKey(str):
 
     __import_args: _ImportArgs
     __is_resolving: bool
+    # FIXME: This should probably be a regular Lock.
     __lock: threading.RLock
     _di_submod_names: t.Optional[set[str]]
 
@@ -918,7 +924,7 @@ class _DIKey(str):
         if self._di_submod_names:
             starting_point = len(imp_name) + 1
 
-            # Avoid triggering our __eq__ again.
+            # Avoid triggering __resolve_import via our __eq__ again.
             # PYUPDATE: py3.14 - Use token as context manager. Ref: https://github.com/python/cpython/issues/129889
             _is_deferred_tok = _is_deferred.set(True)
             try:
@@ -930,7 +936,7 @@ class _DIKey(str):
             self._di_submod_names = None
 
         # 3. Replace the deferred version of the key in the relevant namespace to avoid it sticking around.
-        # Avoid triggering our __eq__ again (would be a recursive trigger too).
+        # Avoid triggering __resolve_import via our __eq__ again (would be a recursive trigger too).
         # PYUPDATE: py3.14 - Use token as context manager. Ref: https://github.com/python/cpython/issues/129889
         _is_deferred_tok = _is_deferred.set(True)
         try:
@@ -957,7 +963,7 @@ def _deferred___import__(  # noqa: PLR0912
     fromlist: t.Optional[t.Sequence[str]] = None,
     level: int = 0,
 ) -> t.Any:
-    """An limited replacement for `__import__` that supports deferred imports by returning proxies.
+    """A limited replacement for `__import__` that supports deferred imports by returning proxies.
 
     Should only be invoked by ``import`` statements.
 
@@ -969,13 +975,14 @@ def _deferred___import__(  # noqa: PLR0912
         msg = "attempted deferred import outside the context of a ``with defer_imports.until_use: ...`` block"
         raise ImportError(msg)
 
-    # asname is a tuple[str | None, ...] when fromlist is populated, or a str | None otherwise.
+    # Thanks to our AST transformer, asname should be a tuple[str | None, ...] when fromlist is populated, or a
+    # str | None otherwise.
     # Since we can't dependently annotate it that way, and annotating it as a union would require isinstance checks to
     # satisfy the type checker later on, keeping it as Any "satisfies" the type checker with less runtime cost.
     try:
         asname: t.Any = locals[_TEMP_ASNAMES]
     except KeyError:
-        msg = "attempted deferred import in module not instrumented by defer_imports"
+        msg = "attempted deferred import in a module not instrumented by defer_imports"
         raise ImportError(msg) from None
 
     # Depend on the parser for some input validation of import statements. It should ensure that fromlist is all
@@ -1042,7 +1049,7 @@ def _deferred___import__(  # noqa: PLR0912
 class _DIContext:
     """A context manager within which imports occur lazily. Not re-entrant. Use via `defer_imports.until_use`.
 
-    If defer_imports isn't set up properly, e.g. `import_hook().install()` is not called first elsewhere, this should be
+    If defer_imports isn't set up properly, i.e. `import_hook().install()` is not called first elsewhere, this should be
     a no-op equivalent to `contextlib.nullcontext`.
 
     Raises

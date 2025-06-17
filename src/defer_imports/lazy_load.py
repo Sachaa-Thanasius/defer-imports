@@ -127,16 +127,16 @@ class _LazyModuleType(_types.ModuleType):
         # Extra
         # -----
         # I would further restrict this to only work when importlib internals request __spec__, but I don't know how.
-        # I attempted the following:
-        #
-        # 1. Stack frame examination via:
+        # I attempted to do so via stack frame examination:
         #     - sys._getframemodulename
         #     - sys._getframe
         #     - traceback.tb_frame.f_back...
-        #    Unfortunately, none of the above could even see a frame where __spec__ is requested by
-        #    importlib._bootstrap._find_and_load(); the import statement somehow directly requests it?
-        #    My guess is that bytecode shenanigans are involved.
-        # 2. Is there even another way?
+        # Unfortunately, none of the above could even see a frame where __spec__ is requested by
+        # importlib._bootstrap._find_and_load(); the import statement somehow directly requests it?
+        # I'm assuming bytecode shenanigans are involved.
+        #
+        # The only other alternative I can think of is locally rewriting and monkeypatching internal importlib machinery
+        # to account for _LazyModuleType's behavior, but that's a terrible idea for too many reasons.
         if name == "__spec__":
             return __spec__
 
@@ -267,7 +267,7 @@ class LazyLoader(_Loader):
 
 
 class _LazyFinder:
-    """A finder that uses `_LazyLoader` to wrap loaders of source module specs."""
+    """A finder proxy that uses `_LazyLoader` to wrap loaders of source module specs."""
 
     def __init__(self, finder: _MetaPathFinderProtocol) -> None:
         if not hasattr(finder, "find_spec"):
