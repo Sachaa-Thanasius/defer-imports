@@ -786,9 +786,41 @@ _ImportArgs: TypeAlias = "tuple[str, dict[str, t.Any], dict[str, t.Any], t.Optio
 #: What builtins.__import__ last pointed to.
 _previous___import__ = contextvars.ContextVar("_previous___import__", default=builtins.__import__)
 
-# FIXME: This should probably be a boolean with a regular threading lock guarding it.
 #: Whether imports in import statements should be deferred.
-_is_deferred = contextvars.ContextVar[bool]("_is_deferred", default=False)
+_is_deferred: bool = False
+
+#: A lock to guard _is_deferred.
+_is_deferred_lock = threading.RLock()
+
+
+class _TempDeferred:
+    """A context manager for temporarily setting `_is_deferred`.
+
+    Used to avoid deadlocks in `_DIKey.__eq__`.
+    """
+
+    __slots__ = ("previous",)
+
+    def __init__(self, /) -> None:
+        self.previous: bool = False
+
+    def __enter__(self, /) -> Self:
+        global _is_deferred  # noqa: PLW0603
+
+        _is_deferred_lock.acquire()
+        self.previous = _is_deferred
+        _is_deferred = True
+
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        global _is_deferred  # noqa: PLW0603
+
+        _is_deferred = self.previous
+        _is_deferred_lock.release()
+
+
+_temp_deferred = _TempDeferred()
 
 
 # Ways to get the exact key from a dict without triggering the expensive _DIKey.__eq__ continuously.
@@ -874,37 +906,40 @@ class _DIKey(str):
     When referenced, the key will replace itself in the namespace with the resolved import or the right name from it.
     """
 
-    __slots__ = ("__import_args", "__is_resolving", "__lock", "_di_submod_names")
+    __slots__ = ("__import_args", "__is_resolved", "__lock", "_di_submod_names")
 
     __import_args: _ImportArgs
-    __is_resolving: bool
-    # FIXME: This should probably be a regular Lock.
-    __lock: threading.RLock
+    __is_resolved: bool
+    __lock: threading.Lock
     _di_submod_names: t.Optional[set[str]]
 
     def __new__(cls, obj: object, import_args: _ImportArgs, submod_names: t.Optional[set[str]] = None, /) -> Self:
         self = super().__new__(cls, obj)
+
         self.__import_args = import_args
-        self.__is_resolving = False
-        self.__lock = threading.RLock()
+        self.__is_resolved = False
+        self.__lock = threading.Lock()
         self._di_submod_names = submod_names
+
         return self
 
     def __eq__(self, value: object, /) -> bool:
-        if _is_deferred.get():
+        if _is_deferred:
             return super().__eq__(value)
 
         is_eq = super().__eq__(value)
         if is_eq is not True:
             return is_eq
 
+        if self.__is_resolved:
+            return True
+
         # Only the first thread to grab the lock should resolve the deferred import.
         with self.__lock:
-            # Reentrant calls from the same thread shouldn't re-trigger the resolution.
-            # This can be caused by self-referential imports, e.g. submodule imports within __init__.py.
-            if not self.__is_resolving:
-                self.__is_resolving = True
+            # Check that another thread didn't already resolve the import while waiting on the lock.
+            if not self.__is_resolved:
                 self.__resolve_import()
+                self.__is_resolved = True
 
         return True
 
@@ -918,31 +953,30 @@ class _DIKey(str):
 
         # 1. Perform the original __import__ and pray.
         from_list = (from_name,) if (from_name is not None) else ()
-        module: types.ModuleType = _previous___import__.get()(imp_name, imp_globals, imp_locals, from_list, 0)
+
+        # For a submodule import, the regular import machinery will attempt to assign the submodule as an attribute to
+        # its parent module. That action will re-trigger the __eq__ that got us here. We need to return early so that
+        # deadlock is avoided.
+        with _temp_deferred:
+            module: types.ModuleType = _previous___import__.get()(imp_name, imp_globals, imp_locals, from_list, 0)
 
         # 2. Create nested keys and proxies as needed in the resolved module.
         if self._di_submod_names:
             starting_point = len(imp_name) + 1
 
-            # Avoid triggering __resolve_import via our __eq__ again.
-            # PYUPDATE: py3.14 - Use token as context manager. Ref: https://github.com/python/cpython/issues/129889
-            _is_deferred_tok = _is_deferred.set(True)
-            try:
+            # Avoid deadlocking when re-triggering our __eq__.
+            with _temp_deferred:
                 for submod_name in self._di_submod_names:
                     _handle_import_key(submod_name, module.__dict__, starting_point)
-            finally:
-                _is_deferred.reset(_is_deferred_tok)
 
             self._di_submod_names = None
 
         # 3. Replace the deferred version of the key in the relevant namespace to avoid it sticking around.
-        # Avoid triggering __resolve_import via our __eq__ again (would be a recursive trigger too).
-        # PYUPDATE: py3.14 - Use token as context manager. Ref: https://github.com/python/cpython/issues/129889
-        _is_deferred_tok = _is_deferred.set(True)
-        try:
-            imp_locals[raw_asname] = imp_locals.pop(raw_asname)
-        finally:
-            _is_deferred.reset(_is_deferred_tok)
+        # Avoid deadlocking when re-triggering our __eq__.
+        with _temp_deferred:
+            orig_val = imp_locals.pop(raw_asname)
+
+        imp_locals[raw_asname] = orig_val
 
         # 4. Resolve any requested attribute access and replace the proxy with the result in the relevant namespace.
         if from_name is not None:
@@ -971,7 +1005,7 @@ def _deferred___import__(  # noqa: PLR0912
     """
 
     # Ensure _DIKey instances won't resolve while we're creating/examining them in here.
-    if not _is_deferred.get():
+    if not _is_deferred:
         msg = "attempted deferred import outside the context of a ``with defer_imports.until_use: ...`` block"
         raise ImportError(msg)
 
@@ -1062,17 +1096,17 @@ class _DIContext:
     As part of its implementation, this temporarily replaces `builtins.__import__`.
     """
 
-    __slots__ = ("_defer_ctx_token", "_import_ctx_token")
+    __slots__ = ("_defer_ctx", "_import_ctx_token")
 
     def __enter__(self, /) -> None:
-        self._defer_ctx_token = _is_deferred.set(True)
+        self._defer_ctx = _temp_deferred.__enter__()
         self._import_ctx_token = _previous___import__.set(builtins.__import__)
         builtins.__import__ = _deferred___import__
 
     def __exit__(self, *exc_info: object) -> None:
         _previous___import__.reset(self._import_ctx_token)
-        _is_deferred.reset(self._defer_ctx_token)
         builtins.__import__ = _previous___import__.get()
+        self._defer_ctx.__exit__(*exc_info)
 
 
 #: The context manager that replaces until_use after instrumentation.

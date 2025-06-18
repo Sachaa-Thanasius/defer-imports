@@ -1020,7 +1020,7 @@ with defer_imports.until_use:
         assert str(module.ManyExpensive.__value__) == "tuple[type_stmt_pkg.exp.Expensive, ...]"
         assert expected_proxy_repr not in repr(vars(module))
 
-    @pytest.mark.skip(reason="The threading protection choices & implementation needs another look.")
+    # @pytest.mark.skip(reason="The threading protection choices & implementation needs another look.")
     def test_thread_safety(self, tmp_path: Path):
         """Test that trying to access a lazily loaded import from multiple threads doesn't cause race conditions.
 
@@ -1043,12 +1043,11 @@ with defer_imports.until_use:
 """
         module = create_sample_module(tmp_path, source)
 
-        num_threads = 2  # Need more to trigger the pypy issue.
+        num_threads = 20  # Need more to trigger the pypy issue.
         barrier = threading.Barrier(num_threads)
 
         def access_module_attr(b: threading.Barrier):
             b.wait()
-            print("here")
             signature = module.inspect.signature
             assert callable(signature)
 
