@@ -4,6 +4,7 @@ import ast
 import builtins
 import contextvars
 import sys
+import threading
 import types
 from importlib.machinery import BYTECODE_SUFFIXES, SOURCE_SUFFIXES, FileFinder, ModuleSpec, SourceFileLoader
 
@@ -15,7 +16,6 @@ with _lazy_load.until_module_use():
     import io
     import itertools
     import os
-    import threading
     import tokenize
     import typing as t
     import warnings
@@ -796,7 +796,8 @@ _is_deferred_lock = threading.RLock()
 class _TempDeferred:
     """A context manager for temporarily setting `_is_deferred`.
 
-    Used to avoid deadlocks in `_DIKey.__eq__`.
+    Used to prevent deferred imports from resolving while within the `until_use` block. It also helps avoid deadlocks
+    with certain cases of self-referential deferred imports.
     """
 
     __slots__ = ("previous",)
@@ -891,7 +892,7 @@ class _DIProxy:
     __slots__ = ("__import_name",)
 
     def __init__(self, import_name: str, /) -> None:
-        self.__import_name = import_name
+        self.__import_name: str = import_name
 
     def __repr__(self, /) -> str:
         return f"<proxy for {self.__import_name!r} import>"
@@ -954,29 +955,25 @@ class _DIKey(str):
         # 1. Perform the original __import__ and pray.
         from_list = (from_name,) if (from_name is not None) else ()
 
-        # For a submodule import, the regular import machinery will attempt to assign the submodule as an attribute to
-        # its parent module. That action will re-trigger the __eq__ that got us here. We need to return early so that
-        # deadlock is avoided.
+        # Temporarily keep prevent _DIKey instances from resolving while doing things that may re-trigger their __eq__s.
         with _temp_deferred:
+            # Internal import machinery triggers __eq__ when attempting a submodule import, when it attempts to assign
+            # the submodule as an attribute to the parent module.
             module: types.ModuleType = _previous___import__.get()(imp_name, imp_globals, imp_locals, from_list, 0)
 
-        # 2. Create nested keys and proxies as needed in the resolved module.
-        if self._di_submod_names:
-            starting_point = len(imp_name) + 1
+            # 2. Create nested keys and proxies as needed in the resolved module.
+            if self._di_submod_names:
+                starting_point = len(imp_name) + 1
 
-            # Avoid deadlocking when re-triggering our __eq__.
-            with _temp_deferred:
+                # _handle_import_key() triggers __eq__.
                 for submod_name in self._di_submod_names:
                     _handle_import_key(submod_name, module.__dict__, starting_point)
 
-            self._di_submod_names = None
+                self._di_submod_names = None
 
-        # 3. Replace the deferred version of the key in the relevant namespace to avoid it sticking around.
-        # Avoid deadlocking when re-triggering our __eq__.
-        with _temp_deferred:
-            orig_val = imp_locals.pop(raw_asname)
-
-        imp_locals[raw_asname] = orig_val
+            # 3. Replace the deferred version of the key in the relevant namespace to avoid it sticking around.
+            # dict.pop() uses __eq__ to find the key to pop.
+            imp_locals[raw_asname] = imp_locals.pop(raw_asname)
 
         # 4. Resolve any requested attribute access and replace the proxy with the result in the relevant namespace.
         if from_name is not None:
@@ -996,7 +993,7 @@ def _deferred___import__(  # noqa: PLR0912
     locals: dict[str, t.Any],
     fromlist: t.Optional[t.Sequence[str]] = None,
     level: int = 0,
-) -> t.Any:
+) -> t.Union[types.ModuleType, _DIProxy]:
     """A limited replacement for `__import__` that supports deferred imports by returning proxies.
 
     Should only be invoked by ``import`` statements.
@@ -1039,7 +1036,7 @@ def _deferred___import__(  # noqa: PLR0912
         if asname:
             if "." in name:
                 # Case 1: import a.b as c
-                # NOTE: Treating it as a "from" import is cheaper than the alternative.
+                # Treating it as a "from" import is cheaper than the alternative.
                 parent_name, _, submod_name = name.rpartition(".")
                 locals[_DIKey(asname, (parent_name, globals, locals, submod_name))] = None
                 result = _DIProxy(parent_name)
@@ -1052,19 +1049,13 @@ def _deferred___import__(  # noqa: PLR0912
                 # Case 3: import a.b
                 parent_name = name.partition(".")[0]
                 try:
-                    preexisting = locals[parent_name]
+                    result = locals[parent_name]
                 except KeyError:
                     locals[_DIKey(parent_name, (parent_name, globals, locals, None), {name})] = None
                     result = _DIProxy(parent_name)
                 else:
-                    # Heuristic: If locals[parent_name] is not a module or proxy, treat it like it didn't exist.
-                    if not isinstance(preexisting, (types.ModuleType, _DIProxy)):
-                        locals[_DIKey(parent_name, (parent_name, globals, locals, None), {name})] = None
-                        result = _DIProxy(parent_name)
-                    else:
-                        # Case 3.a: import importlib[.abc], -> importlib.util <-
-                        _handle_import_key(name, locals)
-                        result = preexisting
+                    # Case 3.a: import importlib[.abc], -> importlib.util <-
+                    _handle_import_key(name, locals)
             else:
                 # Case 4: import a
                 locals[_DIKey(name, (name, globals, locals, None))] = None
@@ -1096,17 +1087,17 @@ class _DIContext:
     As part of its implementation, this temporarily replaces `builtins.__import__`.
     """
 
-    __slots__ = ("_defer_ctx", "_import_ctx_token")
+    __slots__ = ("_is_deferred_ctx", "_import_ctx_token")
 
     def __enter__(self, /) -> None:
-        self._defer_ctx = _temp_deferred.__enter__()
+        self._is_deferred_ctx = _temp_deferred.__enter__()
         self._import_ctx_token = _previous___import__.set(builtins.__import__)
         builtins.__import__ = _deferred___import__
 
     def __exit__(self, *exc_info: object) -> None:
         _previous___import__.reset(self._import_ctx_token)
         builtins.__import__ = _previous___import__.get()
-        self._defer_ctx.__exit__(*exc_info)
+        self._is_deferred_ctx.__exit__(*exc_info)
 
 
 #: The context manager that replaces until_use after instrumentation.

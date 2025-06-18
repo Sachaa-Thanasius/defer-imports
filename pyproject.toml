@@ -30,7 +30,7 @@ Issues = "https://github.com/Sachaa-Thanasius/defer-imports/issues"
 Source = "https://github.com/Sachaa-Thanasius/defer-imports"
 
 [dependency-groups]
-test = ["pytest>=8", "pytest-rerunfailures"]
+test = ["pytest>=8"]
 cov = ["coverage>=7", "covdefaults"]
 profile = ["yelp-gprof2dot"]
 dev = [
@@ -130,6 +130,7 @@ extend-ignore = [
     "RUF003",  # "Ambiguous character" depends on the use case.
     "RUF022",  # __all__ ordering can be meaningful.
     "RUF023",  # __slots__ ordering can be meaningful.
+    "PLC0415", # There are valid reasons to not have imports at the top level.
 
     # ---- Recommended by Ruff when using Ruff format
     "W191",
@@ -170,7 +171,7 @@ allow-multiline = false
 convention = "numpy"
 
 [tool.ruff.lint.per-file-ignores]
-# ---- Package code
+# ---- Library code
 "src/defer_imports/ast_rewrite.py" = [
     "A002", # Allow some shadowing of builtins by parameter names.
 ]

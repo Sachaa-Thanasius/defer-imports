@@ -172,7 +172,7 @@ class _LazyModuleType(_types.ModuleType):
                     for key, value in attrs_now.items()
                     # Code that set an attribute may have kept a reference to the
                     # assigned object, making identity more important than equality.
-                    if (key not in attrs_then) or (attrs_now[key] is not attrs_then[key])
+                    if (key not in attrs_then) or (value is not attrs_then[key])
                 }
 
                 assert __spec__.loader is not None, "This spec must have an actual loader."

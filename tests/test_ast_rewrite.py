@@ -1020,7 +1020,6 @@ with defer_imports.until_use:
         assert str(module.ManyExpensive.__value__) == "tuple[type_stmt_pkg.exp.Expensive, ...]"
         assert expected_proxy_repr not in repr(vars(module))
 
-    # @pytest.mark.skip(reason="The threading protection choices & implementation needs another look.")
     def test_thread_safety(self, tmp_path: Path):
         """Test that trying to access a lazily loaded import from multiple threads doesn't cause race conditions.
 
