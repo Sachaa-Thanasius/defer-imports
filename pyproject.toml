@@ -196,7 +196,7 @@ convention = "numpy"
 
 [tool.pyright]
 include = ["src/defer_imports", "tests"]
-ignore = ["tests/test_lazy_load.py"]
+ignore = ["tests/*.py"]
 
 pythonVersion = "3.9"
 pythonPlatform = "All"

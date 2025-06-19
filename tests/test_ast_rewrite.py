@@ -18,11 +18,18 @@ from defer_imports.ast_rewrite import (
     _BYTECODE_HEADER,
     _PATH_HOOK,
     _TEMP_ASNAMES,
+    _accumulate_dotted_parts,
     _DIFileLoader,
     _DIKey,
+    _get_exact_key,
     _ImportsInstrumenter,
     import_hook,
 )
+
+
+# ============================================================================
+# region -------- Helpers --------
+# ============================================================================
 
 
 NestedMapping = collections.abc.Mapping[str, typing.Union["NestedMapping", str]]
@@ -124,6 +131,30 @@ def create_sample_package(path: Path, package_name: str, dir_contents: NestedMap
     spec.loader.exec_module(module)
 
     return module
+
+
+# endregion
+
+
+@pytest.mark.parametrize(
+    ("dotted_name", "start", "expected"),
+    [
+        ("a.b.c.d.e", 0, {"a", "a.b", "a.b.c", "a.b.c.d", "a.b.c.d.e"}),
+        ("a.b.c.d.e", len("a.b."), {"a.b.c", "a.b.c.d", "a.b.c.d.e"}),
+    ],
+)
+def test__accumulate_dotted_parts(dotted_name: str, start: int, expected: set[str]):
+    assert _accumulate_dotted_parts(dotted_name, start) == expected
+
+
+def test__get_exact_key():
+    class MyStr(str):
+        __slots__ = ()
+
+    dct = {MyStr("hello"): 1, "world": 2, "people": 3}
+    name = "hello"
+
+    assert isinstance(_get_exact_key(name, dct), MyStr)
 
 
 def test_path_hook_installation():
@@ -476,7 +507,7 @@ class TestImport:
     def better_key_repr(self):
         """Replace _DIKey.__repr__ with a more verbose version for all tests."""
 
-        def verbose_repr(self: object) -> str:
+        def verbose_repr(self: _DIKey) -> str:
             return f"<key for {super(type(self), self).__repr__()} import>"
 
         with unittest.mock.patch.object(_DIKey, "__repr__", verbose_repr):
@@ -759,6 +790,19 @@ with defer_imports.until_use:
         assert exc_info.value.offset == 5
         assert exc_info.value.text == "    a = 1 +         2 +         3; b = 2\n"
 
+    def test_name_clobbering(self, tmp_path: Path):
+        source = """\
+import defer_imports
+
+importlib = None
+with defer_imports.until_use:
+    import importlib
+"""
+        module = create_sample_module(tmp_path, source)
+
+        expected_importlib_repr = "<key for 'importlib' import>: <proxy for 'importlib' import>"
+        assert expected_importlib_repr in repr(vars(module))
+
     def test_top_level_and_submodules_1(self, tmp_path: Path):
         source = """\
 import defer_imports
@@ -770,7 +814,7 @@ with defer_imports.until_use:
 """
         module = create_sample_module(tmp_path, source)
 
-        # Prevent the caching of these from interfering with the test.
+        # Prevent the caching of these from interfering with the checking of each submodule's resolution.
         for mod in ("importlib", "importlib.abc", "importlib.util"):
             sys.modules.pop(mod, None)
 
@@ -798,6 +842,40 @@ with defer_imports.until_use:
         assert expected_importlib_util_repr not in repr(module_importlib_vars)
 
     def test_top_level_and_submodules_2(self, tmp_path: Path):
+        source = """\
+import defer_imports
+
+concurrent = None
+with defer_imports.until_use:
+    import concurrent.futures.process
+"""
+        module = create_sample_module(tmp_path, source)
+
+        # Prevent the caching of these from interfering with the checking of each submodule's resolution.
+        for mod in ("concurrent", "concurrent.futures", "concurrent.futures.process"):
+            sys.modules.pop(mod, None)
+
+        # Test that the parent module proxy is here and then resolves.
+        expected_repr = "<key for 'concurrent' import>: <proxy for 'concurrent' import>"
+
+        assert expected_repr in repr(vars(module))
+        assert module.concurrent.__spec__.name == "concurrent"
+        assert expected_repr not in repr(vars(module))
+
+        # Test that the nested proxies carry over and resolve.
+        expected_repr = "<key for 'futures' import>: <proxy for 'concurrent.futures' import>"
+
+        assert expected_repr in repr(vars(module.concurrent))
+        assert module.concurrent.futures.__spec__.name == "concurrent.futures"
+        assert expected_repr not in repr(vars(module.concurrent))
+
+        expected_repr = "<key for 'process' import>: <proxy for 'concurrent.futures.process' import>"
+
+        assert expected_repr in repr(vars(module.concurrent.futures))
+        assert module.concurrent.futures.process.__spec__.name == "concurrent.futures.process"
+        assert expected_repr not in repr(vars(module.concurrent.futures))
+
+    def test_top_level_and_submodules_3(self, tmp_path: Path):
         source = """\
 import defer_imports
 

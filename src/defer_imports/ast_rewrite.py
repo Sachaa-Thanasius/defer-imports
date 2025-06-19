@@ -794,7 +794,7 @@ _is_deferred_lock = threading.RLock()
 
 
 class _TempDeferred:
-    """A context manager for temporarily setting `_is_deferred`.
+    """A re-entrant context manager for temporarily setting `_is_deferred`.
 
     Used to prevent deferred imports from resolving while within the `until_use` block. It also helps avoid deadlocks
     with certain cases of self-referential deferred imports.
@@ -824,7 +824,21 @@ class _TempDeferred:
 _temp_deferred = _TempDeferred()
 
 
-# Ways to get the exact key from a dict without triggering the expensive _DIKey.__eq__ continuously.
+def _accumulate_dotted_parts(dotted_name: str, start: int, /) -> set[str]:
+    """Return an accumulation of dot-separated components from a dotted string."""
+
+    sub_names: set[str] = set()
+    while (end := dotted_name.find(".", start)) != -1:
+        sub_names.add(dotted_name[:end])
+        start = end + 1
+    sub_names.add(dotted_name)
+    return sub_names
+
+
+# NOTE: Ways to get the exact key from a dict without triggering the expensive _DIKey.__eq__ continuously.
+# It can take a significant amount of time. Normal "==" semantics are triggered by most presence checks, e.g.
+# nmsp.__contains__, and that causes a performance issue because _DIKey's very slow __eq__ always take priority over
+# str's. Thus, we avoid those routes.
 # PYUPDATE: py3.14 - Check that this fast path still works.
 if sys.implementation.name == "cpython" and (3, 9) <= sys.version_info < (3, 14):  # pragma: cpython cover
 
@@ -838,13 +852,15 @@ else:  # pragma: cpython no cover
         return next(filter(name.__eq__, dct), None)
 
 
-def _handle_import_key(import_name: str, nmsp: dict[str, t.Any], start_idx: int = 0, /) -> None:
+def _handle_import_key(import_name: str, nmsp: dict[str, t.Any], /) -> None:
     """Ensure that a dotted import name (e.g., "a.b.c") is represented as a chain of deferred proxies
     in the target namespace.
     """
 
     # NOTE: We can't use setattr() on modules directly because PyPy normalizes the attr key type to `str` in setattr().
     # Instead, we assign into the module dict.
+
+    start_idx = import_name.find(".") + 1
 
     while True:
         end_idx = import_name.find(".", start_idx)
@@ -855,32 +871,19 @@ def _handle_import_key(import_name: str, nmsp: dict[str, t.Any], start_idx: int 
         else:
             submod_name = import_name[start_idx:]
 
-        # NOTE: Finding the key takes a significant amount of time.
-        # Normal "==" semantics are triggered by most presence checks, e.g. nmsp.__contains__, and that causes a
-        # performance issue because _DIKey's very slow __eq__ always take priority over str's. Thus, we avoid those
-        # routes.
         if (existing_key := _get_exact_key(submod_name, nmsp)) is not None:
-            if isinstance(existing_key, _DIKey):
-                if existing_key._di_submod_names:
-                    existing_key._di_submod_names.add(import_name)
-                else:
-                    existing_key._di_submod_names = {import_name}
-                return
-            else:
+            if not isinstance(existing_key, _DIKey):
                 # Keep looping, but with a more nested namespace.
                 nmsp = nmsp[submod_name].__dict__
                 start_idx = end_idx + 1
                 continue
+            else:
+                existing_key._di_add_submodule_name(import_name)
+                return
         else:
             if not at_final_part_of_name:
                 full_submod_name = import_name[:end_idx]
-
-                sub_names: set[str] = set()
-                while (end_idx := import_name.find(".", start_idx)) != -1:
-                    sub_names.add(import_name[:end_idx])
-                    start_idx = end_idx + 1
-                sub_names.add(import_name)
-
+                sub_names = _accumulate_dotted_parts(import_name, end_idx + 1)
                 nmsp[_DIKey(submod_name, (full_submod_name, nmsp, nmsp, None), sub_names)] = _DIProxy(full_submod_name)
                 return
             else:
@@ -907,12 +910,12 @@ class _DIKey(str):
     When referenced, the key will replace itself in the namespace with the resolved import or the right name from it.
     """
 
-    __slots__ = ("__import_args", "__is_resolved", "__lock", "_di_submod_names")
+    __slots__ = ("__import_args", "__is_resolved", "__lock", "__submod_names")
 
     __import_args: _ImportArgs
     __is_resolved: bool
     __lock: threading.Lock
-    _di_submod_names: t.Optional[set[str]]
+    __submod_names: t.Optional[set[str]]
 
     def __new__(cls, obj: object, import_args: _ImportArgs, submod_names: t.Optional[set[str]] = None, /) -> Self:
         self = super().__new__(cls, obj)
@@ -920,7 +923,7 @@ class _DIKey(str):
         self.__import_args = import_args
         self.__is_resolved = False
         self.__lock = threading.Lock()
-        self._di_submod_names = submod_names
+        self.__submod_names = submod_names
 
         return self
 
@@ -946,48 +949,52 @@ class _DIKey(str):
 
     __hash__ = str.__hash__
 
+    def _di_add_submodule_name(self, submod_name: str, /) -> None:
+        if self.__submod_names:
+            self.__submod_names.add(submod_name)
+        else:
+            self.__submod_names = {submod_name}
+
     def __resolve_import(self, /) -> None:
         """Resolve the import and replace the deferred key and placeholder in the relevant namespace with the result."""
 
         raw_asname = str(self)
         imp_name, imp_globals, imp_locals, from_name = self.__import_args
-
-        # 1. Perform the original __import__ and pray.
         from_list = (from_name,) if (from_name is not None) else ()
 
-        # Temporarily keep prevent _DIKey instances from resolving while doing things that may re-trigger their __eq__s.
+        # Temporarily prevent _DIKey instances from resolving while doing things that may re-trigger their __eq__.
         with _temp_deferred:
+            # 1. Perform the original __import__ and pray.
             # Internal import machinery triggers __eq__ when attempting a submodule import, when it attempts to assign
             # the submodule as an attribute to the parent module.
             module: types.ModuleType = _previous___import__.get()(imp_name, imp_globals, imp_locals, from_list, 0)
 
-            # 2. Create nested keys and proxies as needed in the resolved module.
-            if self._di_submod_names:
-                starting_point = len(imp_name) + 1
-
-                # _handle_import_key() triggers __eq__.
-                for submod_name in self._di_submod_names:
-                    _handle_import_key(submod_name, module.__dict__, starting_point)
-
-                self._di_submod_names = None
-
-            # 3. Replace the deferred version of the key in the relevant namespace to avoid it sticking around.
+            # 2. Replace the deferred key in the relevant namespace to avoid it sticking around.
             # dict.pop() uses __eq__ to find the key to pop.
             imp_locals[raw_asname] = imp_locals.pop(raw_asname)
 
-        # 4. Resolve any requested attribute access and replace the proxy with the result in the relevant namespace.
+        # 3. Resolve any requested attribute access, then replace the proxy with the result in the relevant namespace.
         if from_name is not None:
             imp_locals[raw_asname] = getattr(module, from_name)
         elif ("." in imp_name) and ("." not in raw_asname):
             attr = module
-            for attr_name in imp_name.rpartition(".")[2].split("."):
+            for attr_name in imp_name.split(".")[1:]:
                 attr = getattr(attr, attr_name)
             imp_locals[raw_asname] = attr
         else:
             imp_locals[raw_asname] = module
 
+        # 4. Create nested keys and proxies as needed in the resolved module.
+        if self.__submod_names:
+            with _temp_deferred:
+                # _handle_import_key() triggers __eq__.
+                for submod_name in self.__submod_names:
+                    _handle_import_key(submod_name, module.__dict__)
 
-def _deferred___import__(  # noqa: PLR0912
+                self.__submod_names = None
+
+
+def _deferred___import__(
     name: str,
     globals: dict[str, t.Any],
     locals: dict[str, t.Any],
@@ -1032,43 +1039,42 @@ def _deferred___import__(  # noqa: PLR0912
 
         name = _resolve_name(name, package, level)
 
-    if not fromlist:
-        if asname:
-            if "." in name:
-                # Case 1: import a.b as c
-                # Treating it as a "from" import is cheaper than the alternative.
-                parent_name, _, submod_name = name.rpartition(".")
-                locals[_DIKey(asname, (parent_name, globals, locals, submod_name))] = None
-                result = _DIProxy(parent_name)
-            else:
-                # Case 2: import a as c
-                locals[_DIKey(asname, (name, globals, locals, None))] = None
-                result = _DIProxy(name)
-        else:
-            if "." in name:
-                # Case 3: import a.b
-                parent_name = name.partition(".")[0]
-                try:
-                    result = locals[parent_name]
-                except KeyError:
-                    locals[_DIKey(parent_name, (parent_name, globals, locals, None), {name})] = None
-                    result = _DIProxy(parent_name)
-                else:
-                    # Case 3.a: import importlib[.abc], -> importlib.util <-
-                    _handle_import_key(name, locals)
-            else:
-                # Case 4: import a
-                locals[_DIKey(name, (name, globals, locals, None))] = None
-                result = _DIProxy(name)
-    else:
-        # Case 5: from ... import ... [as ...]
+    # Handle the various types of import statements.
+    if fromlist:
+        # Case 1: from ... import ... [as ...]
         from_asname: str | None
         for from_name, from_asname in zip(fromlist, asname):
-            locals[_DIKey(from_asname or from_name, (name, globals, locals, from_name))] = None
+            visible_name = from_asname or from_name
+            locals[_DIKey(visible_name, (name, globals, locals, from_name))] = locals.pop(visible_name, None)
+        return _DIProxy(name)
 
-        result = _DIProxy(name)
+    elif "." not in name:
+        # Case 2 & 3: import a [as c]
+        visible_name = asname or name
+        locals[_DIKey(visible_name, (name, globals, locals, None))] = locals.pop(visible_name, None)
+        return _DIProxy(name)
 
-    return result
+    elif asname:
+        # Case 4: import a.b.c as d
+        # It's less work to treat this as a "from" import, e.g. from a.b import c as d.
+        parent_name, _, submod_name = name.rpartition(".")
+        locals[_DIKey(asname, (parent_name, globals, locals, submod_name))] = locals.pop(asname, None)
+        return _DIProxy(parent_name)
+
+    else:
+        # Case 5: import a.b
+        parent_name = name.partition(".")[0]
+        existing_key = _get_exact_key(parent_name, locals)
+
+        if (existing_key is not None) and isinstance(existing_key, _DIKey):
+            # Case 5.1: The parent module name was imported via defer_imports in the same namespace.
+            existing_key._di_add_submodule_name(name)
+            return locals[parent_name]
+        else:
+            # Case 5.2: The parent module name doesn't exist in the same namespace or wasn't placed there by us.
+            sub_names = _accumulate_dotted_parts(name, len(parent_name) + 1)
+            locals[_DIKey(parent_name, (parent_name, globals, locals, None), sub_names)] = locals.pop(parent_name, None)
+            return _DIProxy(parent_name)
 
 
 class _DIContext:
