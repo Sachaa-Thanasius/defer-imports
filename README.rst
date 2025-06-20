@@ -47,12 +47,12 @@ To do its work, ``defer-imports`` must hook into the Python import system. Inclu
 
 .. code-block:: python
 
-    import defer_imports
+    import defer_imports.ast_rewrite
 
     # For all usage, import statements *within the module the hook is installed from* 
     # are not affected. In this case, that would be this module.
 
-    with defer_imports.import_hook():
+    with defer_imports.ast_rewrite.import_hook():
         import your_code
 
 
@@ -62,13 +62,13 @@ Regardless of passed configuration, the import hook will cause imports contained
 
 .. code-block:: python
 
-    import defer_imports
+    import defer_imports.ast_rewrite
 
     # Ex 1. Henceforth, instrument all import statements *only* in modules whose names
     # are in the given sequence of strings.
     #
     # Better suited for libraries.
-    with defer_imports.import_hook([f"{__name__}.*"]):
+    with defer_imports.ast_rewrite.import_hook([f"{__name__}.*"]):
         import ...
 
     # Ex 2. Henceforth, instrument all import statements *only* in modules whose names
@@ -79,7 +79,7 @@ Regardless of passed configuration, the import hook will cause imports contained
     # be affected.
     #
     # Better suited for libraries.
-    with defer_imports.import_hook(["discord"]):
+    with defer_imports.ast_rewrite.import_hook(["discord"]):
         import ...
 
     # Ex 3. Henceforth, instrument all import statements in other pure-Python modules
@@ -87,7 +87,7 @@ Regardless of passed configuration, the import hook will cause imports contained
     # configuration passed in alongside it.
     #
     # Better suited for applications.
-    defer_imports.import_hook(["*"])
+    defer_imports.ast_rewrite.import_hook(["*"])
 
     import ...
 
@@ -174,7 +174,7 @@ The ``defer_imports.until_use`` context manager is what causes the proxies to be
 
 The new ``__import__`` also replaces the keys of those proxies in the namespace with special keys that store the required arguments to trigger the late import. These keys are aware of the namespace, the *dictionary*, they live in, and have overriden their ``__eq__`` and ``__hash__`` methods so that they know when they've been *directly* queried. Once such a key has been matched (i.e. someone uses the name of the import), it can use its stored arguments to execute the late import and *replace itself and the proxy* in the corresponding namespace. That way, as soon as the name of the deferred import is referenced, all a user sees in the local namespace is a normal string key and the result of the resolved import.
 
-The missing intermediate step is making sure these special keys and proxies match up in the namespace. After all, Python name binding semantics only allow regular strings to be used as variable names/namespace keys; how can this be bypassed? ``defer-imports``'s answer is a little compile-time instrumentation and a little modification of the ``locals`` dictionary passed to ``__import__``. When a user calls ``defer_imports.install_import_hook()`` to set up the library machinery (see "Setup" above), what they are doing is installing an import hook that will modify the code of any given Python file that uses the ``defer_imports.until_use`` context manager. Using AST transformation, it adds a few lines of code around imports within that context manager to notify the new ``__import__`` what the name is that the import will be stored into.
+The missing intermediate step is making sure these special keys and proxies match up in the namespace. After all, Python name binding semantics only allow regular strings to be used as variable names/namespace keys; how can this be bypassed? ``defer-imports``'s answer is a little compile-time instrumentation and a little modification of the ``locals`` dictionary passed to ``__import__``. When a user calls ``defer_imports.ast_rewrite.import_hook()`` to set up the library machinery (see "Setup" above), what they are doing is installing an import hook that will modify the code of any given Python file that uses the ``defer_imports.until_use`` context manager. Using AST transformation, it adds a few lines of code around imports within that context manager to notify the new ``__import__`` what the name is that the import will be stored into.
 
 With this methodology, we can avoid using implementation-specific hacks like frame manipulation to modify the locals. We can even avoid changing the contract of ``builtins.__import__``, which specifically says it does not modify the global or local namespaces that are passed into it. We may modify and replace members of it, but at no point do we add or remove anything while within ``__import__``, thereby not changing its size.
 
@@ -186,9 +186,9 @@ There is a local benchmark script for timing the import of a significant portion
 
 If you want compilation time included in the benchmark, do the following:
 
-    1.  Run with |python -B|_ and ``--remove-pycaches`` to purge all bytecode cache files in the project directories and prevent new ones from being written.
-    2.  Run with just |python -B|_ to get the compilation time included.
-    3.  As long as there are no pycache files, you can repeat just 2.
+1.  Run with |python -B|_ and ``--remove-pycaches`` to purge all bytecode cache files in the project directories and prevent new ones from being written.
+2.  Run with just |python -B|_ to get the compilation time included.
+3.  As long as there are no pycache files, you can repeat just 2.
 
 An sample run across versions, with bytecode caching, after some warmup runs:
 
