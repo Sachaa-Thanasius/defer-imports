@@ -534,11 +534,11 @@ def _walk_globals(node: ast.AST) -> t.Generator[ast.AST, None, None]:
     *Child* nodes that introduce a new scope, such as class and function definitions, are skipped entirely.
     """
 
-    scope_node_types = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
+    SCOPE_NODE_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
     unvisited = collections.deque([node])
     while unvisited:
         node = unvisited.popleft()
-        unvisited.extend(child for child in ast.iter_child_nodes(node) if not isinstance(child, scope_node_types))
+        unvisited.extend(child for child in ast.iter_child_nodes(node) if not isinstance(child, SCOPE_NODE_TYPES))
         yield node
 
 
@@ -558,11 +558,10 @@ class _DIFileLoader(SourceFileLoader):
             `importlib.machinery.SourceLoader.get_code()` expects this error from this function.
         """
 
-        # NOTE: Another option is to monkeypatch `importlib.util.cache_from_source`, as beartype and typeguard do,
-        # but that seems excessive for this use case.
-        # Ref: https://github.com/beartype/beartype/blob/e9eeb4e282f438e770520b99deadbe219a1c62dc/beartype/claw/_importlib/_clawimpload.py#L177-L312
-        # NOTE: See facebookincubator/cinderx's strict loader for a much more sophisticated code rewriter that also
-        # deals with this.
+        # NOTE: There are other options:
+        #     1. Monkeypatch `importlib.util.cache_from_source`, as beartype and typeguard do.
+        #        Ref: https://github.com/beartype/beartype/blob/e9eeb4e282f438e770520b99deadbe219a1c62dc/beartype/claw/_importlib/_clawimpload.py#L177-L312
+        #     2. Do whatever facebookincubator/cinderx's strict loader does.
 
         data = super().get_data(path)
 
@@ -666,18 +665,35 @@ class _DIFileFinder(FileFinder):
 _PATH_HOOK = _DIFileFinder.path_hook((_DIFileLoader, SOURCE_SUFFIXES))
 
 
+# TODO: Reevaluate configuration in general.
+# Currently, the only cooperative configuration setup currently won't break the world is:
+#
+#     1. Libraries always use import_hook() as context manager and only defer their own modules/submodules.
+#     2. Applications call install_hook() on startup with no args or ["*"].
+#
+# There's no reasonable way to enforce 1, and it feels like an API that isn't meant to be used by libraries.
+# A ton of similar libraries (beartype) and ideas (PEP 690) get around this by stating upfront they only are directly
+# targetting the use case of applications.
+#
+# Is there way to make the API more difficult to "misuse" while still being useful for libraries?
+#
+# Other things to consider:
+#     - Does uninstall do what we or a library/app/user would want?
+#     - Can this work for libraries with different structures? Examples:
+#          - Single-file modules (astpretty)
+#          - Multi-file libraries (packaging)
 @_final
 class ImportHookContext:
     """An installer and configurer for defer_imports's import hook.
 
     Before this is called, `defer_imports.until_use` will be a no-op.
 
-    Installation ensures that imports within `defer_imports.until_use` blocks are always instrumented within modules
-    imported *afterwards*. The configuration knobs are only for determining which modules should be "globally"
-    instrumented, having *all* their global imports rewritten.
-
     Install *before* importing modules this is meant to affect. One place to do that is ``__init__.py`` of a package
     or application.
+
+    Installation ensures that imports within `defer_imports.until_use` blocks are always instrumented within any modules
+    imported *afterwards*. The configuration knobs are only for determining which modules should be globally
+    instrumented, having *all* their global imports rewritten (excluding those in escape hatches).
 
     Parameters
     ----------
@@ -940,7 +956,7 @@ class _DIKey(str):
 
         # Only the first thread to grab the lock should resolve the deferred import.
         with self.__lock:
-            # Check that another thread didn't already resolve the import while waiting on the lock.
+            # Check that another thread didn't already resolve the import while this one was waiting on the lock.
             if not self.__is_resolved:
                 self.__resolve_import()
                 self.__is_resolved = True
@@ -958,11 +974,13 @@ class _DIKey(str):
     def __resolve_import(self, /) -> None:
         """Resolve the import and replace the deferred key and placeholder in the relevant namespace with the result."""
 
+        # NOTE: We're using _temp_deferred to temporarily prevent _DIKey instances from resolving while we do things
+        # that may re-trigger their __eq__.
+
         raw_asname = str(self)
         imp_name, imp_globals, imp_locals, from_name = self.__import_args
         from_list = (from_name,) if (from_name is not None) else ()
 
-        # Temporarily prevent _DIKey instances from resolving while doing things that may re-trigger their __eq__.
         with _temp_deferred:
             # 1. Perform the original __import__ and pray.
             # Internal import machinery triggers __eq__ when attempting a submodule import, when it attempts to assign

@@ -67,10 +67,10 @@ def remove_pycaches() -> None:
         cache_file.unlink()
 
 
-def pretty_print_results(results: dict[str, float], minimum: float) -> None:
-    """Format and print results as an reST-style list table."""
+def pprint_results(results: dict[str, float], minimum: float) -> None:
+    """Format and print results as an rST-style list table."""
 
-    sep = "  "
+    sep = " " * 2
 
     impl_header = "Implementation"
     impl_len = len(impl_header)
@@ -94,12 +94,6 @@ def pretty_print_results(results: dict[str, float], minimum: float) -> None:
     impl = platform.python_implementation().ljust(impl_len)
     version = f"{sys.version_info.major}.{sys.version_info.minor}".ljust(version_len)
 
-    if sys.dont_write_bytecode:
-        print("Run once with __pycache__ folders removed and bytecode caching disallowed")
-    else:
-        print("Run once with bytecode caching allowed")
-
-    print()
     print(divider)
     print(header)
     print(divider)
@@ -145,7 +139,14 @@ def main() -> None:
 
     minimum = min(results.values())
 
-    pretty_print_results(results, minimum)
+    if sys.dont_write_bytecode:
+        print("Run once with __pycache__ folders removed and bytecode caching disallowed")
+    else:
+        print("Run once with bytecode caching allowed")
+
+    print()
+
+    pprint_results(results, minimum)
 
 
 if __name__ == "__main__":

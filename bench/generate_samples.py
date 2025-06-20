@@ -590,14 +590,6 @@ def main() -> None:
     # ---- defer_imports-influenced imports (local), but for a test in the tests directory
     shutil.copy(sample_defer_path, tests_path / "sample_stdlib_imports.py")
 
-    # ---- slothy-hooked imports
-    sample_slothy_contents = _CONTEXT_MANAGER_TEMPLATE.format(
-        import_stmt="from slothy import lazy_importing",
-        ctx_manager="with lazy_importing():",
-    )
-    sample_slothy_path = bench_path / "sample_slothy.py"
-    sample_slothy_path.write_text(sample_slothy_contents, encoding="utf-8")
-
 
 if __name__ == "__main__":
     raise SystemExit(main())
