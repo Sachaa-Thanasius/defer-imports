@@ -665,23 +665,6 @@ class _DIFileFinder(FileFinder):
 _PATH_HOOK = _DIFileFinder.path_hook((_DIFileLoader, SOURCE_SUFFIXES))
 
 
-# TODO: Reevaluate configuration in general.
-# Currently, the only cooperative configuration setup currently won't break the world is:
-#
-#     1. Libraries always use import_hook() as context manager and only defer their own modules/submodules.
-#     2. Applications call install_hook() on startup with no args or ["*"].
-#
-# There's no reasonable way to enforce 1, and it feels like an API that isn't meant to be used by libraries.
-# A ton of similar libraries (beartype) and ideas (PEP 690) get around this by stating upfront they only are directly
-# targetting the use case of applications.
-#
-# Is there way to make the API more difficult to "misuse" while still being useful for libraries?
-#
-# Other things to consider:
-#     - Does uninstall do what we or a library/app/user would want?
-#     - Can this work for libraries with different structures? Examples:
-#          - Single-file modules (astpretty)
-#          - Multi-file libraries (packaging)
 @_final
 class ImportHookContext:
     """An installer and configurer for defer_imports's import hook.
