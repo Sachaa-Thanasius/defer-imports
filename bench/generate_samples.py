@@ -14,8 +14,8 @@ import __future__
 # import _bootlocale  # Doesn't exist on 3.11 on Windows
 import _collections_abc
 import _compat_pickle
-import _compression
 
+# import _compression  # Removed/renamed in 3.14.
 # import _dummy_thread  # Doesn't exist in 3.9+ in WSL
 import _markupbase
 import _osx_support
@@ -96,10 +96,10 @@ import csv
 import ctypes
 import ctypes._aix
 import ctypes._endian
-import ctypes.macholib
-import ctypes.macholib.dyld
-import ctypes.macholib.dylib
 
+# import ctypes.macholib  # Doesn't exist in WSL
+# import ctypes.macholib.dyld  # Doesn't exist in WSL
+# import ctypes.macholib.dylib  # Doesn't exist in WSL
 # import ctypes.macholib.framework  # Doesn't exist in 3.9+ in WSL
 import ctypes.util
 import dataclasses
@@ -553,7 +553,7 @@ import test
 """
 
 _INDENTED_STDLIB_IMPORTS = "".join(
-    (f'{" " * 4}{line}' if line.strip() else line) for line in _STDLIB_IMPORTS.splitlines(keepends=True)
+    (f"{' ' * 4}{line}" if line.strip() else line) for line in _STDLIB_IMPORTS.splitlines(keepends=True)
 )
 
 _CONTEXT_MANAGER_TEMPLATE = f"""\
@@ -589,14 +589,6 @@ def main() -> None:
 
     # ---- defer_imports-influenced imports (local), but for a test in the tests directory
     shutil.copy(sample_defer_path, tests_path / "sample_stdlib_imports.py")
-
-    # ---- slothy-hooked imports
-    sample_slothy_contents = _CONTEXT_MANAGER_TEMPLATE.format(
-        import_stmt="from slothy import lazy_importing",
-        ctx_manager="with lazy_importing():",
-    )
-    sample_slothy_path = bench_path / "sample_slothy.py"
-    sample_slothy_path.write_text(sample_slothy_contents, encoding="utf-8")
 
 
 if __name__ == "__main__":

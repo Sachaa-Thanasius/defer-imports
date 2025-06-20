@@ -1,20 +1,23 @@
 # pyright: reportUnusedImport=none
-"""Simple benchark script for comparing the import time of the Python standard library when using regular imports,
-defer_imports-influence imports, and slothy-influenced imports.
 
-The sample scripts being imported are generated with bench/generate_samples.py.
+"""Simple benchark script for comparing the import time of the Python standard library when using regular imports and
+defer_imports-influence imports.
+
+The sample scripts being imported were generated with bench/generate_samples.py.
 """
 
+import argparse
 import platform
 import shutil
 import sys
 import time
+import unittest.mock
 from pathlib import Path
 
-import defer_imports
+import defer_imports.ast_rewrite
 
 
-class CatchTime:
+class TimeCatcher:
     """A context manager that measures the time taken to execute its body."""
 
     def __enter__(self):
@@ -26,41 +29,48 @@ class CatchTime:
 
 
 def bench_regular() -> float:
-    with CatchTime() as ct:
+    with TimeCatcher() as tc:
         import bench.sample_regular
-    return ct.elapsed
-
-
-def bench_slothy() -> float:
-    with CatchTime() as ct:
-        import bench.sample_slothy
-    return ct.elapsed
+    return tc.elapsed
 
 
 def bench_defer_imports_local() -> float:
-    with defer_imports.install_import_hook(uninstall_after=True), CatchTime() as ct:
-        import bench.sample_defer_local
-    return ct.elapsed
+    with TimeCatcher() as tc:  # noqa: SIM117
+        with defer_imports.ast_rewrite.import_hook(uninstall_after=True):
+            import bench.sample_defer_local
+    return tc.elapsed
 
 
 def bench_defer_imports_global() -> float:
-    with defer_imports.install_import_hook(uninstall_after=True, apply_all=True), CatchTime() as ct:
-        import bench.sample_defer_global
-    return ct.elapsed
+    with TimeCatcher() as tc:  # noqa: SIM117
+        with defer_imports.ast_rewrite.import_hook(["*"], uninstall_after=True):
+            import bench.sample_defer_global
+    return tc.elapsed
+
+
+BENCH_FUNCS = {
+    "regular": bench_regular,
+    "defer_imports (local)": bench_defer_imports_local,
+    "defer_imports (global)": bench_defer_imports_global,
+}
 
 
 def remove_pycaches() -> None:
     """Remove all cached Python bytecode files from the current directory."""
 
-    for dir_ in Path().rglob("__pycache__"):
-        shutil.rmtree(dir_)
+    curr_dir = Path()
 
-    for file in Path().rglob("*.py[co]"):
-        file.unlink()
+    for cache_dir in curr_dir.rglob("__pycache__"):
+        shutil.rmtree(cache_dir)
+
+    for cache_file in curr_dir.rglob("*.py[co]"):
+        cache_file.unlink()
 
 
-def pretty_print_results(results: dict[str, float], minimum: float) -> None:
-    """Format and print results as an reST-style list table."""
+def pprint_results(results: dict[str, float], minimum: float) -> None:
+    """Format and print results as an rST-style list table."""
+
+    sep = " " * 2
 
     impl_header = "Implementation"
     impl_len = len(impl_header)
@@ -78,18 +88,12 @@ def pretty_print_results(results: dict[str, float], minimum: float) -> None:
     time_header = "Time".ljust(time_len)
     time_divider = "=" * time_len
 
-    divider = "  ".join((impl_divider, version_divider, benchmark_divider, time_divider))
-    header = "  ".join((impl_header, version_header, benchmark_header, time_header))
+    divider = sep.join((impl_divider, version_divider, benchmark_divider, time_divider))
+    header = sep.join((impl_header, version_header, benchmark_header, time_header))
 
     impl = platform.python_implementation().ljust(impl_len)
     version = f"{sys.version_info.major}.{sys.version_info.minor}".ljust(version_len)
 
-    if sys.dont_write_bytecode:
-        print("Run once with __pycache__ folders removed and bytecode caching disallowed")
-    else:
-        print("Run once with bytecode caching allowed")
-
-    print()
     print(divider)
     print(header)
     print(divider)
@@ -98,44 +102,51 @@ def pretty_print_results(results: dict[str, float], minimum: float) -> None:
         fmt_bench_type = bench_type.ljust(benchmark_len)
         fmt_result = f"{result:.5f}s ({result / minimum:.2f}x)".ljust(time_len)
 
-        print(impl, version, fmt_bench_type, fmt_result, sep="  ")
+        print(impl, version, fmt_bench_type, fmt_result, sep=sep)
 
     print(divider)
 
 
-BENCH_FUNCS = {
-    "regular": bench_regular,
-    "slothy": bench_slothy,
-    "defer_imports (local)": bench_defer_imports_local,
-    "defer_imports (global)": bench_defer_imports_global,
-}
-
-
 def main() -> None:
-    import argparse
-
     parser = argparse.ArgumentParser()
 
     default_exec_order = list(BENCH_FUNCS)
     parser.add_argument(
         "--exec-order",
         action="extend",
-        nargs=4,
+        nargs=len(default_exec_order),
         choices=default_exec_order,
         type=str,
         help="The order in which the influenced (or not influenced) imports are run",
     )
+    parser.add_argument(
+        "--remove-pycaches",
+        action="store_true",
+        help="Whether to remove __pycache__ directories and other bytecode cache files.",
+    )
     args = parser.parse_args()
 
-    if sys.dont_write_bytecode:
+    # See how long it actually takes to compile.
+    if args.remove_pycaches:
         remove_pycaches()
 
     exec_order: list[str] = args.exec_order or default_exec_order
 
-    results = {type_: BENCH_FUNCS[type_]() for type_ in exec_order}
+    results: dict[str, float] = {}
+    for type_ in exec_order:
+        with unittest.mock.patch.dict(sys.modules):
+            results[type_] = BENCH_FUNCS[type_]()
+
     minimum = min(results.values())
 
-    pretty_print_results(results, minimum)
+    if sys.dont_write_bytecode:
+        print("Run once with __pycache__ folders removed and bytecode caching disallowed")
+    else:
+        print("Run once with bytecode caching allowed")
+
+    print()
+
+    pprint_results(results, minimum)
 
 
 if __name__ == "__main__":

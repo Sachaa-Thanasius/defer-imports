@@ -1,1 +1,5 @@
 * text=auto eol=lf
+
+# Generated files
+bench/sample_*.py               linguist-generated=true diff=generated
+tests/sample_stdlib_imports.py  linguist-generated=true diff=generated
