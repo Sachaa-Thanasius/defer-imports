@@ -52,44 +52,26 @@ To do its work, ``defer-imports`` must hook into the Python import system. Inclu
     # For all usage, import statements *within the module the hook is installed from* 
     # are not affected. In this case, that would be this module.
 
-    defer_imports.install_import_hook()
-
-    import your_code
-
-
-The function call's result can be used as a context manager, which makes sense when passing in configuration arguments. That way, unrelated code or usage of this library isn't polluted:
-
-.. code-block:: python
-
-    import defer_imports
-
-    with defer_imports.install_import_hook(module_names=(__name__,)) as hook_ctx:
+    with defer_imports.import_hook():
         import your_code
 
 
-Making this call without arguments allows user code with imports contained within the ``defer_imports.until_use`` context manager to be deferred until referenced. However, its several configuration parameters allow toggling global instrumentation (affecting all import statements) and adjusting the granularity of that global instrumentation.
+Regardless of passed configuration, the import hook will cause imports contained within the ``defer_imports.until_use`` context manager to be deferred until referenced. However, its several configuration parameters allow toggling global instrumentation (affecting all import statements) and adjusting the granularity of that global instrumentation.
 
-**WARNING: Avoid using the hook as anything other than a context manager when passing in module-specific configuration; otherwise, the explicit (or default) configuration will persist and may cause other packages using defer_imports to behave differently than expected.**
+**WARNING: When passing in configuration, avoid installing the hook without resetting your specific configuration after usage; otherwise, the explicit (or default) configuration will persist and may cause other packages using defer_imports to behave differently than intended by their authors.**
 
 .. code-block:: python
 
     import defer_imports
 
-    # Ex 1. Henceforth, instrument all import statements in other pure-Python modules
-    # so that they are deferred. Off by default. If on, it has priority over any other
-    # configuration passed in alongside it.
-    #
-    # Better suited for applications.
-    defer_imports.install_import_hook(apply_all=True)
-
-    # Ex 2. Henceforth, instrument all import statements *only* in modules whose names
+    # Ex 1. Henceforth, instrument all import statements *only* in modules whose names
     # are in the given sequence of strings.
     #
     # Better suited for libraries.
-    with defer_imports.install_import_hook(module_names=(__name__,)):
-        ...
+    with defer_imports.import_hook([f"{__name__}.*"]):
+        import ...
 
-    # Ex 3. Henceforth, instrument all import statements *only* in modules whose names
+    # Ex 2. Henceforth, instrument all import statements *only* in modules whose names
     # are in the given sequence *or* whose names indicate they are submodules of any
     # of the sequence members.
     #
@@ -97,8 +79,17 @@ Making this call without arguments allows user code with imports contained withi
     # be affected.
     #
     # Better suited for libraries.
-    with defer_imports.install_import_hook(module_names=("discord",), recursive=True):
-        ...
+    with defer_imports.import_hook(["discord"]):
+        import ...
+
+    # Ex 3. Henceforth, instrument all import statements in other pure-Python modules
+    # so that they are deferred. Off by default. If on, it has priority over any other
+    # configuration passed in alongside it.
+    #
+    # Better suited for applications.
+    defer_imports.import_hook(["*"])
+
+    import ...
 
 
 Example
@@ -155,11 +146,11 @@ Caveats
 -   May clash with other import hooks.
 
     -   Examples of popular packages using clashing import hooks: |typeguard|_, |beartype|_, |jaxtyping|_, |torchtyping|_, |pyximport|_
-    -   It's possible to work around this by reaching into ``defer-imports``'s internals, combining its instrumentation machinery with that of another library's, then creating a custom import hook using that machinery, but such a scenario is currently not well-supported beyond ``defer_imports.install_import_hook()`` accepting a ``loader_class`` argument.
+    -   It's possible to work around this by reaching into ``defer-imports``'s internals, combining its instrumentation machinery with that of another library's, then creating a custom import hook using that machinery, but such a scenario is currently not well-supported.
 
--   Can't automatically resolve deferred imports in a namespace when that namespace is being iterated over, leaving a hole in its abstraction.
+-   Can't automatically resolve deferred imports in a namespace if the namespace and its keys are inspected without triggering those keys' `__eq__` method, leaving a hole in its abstraction.
 
-    -   When using dictionary iteration methods on a dictionary or namespace that contains a deferred import key/proxy pair, the members of that pair will be visible, mutable, and will not resolve automatically. PEP 690 specifically addresses this by modifying the builtin ``dict``, allowing each instance to know if it contains proxies and then resolve them automatically during iteration (see the second half of its `"Implementation" section <https://peps.python.org/pep-0690/#implementation>`_ for more details). Note that qualifying ``dict`` iteration methods include ``dict.items()``, ``dict.values()``, etc., as well as the builtin functions ``locals()``, ``globals()``, ``vars()``, and ``dir()``.
+    -   For example, when using dictionary iteration methods on a dictionary or namespace that contains a deferred import key/proxy pair, the members of that pair will be visible, mutable, and will not resolve automatically. PEP 690 specifically addresses this by modifying the builtin ``dict``, allowing each instance to know if it contains proxies and then resolve them automatically during iteration (see the second half of its `"Implementation" section <https://peps.python.org/pep-0690/#implementation>`_ for more details). Note that qualifying ``dict`` iteration methods include ``dict.items()``, ``dict.values()``, etc., and it's possible to get namespace keys and values with ``locals()``, ``globals()``, ``vars()``, and ``dir()``.
 
         As of right now, nothing can be done about this using pure Python without massively slowing down ``dict``. Accordingly, users should try to avoid interacting with deferred import keys/proxies if encountered while iterating over module dictionaries; the result of doing so is not guaranteed.
 
@@ -179,64 +170,55 @@ How?
 
 The core of this package is quite simple: when import statments are executed, the resulting values are special proxies representing the delayed import, which are then saved in the local namespace with special keys instead of normal string keys. When a user requests the normal string key corresponding to the import, the relevant import is executed and both the special key and the proxy replace themselves with the correct string key and import result. Everything stems from this.
 
-The ``defer_imports.until_use`` context manager is what causes the proxies to be returned by the import statements: it temporarily replaces ``builtins.__import__`` with a version that will give back proxies that store the arguments needed to execute the *actual* import at a later time.
+The ``defer_imports.until_use`` context manager is what causes the proxies to be returned by the import statements: it temporarily replaces ``builtins.__import__`` with a version that will give back proxies that do nothing.
 
-Those proxies don't use those stored ``__import__`` arguments themselves, though; the aforementioned special keys are what use the proxy's stored arguments to trigger the late import. These keys are aware of the namespace, the *dictionary*, they live in, are aware of the proxy they are the key for, and have overriden their ``__eq__`` and ``__hash__`` methods so that they know when they've been queried. In a sense, they're like descriptors, but instead of "owning the dot", they're "owning the brackets". Once such a key has been matched (i.e. someone uses the name of the import), it can use its corresponding proxy's stored arguments to execute the late import and *replace itself and the proxy* in the local namespace. That way, as soon as the name of the deferred import is referenced, all a user sees in the local namespace is a normal string key and the result of the resolved import.
+The new ``__import__`` also replaces the keys of those proxies in the namespace with special keys that store the required arguments to trigger the late import. These keys are aware of the namespace, the *dictionary*, they live in, and have overriden their ``__eq__`` and ``__hash__`` methods so that they know when they've been *directly* queried. Once such a key has been matched (i.e. someone uses the name of the import), it can use its stored arguments to execute the late import and *replace itself and the proxy* in the corresponding namespace. That way, as soon as the name of the deferred import is referenced, all a user sees in the local namespace is a normal string key and the result of the resolved import.
 
-The missing intermediate step is making sure these special proxies are stored with these special keys in the namespace. After all, Python name binding semantics only allow regular strings to be used as variable names/namespace keys; how can this be bypassed? ``defer-imports``'s answer is a little compile-time instrumentation. When a user calls ``defer_imports.install_import_hook()`` to set up the library machinery (see "Setup" above), what they are doing is installing an import hook that will modify the code of any given Python file that uses the ``defer_imports.until_use`` context manager. Using AST transformation, it adds a few lines of code around imports within that context manager to reassign the returned proxies to special keys in the local namespace (via ``locals()``).
+The missing intermediate step is making sure these special keys and proxies match up in the namespace. After all, Python name binding semantics only allow regular strings to be used as variable names/namespace keys; how can this be bypassed? ``defer-imports``'s answer is a little compile-time instrumentation and a little modification of the ``locals`` dictionary passed to ``__import__``. When a user calls ``defer_imports.install_import_hook()`` to set up the library machinery (see "Setup" above), what they are doing is installing an import hook that will modify the code of any given Python file that uses the ``defer_imports.until_use`` context manager. Using AST transformation, it adds a few lines of code around imports within that context manager to notify the new ``__import__`` what the name is that the import will be stored into.
 
-With this methodology, we can avoid using implementation-specific hacks like frame manipulation to modify the locals. We can even avoid changing the contract of ``builtins.__import__``, which specifically says it does not modify the global or local namespaces that are passed into it. We may modify and replace members of it, but at no point do we change its size while within ``__import__`` by removing or adding anything.
+With this methodology, we can avoid using implementation-specific hacks like frame manipulation to modify the locals. We can even avoid changing the contract of ``builtins.__import__``, which specifically says it does not modify the global or local namespaces that are passed into it. We may modify and replace members of it, but at no point do we add or remove anything while within ``__import__``, thereby not changing its size.
 
 
 Benchmarks
 ==========
 
-There are currently a few ways of measuring activation and/or import time:
+There is a local benchmark script for timing the import of a significant portion of the standard library. It can be invoked with ``python -m bench.bench_samples``.
 
--   A local benchmark script for timing the import of a significant portion of the standard library.
+If you want compilation time included in the benchmark, do the following:
 
-    -   Invokable with ``python -m bench.bench_samples`` or ``hatch run bench:bench``.
-    -   To prevent bytecode caching from impacting the benchmark, run with |python -B|_, which will set ``sys.dont_write_bytecode`` to ``True`` and cause the benchmark script to purge all existing ``__pycache__`` folders in the project directory.
-    -   PyPy is excluded from the benchmark since it takes time to ramp up.
-    -   An sample run across versions using ``hatch``:
+    1.  Run with |python -B|_ and ``--remove-pycaches`` to purge all bytecode cache files in the project directories and prevent new ones from being written.
+    2.  Run with just |python -B|_ to get the compilation time included.
+    3.  As long as there are no pycache files, you can repeat just 2.
 
-        (Run once with ``__pycache__`` folders removed and ``sys.dont_write_bytecode=True``):
+An sample run across versions, with bytecode caching, after some warmup runs:
 
-        ==============  =======  =============  ===================
-        Implementation  Version  Benchmark      Time
-        ==============  =======  =============  ===================
-        CPython         3.9      regular        0.48585s (409.31x)
-        CPython         3.9      slothy         0.00269s (2.27x)
-        CPython         3.9      defer-imports  0.00119s (1.00x)
-        \-\-            \-\-     \-\-           \-\-
-        CPython         3.10     regular        0.41860s (313.20x)
-        CPython         3.10     slothy         0.00458s (3.43x)   
-        CPython         3.10     defer-imports  0.00134s (1.00x)
-        \-\-            \-\-     \-\-           \-\-
-        CPython         3.11     regular        0.60501s (279.51x)
-        CPython         3.11     slothy         0.00570s (2.63x)
-        CPython         3.11     defer-imports  0.00216s (1.00x)
-        \-\-            \-\-     \-\-           \-\-
-        CPython         3.12     regular        0.53233s (374.40x)
-        CPython         3.12     slothy         0.00552s (3.88x)
-        CPython         3.12     defer-imports  0.00142s (1.00x)   
-        \-\-            \-\-     \-\-           \-\-
-        CPython         3.13     regular        0.53704s (212.19x)
-        CPython         3.13     slothy         0.00319s (1.26x)
-        CPython         3.13     defer-imports  0.00253s (1.00x)
-        ==============  =======  =============  ===================
-
--   Commands for only measuring import time of the library, using built-in Python timing tools like |timeit|_ and |python -X importtime|_.
-
-    -   Examples::
-
-            python -m timeit -n 1 -r 1 -- "import defer_imports"
-            hatch run bench:import-time defer_imports
-            python -X importtime -c "import defer_imports"
-            hatch run bench:simple-import-time defer_imports
-
-    -   Substitute ``defer_imports`` in the above commands with other modules, e.g. ``slothy``, to compare.
-    -   The results can vary greatly between runs. If possible, only compare the resulting time(s) when collected from the same process.
+==============  =======  ======================  ===================
+Implementation  Version  Benchmark               Time
+==============  =======  ======================  ===================
+CPython         3.9      regular                 0.32654s (194.87x)
+CPython         3.9      defer_imports (local)   0.00180s (1.07x)
+CPython         3.9      defer_imports (global)  0.00168s (1.00x)
+\-\-            \-\-     \-\-                    \-\-
+CPython         3.10     regular                 0.28364s (165.28x)
+CPython         3.10     defer_imports (local)   0.00173s (1.01x)
+CPython         3.10     defer_imports (global)  0.00172s (1.00x)
+\-\-            \-\-     \-\-                    \-\-
+CPython         3.11     regular                 0.28739s (194.71x)
+CPython         3.11     defer_imports (local)   0.00158s (1.07x)
+CPython         3.11     defer_imports (global)  0.00148s (1.00x)
+\-\-            \-\-     \-\-                    \-\-
+CPython         3.12     regular                 0.29072s (169.91x)
+CPython         3.12     defer_imports (local)   0.00171s (1.00x)
+CPython         3.12     defer_imports (global)  0.00224s (1.31x)  
+\-\-            \-\-     \-\-                    \-\-
+CPython         3.13     regular                 0.29238s (182.38x)
+CPython         3.13     defer_imports (local)   0.00183s (1.14x)
+CPython         3.13     defer_imports (global)  0.00160s (1.00x)
+\-\-            \-\-     \-\-                    \-\-
+PyPy            3.10     regular                 0.63871s (159.21x)
+PyPy            3.10     defer_imports (local)   0.00752s (1.88x)
+PyPy            3.10     defer_imports (global)  0.00401s (1.00x)
+==============  =======  ======================  ===================
 
 
 Acknowledgements
@@ -255,7 +237,7 @@ The design of this library was inspired by the following:
 -   |ideas|_
 -   `Sinbad <https://github.com/mikeshardmind>`_'s feedback
 
-Without them, this would not exist.
+Without them, this would not exist. It stands on the shoulders of giants.
 
 
 ..
