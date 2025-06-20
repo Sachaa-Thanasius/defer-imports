@@ -559,9 +559,9 @@ class _DIFileLoader(SourceFileLoader):
         """
 
         # NOTE: There are other options:
-        #     1. Monkeypatch `importlib.util.cache_from_source`, as beartype and typeguard do.
-        #        Ref: https://github.com/beartype/beartype/blob/e9eeb4e282f438e770520b99deadbe219a1c62dc/beartype/claw/_importlib/_clawimpload.py#L177-L312
-        #     2. Do whatever facebookincubator/cinderx's strict loader does.
+        # 1. Monkeypatch `importlib.util.cache_from_source`, as beartype and typeguard do.
+        #    Ref: https://github.com/beartype/beartype/blob/e9eeb4e282f438e770520b99deadbe219a1c62dc/beartype/claw/_importlib/_clawimpload.py#L177-L312
+        # 2. Do whatever facebookincubator/cinderx's strict loader does.
 
         data = super().get_data(path)
 
@@ -820,9 +820,6 @@ class _TempDeferred:
         _is_deferred_lock.release()
 
 
-_temp_deferred = _TempDeferred()
-
-
 def _accumulate_dotted_parts(dotted_name: str, start: int, /) -> set[str]:
     """Return an accumulation of dot-separated components from a dotted string."""
 
@@ -957,21 +954,21 @@ class _DIKey(str):
     def __resolve_import(self, /) -> None:
         """Resolve the import and replace the deferred key and placeholder in the relevant namespace with the result."""
 
-        # NOTE: We're using _temp_deferred to temporarily prevent _DIKey instances from resolving while we do things
-        # that may re-trigger their __eq__.
+        # NOTE: We're using this to temporarily prevent _DIKey instances from resolving while we do things that may
+        # re-trigger their __eq__.
+        temp_deferred = _TempDeferred()
 
         raw_asname = str(self)
         imp_name, imp_globals, imp_locals, from_name = self.__import_args
         from_list = (from_name,) if (from_name is not None) else ()
 
-        with _temp_deferred:
+        with temp_deferred:
             # 1. Perform the original __import__ and pray.
-            # Internal import machinery triggers __eq__ when attempting a submodule import, when it attempts to assign
-            # the submodule as an attribute to the parent module.
+            # __eq__ trigger: Internal import machinery when it tries to assign a submodule to a parent module.
             module: types.ModuleType = _previous___import__.get()(imp_name, imp_globals, imp_locals, from_list, 0)
 
             # 2. Replace the deferred key in the relevant namespace to avoid it sticking around.
-            # dict.pop() uses __eq__ to find the key to pop.
+            # __eq__ trigger: dict.pop().
             imp_locals[raw_asname] = imp_locals.pop(raw_asname)
 
         # 3. Resolve any requested attribute access, then replace the proxy with the result in the relevant namespace.
@@ -987,8 +984,8 @@ class _DIKey(str):
 
         # 4. Create nested keys and proxies as needed in the resolved module.
         if self.__submod_names:
-            with _temp_deferred:
-                # _handle_import_key() triggers __eq__.
+            with temp_deferred:
+                # __eq__ trigger: _handle_import_key().
                 for submod_name in self.__submod_names:
                     _handle_import_key(submod_name, module.__dict__)
 
@@ -1068,11 +1065,11 @@ def _deferred___import__(
         existing_key = _get_exact_key(parent_name, locals)
 
         if (existing_key is not None) and isinstance(existing_key, _DIKey):
-            # Case 5.1: The parent module name was imported via defer_imports in the same namespace.
+            # Case 5.1: The name of the parent module was imported via defer_imports in the same namespace.
             existing_key._di_add_submodule_name(name)
             return locals[parent_name]
         else:
-            # Case 5.2: The parent module name doesn't exist in the same namespace or wasn't placed there by us.
+            # Case 5.2: The name of the parent module doesn't exist in the same namespace or wasn't placed there by us.
             sub_names = _accumulate_dotted_parts(name, len(parent_name) + 1)
             locals[_DIKey(parent_name, (parent_name, globals, locals, None), sub_names)] = locals.pop(parent_name, None)
             return _DIProxy(parent_name)
@@ -1097,7 +1094,7 @@ class _DIContext:
     __slots__ = ("_is_deferred_ctx", "_import_ctx_token")
 
     def __enter__(self, /) -> None:
-        self._is_deferred_ctx = _temp_deferred.__enter__()
+        self._is_deferred_ctx = _TempDeferred().__enter__()
         self._import_ctx_token = _previous___import__.set(builtins.__import__)
         builtins.__import__ = _deferred___import__
 
