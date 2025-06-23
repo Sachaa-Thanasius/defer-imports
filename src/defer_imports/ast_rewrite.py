@@ -88,7 +88,7 @@ elif _sys.version_info >= (3, 12):  # pragma: >=3.12 cover
     # collections always imports collections.abc, but typeshed isn't aware of that (yet).
     _ReadableBuffer: _t.TypeAlias = "_collections.abc.Buffer"
 else:  # pragma: <3.12 cover
-    _ReadableBuffer: TypeAlias = "_t.Union[bytes, bytearray, memoryview]"
+    _ReadableBuffer: _TypeAlias = "_t.Union[bytes, bytearray, memoryview]"
 
 
 if TYPE_CHECKING:
