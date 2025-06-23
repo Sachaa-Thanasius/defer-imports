@@ -14,7 +14,7 @@ import time
 import unittest.mock
 from pathlib import Path
 
-import defer_imports.ast_rewrite
+import defer_imports
 
 
 class TimeCatcher:
@@ -36,14 +36,14 @@ def bench_regular() -> float:
 
 def bench_defer_imports_local() -> float:
     with TimeCatcher() as tc:  # noqa: SIM117
-        with defer_imports.ast_rewrite.import_hook(uninstall_after=True):
+        with defer_imports.import_hook(uninstall_after=True):
             import bench.sample_defer_local
     return tc.elapsed
 
 
 def bench_defer_imports_global() -> float:
     with TimeCatcher() as tc:  # noqa: SIM117
-        with defer_imports.ast_rewrite.import_hook(["*"], uninstall_after=True):
+        with defer_imports.import_hook(["*"], uninstall_after=True):
             import bench.sample_defer_global
     return tc.elapsed
 

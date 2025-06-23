@@ -12,7 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from defer_imports.ast_rewrite import (
+import defer_imports
+from defer_imports._ast_rewrite import (
     _ACTUAL_CTX_ASNAME,
     _ACTUAL_CTX_NAME,
     _BYTECODE_HEADER,
@@ -23,7 +24,6 @@ from defer_imports.ast_rewrite import (
     _DIKey,
     _get_exact_key,
     _ImportsInstrumenter,
-    import_hook,
 )
 
 
@@ -38,7 +38,7 @@ NestedMapping = collections.abc.Mapping[str, typing.Union["NestedMapping", str]]
 SAMPLE_DOCSTRING = "Module docstring here"
 
 MODULE_TEMPLATE = f"""\
-from defer_imports.ast_rewrite import {_ACTUAL_CTX_NAME} as {_ACTUAL_CTX_ASNAME}
+from defer_imports._ast_rewrite import {_ACTUAL_CTX_NAME} as {_ACTUAL_CTX_ASNAME}
 {{}}
 del {_ACTUAL_CTX_ASNAME}
 """.rstrip()
@@ -166,7 +166,7 @@ def test_path_hook_installation():
         before_length = len(sys.path_hooks)
 
         # It should not be present after just getting the hook context.
-        hook_ctx = import_hook()
+        hook_ctx = defer_imports.import_hook()
         assert _PATH_HOOK not in sys.path_hooks
         assert len(sys.path_hooks) == before_length
 
@@ -1024,7 +1024,7 @@ with defer_imports.until_use:
         with unittest.mock.patch.dict(sys.path_importer_cache):
             sys.path_importer_cache.pop(str(Path(__file__).parent), None)
 
-            with import_hook(uninstall_after=True):
+            with defer_imports.import_hook(uninstall_after=True):
                 import tests.sample_stdlib_imports
 
             # Sample-check the __future__ import.

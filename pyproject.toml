@@ -172,7 +172,7 @@ convention = "numpy"
 
 [tool.ruff.lint.per-file-ignores]
 # ---- Library code
-"src/defer_imports/ast_rewrite.py" = [
+"src/defer_imports/_ast_rewrite.py" = [
     "A002", # Allow some shadowing of builtins by parameter names.
 ]
 

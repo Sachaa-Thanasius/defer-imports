@@ -50,42 +50,36 @@ else:
 
 
 if TYPE_CHECKING:
-    from typing_extensions import TypeAlias as _TypeAlias
+    from typing_extensions import TypeAlias
 elif sys.version_info >= (3, 10):  # pragma: >=3.10 cover
-    _TypeAlias: t.TypeAlias = "t.TypeAlias"
+    TypeAlias: t.TypeAlias = "t.TypeAlias"
 else:  # pragma: <3.10 cover
 
     class TypeAlias:
         """Placeholder for typing.TypeAlias."""
 
-    _TypeAlias = TypeAlias
-    del TypeAlias
-
 
 if TYPE_CHECKING:
-    from typing_extensions import Self as _Self
+    from typing_extensions import Self
 elif sys.version_info >= (3, 11):  # pragma: >=3.11 cover
-    _Self: t.TypeAlias = "t.Self"
+    Self: t.TypeAlias = "t.Self"
 else:  # pragma: <3.11 cover
 
     class Self:
         """Placeholder for typing.Self."""
 
-    _Self = Self
-    del Self
-
 
 if TYPE_CHECKING:
-    from typing_extensions import Buffer as _ReadableBuffer
+    from typing_extensions import Buffer as ReadableBuffer
 elif sys.version_info >= (3, 12):  # pragma: >=3.12 cover
     # collections always imports collections.abc, but typeshed isn't aware of that (yet).
-    _ReadableBuffer: t.TypeAlias = "collections.abc.Buffer"
+    ReadableBuffer: t.TypeAlias = "collections.abc.Buffer"
 else:  # pragma: <3.12 cover
-    _ReadableBuffer: _TypeAlias = "t.Union[bytes, bytearray, memoryview]"
+    ReadableBuffer: TypeAlias = "t.Union[bytes, bytearray, memoryview]"
 
 
 if TYPE_CHECKING:
-    _final = t.final
+    final = t.final
 else:
 
     def final(f: object) -> object:  # pragma: no cover (tested in stdlib)
@@ -99,30 +93,27 @@ else:
             pass
         return f
 
-    _final = final
-    del final
-
 
 if sys.version_info >= (3, 10):  # pragma: >=3.10 cover
-    _SyntaxContext: _TypeAlias = (
+    _SyntaxContext: TypeAlias = (
         "tuple[t.Optional[str], t.Optional[int], t.Optional[int], t.Optional[str], t.Optional[int], t.Optional[int]]"
     )
 else:  # pragma: <3.10 cover
-    _SyntaxContext: _TypeAlias = "tuple[t.Optional[str], t.Optional[int], t.Optional[int], t.Optional[str]]"
+    _SyntaxContext: TypeAlias = "tuple[t.Optional[str], t.Optional[int], t.Optional[int], t.Optional[str]]"
 
 
 # compile()'s internals, and thus wrappers of it (e.g. ast.parse()), dropped support in 3.12 for non-bytes buffers as
 # the filename argument (see https://github.com/python/cpython/issues/98393).
 if sys.version_info >= (3, 12):  # pragma: >=3.12 cover
-    _ModulePath: _TypeAlias = "t.Union[str, os.PathLike[str], bytes]"
+    _ModulePath: TypeAlias = "t.Union[str, os.PathLike[str], bytes]"
 else:  # pragma: <3.12 cover
-    _ModulePath: _TypeAlias = "t.Union[str, os.PathLike[str], _ReadableBuffer]"
+    _ModulePath: TypeAlias = "t.Union[str, os.PathLike[str], ReadableBuffer]"
 
 
 # endregion
 
 
-_SourceData: _TypeAlias = "t.Union[_ReadableBuffer, str]"
+_SourceData: TypeAlias = "t.Union[ReadableBuffer, str]"
 
 
 # ============================================================================
@@ -206,7 +197,7 @@ def _calc___package__(globals: t.Mapping[str, t.Any]) -> t.Optional[str]:  # pra
 #
 # NOTE: The parameter type should be narrower (here and in typeshed), but for now, we just let this raise if
 # source_bytes.decode() doesn't exist. That shouldn't ever happen with our specific source retrieval pipeline.
-def _decode_source(source_bytes: _ReadableBuffer) -> str:  # pragma: no cover (tested in stdlib)
+def _decode_source(source_bytes: ReadableBuffer) -> str:  # pragma: no cover (tested in stdlib)
     """Decode bytes representing source code and return the string.
 
     Universal newline support is used in the decoding.
@@ -229,7 +220,7 @@ def _decode_source(source_bytes: _ReadableBuffer) -> str:  # pragma: no cover (t
 # NOTE: Technically, something like ast.AST & LocationAttrsProtocol would be more accurate, but:
 # 1. Python doesn't have intersections yet, and
 # 2. Using a local protocol without eagerly importing typing or having another module isn't doable until 3.12.
-_ASTWithLocation: _TypeAlias = "t.Union[ast.expr, ast.stmt]"
+_ASTWithLocation: TypeAlias = "t.Union[ast.expr, ast.stmt]"
 
 
 # NOTE: Make our generated variables more hygienic by prefixing their names with "_@di_". A few reasons for this choice:
@@ -602,7 +593,7 @@ class _DIFileLoader(SourceFileLoader):
 
         return data[len(_BYTECODE_HEADER) :]
 
-    def set_data(self, path: str, data: _ReadableBuffer, *, _mode: int = 0o666) -> None:
+    def set_data(self, path: str, data: ReadableBuffer, *, _mode: int = 0o666) -> None:
         """Write bytes data to a file.
 
         If the file is a bytecode one, add a `defer_imports`-specific header to it. That way, instrumented bytecode
@@ -689,7 +680,7 @@ class _DIFileFinder(FileFinder):
 _PATH_HOOK = _DIFileFinder.path_hook((_DIFileLoader, SOURCE_SUFFIXES))
 
 
-@_final
+@final
 class ImportHookContext:
     """An installer and configurer for defer_imports's import hook.
 
@@ -730,7 +721,7 @@ class ImportHookContext:
         self._uninstall_after: bool = uninstall_after
         self._config_token: contextvars.Token[tuple[str, ...]] | None = None
 
-    def __enter__(self, /) -> _Self:
+    def __enter__(self, /) -> Self:
         self.install()
         return self
 
@@ -803,7 +794,7 @@ import_hook = ImportHookContext
 # ============================================================================
 
 
-_ImportArgs: _TypeAlias = "tuple[str, dict[str, t.Any], dict[str, t.Any], t.Optional[str]]"
+_ImportArgs: TypeAlias = "tuple[str, dict[str, t.Any], dict[str, t.Any], t.Optional[str]]"
 
 
 #: Whether imports in import statements should be deferred.
@@ -825,7 +816,7 @@ class _TempDeferred:
     def __init__(self, /) -> None:
         self.previous: bool = False
 
-    def __enter__(self, /) -> _Self:
+    def __enter__(self, /) -> Self:
         global _is_deferred  # noqa: PLW0603
 
         _is_deferred_lock.acquire()
@@ -915,7 +906,7 @@ class _DIProxy:
     def __repr__(self, /) -> str:
         return f"<proxy for {self.__import_name!r} import>"
 
-    def __getattr__(self, name: str, /) -> _Self:
+    def __getattr__(self, name: str, /) -> Self:
         return self.__class__(f"{self.__import_name}.{name}")
 
 
@@ -932,7 +923,7 @@ class _DIKey(str):
     __lock: threading.Lock
     __submod_names: t.Optional[set[str]]
 
-    def __new__(cls, obj: object, import_args: _ImportArgs, submod_names: t.Optional[set[str]] = None, /) -> _Self:
+    def __new__(cls, obj: object, import_args: _ImportArgs, submod_names: t.Optional[set[str]] = None, /) -> Self:
         self = super().__new__(cls, obj)
 
         self.__import_args = import_args
@@ -1133,7 +1124,7 @@ class _DIContext:
 _actual_until_use = _DIContext()
 
 
-class _NullContext:
+class NullContext:
     """A placeholder context manager that does nothing on its own.
 
     Should not be manually constructed: use through `defer_imports.until_use`.
@@ -1146,7 +1137,7 @@ class _NullContext:
         pass
 
 
-until_use = _NullContext()
+until_use = NullContext()
 
 
 # endregion
