@@ -1102,14 +1102,6 @@ with defer_imports.until_use:
         """Test that trying to access a lazily loaded import from multiple threads doesn't cause race conditions.
 
         Based on a test for importlib.util.LazyLoader in the CPython test suite.
-
-        Notes
-        -----
-        This test is flaky, seemingly more so in CI than locally. Some information about the failure:
-
-        -   module.inspect doesn't get resolved, so module.inspect.signature isn't a callable. The proxy should be
-            be resolved before this happens, and is even guarded with a RLock and a boolean to prevent this...
-        -   It only happens on pypy, and at a very low rate.
         """
 
         source = """\
