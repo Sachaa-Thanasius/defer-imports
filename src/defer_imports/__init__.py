@@ -2,20 +2,7 @@
 
 __version__ = "1.0.0.dev0"
 
-__all__ = ("until_use",)
+__all__ = ("import_hook", "until_use")
 
 
-class _NullContext:
-    """A placeholder context manager that does nothing on its own.
-
-    Should not be manually constructed: use through `defer_imports.until_use`.
-    """
-
-    def __enter__(self, /) -> None:
-        pass
-
-    def __exit__(self, *exc_info: object) -> None:
-        pass
-
-
-until_use: _NullContext = _NullContext()
+from .ast_rewrite import import_hook, until_use

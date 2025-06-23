@@ -11,6 +11,8 @@ __all__ = ("until_module_use",)
 
 # ============================================================================
 # region -------- Compatibility shims --------
+#
+# Version-dependent or hidden-from-type-checking imports and definitions.
 # ============================================================================
 
 

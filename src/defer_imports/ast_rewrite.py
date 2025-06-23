@@ -1,37 +1,30 @@
 from __future__ import annotations
 
-import ast as _ast
-import builtins as _builtins
-import contextvars as _contextvars
-import sys as _sys
-import threading as _threading
-import types as _types
-from importlib.machinery import (
-    BYTECODE_SUFFIXES as _BYTECODE_SUFFIXES,
-    SOURCE_SUFFIXES as _SOURCE_SUFFIXES,
-    FileFinder as _FileFinder,
-    ModuleSpec as _ModuleSpec,
-    SourceFileLoader as _SourceFileLoader,
-)
+import ast
+import builtins
+import contextvars
+import sys
+import threading
+import types
+from importlib.machinery import BYTECODE_SUFFIXES, SOURCE_SUFFIXES, FileFinder, ModuleSpec, SourceFileLoader
 
 from . import __version__ as _version, lazy_load as _lazy_load
 
 
 with _lazy_load.until_module_use():
-    import collections as _collections
-    import io as _io
-    import itertools as _itertools
-    import os as _os
-    import tokenize as _tokenize
-    import typing as _t
-    import warnings as _warnings
-
-
-__all__ = ("import_hook",)
+    import collections
+    import io
+    import itertools
+    import os
+    import tokenize
+    import typing as t
+    import warnings
 
 
 # ============================================================================
 # region -------- Compatibility shims --------
+#
+# Version-dependent or hidden-from-type-checking imports and definitions.
 # ============================================================================
 
 
@@ -58,8 +51,8 @@ else:
 
 if TYPE_CHECKING:
     from typing_extensions import TypeAlias as _TypeAlias
-elif _sys.version_info >= (3, 10):  # pragma: >=3.10 cover
-    _TypeAlias: _t.TypeAlias = "_t.TypeAlias"
+elif sys.version_info >= (3, 10):  # pragma: >=3.10 cover
+    _TypeAlias: t.TypeAlias = "t.TypeAlias"
 else:  # pragma: <3.10 cover
 
     class TypeAlias:
@@ -71,8 +64,8 @@ else:  # pragma: <3.10 cover
 
 if TYPE_CHECKING:
     from typing_extensions import Self as _Self
-elif _sys.version_info >= (3, 11):  # pragma: >=3.11 cover
-    _Self: _t.TypeAlias = "_t.Self"
+elif sys.version_info >= (3, 11):  # pragma: >=3.11 cover
+    _Self: t.TypeAlias = "t.Self"
 else:  # pragma: <3.11 cover
 
     class Self:
@@ -84,15 +77,15 @@ else:  # pragma: <3.11 cover
 
 if TYPE_CHECKING:
     from typing_extensions import Buffer as _ReadableBuffer
-elif _sys.version_info >= (3, 12):  # pragma: >=3.12 cover
+elif sys.version_info >= (3, 12):  # pragma: >=3.12 cover
     # collections always imports collections.abc, but typeshed isn't aware of that (yet).
-    _ReadableBuffer: _t.TypeAlias = "_collections.abc.Buffer"
+    _ReadableBuffer: t.TypeAlias = "collections.abc.Buffer"
 else:  # pragma: <3.12 cover
-    _ReadableBuffer: _TypeAlias = "_t.Union[bytes, bytearray, memoryview]"
+    _ReadableBuffer: _TypeAlias = "t.Union[bytes, bytearray, memoryview]"
 
 
 if TYPE_CHECKING:
-    _final = _t.final
+    _final = t.final
 else:
 
     def final(f: object) -> object:  # pragma: no cover (tested in stdlib)
@@ -110,24 +103,26 @@ else:
     del final
 
 
-if _sys.version_info >= (3, 10):  # pragma: >=3.10 cover
-    _SyntaxContext: _TypeAlias = "tuple[_t.Optional[str], _t.Optional[int], _t.Optional[int], _t.Optional[str], _t.Optional[int], _t.Optional[int]]"
+if sys.version_info >= (3, 10):  # pragma: >=3.10 cover
+    _SyntaxContext: _TypeAlias = (
+        "tuple[t.Optional[str], t.Optional[int], t.Optional[int], t.Optional[str], t.Optional[int], t.Optional[int]]"
+    )
 else:  # pragma: <3.10 cover
-    _SyntaxContext: _TypeAlias = "tuple[_t.Optional[str], _t.Optional[int], _t.Optional[int], _t.Optional[str]]"
+    _SyntaxContext: _TypeAlias = "tuple[t.Optional[str], t.Optional[int], t.Optional[int], t.Optional[str]]"
 
 
 # compile()'s internals, and thus wrappers of it (e.g. ast.parse()), dropped support in 3.12 for non-bytes buffers as
 # the filename argument (see https://github.com/python/cpython/issues/98393).
-if _sys.version_info >= (3, 12):  # pragma: >=3.12 cover
-    _ModulePath: _TypeAlias = "_t.Union[str, _os.PathLike[str], bytes]"
+if sys.version_info >= (3, 12):  # pragma: >=3.12 cover
+    _ModulePath: _TypeAlias = "t.Union[str, os.PathLike[str], bytes]"
 else:  # pragma: <3.12 cover
-    _ModulePath: _TypeAlias = "_t.Union[str, _os.PathLike[str], _ReadableBuffer]"
+    _ModulePath: _TypeAlias = "t.Union[str, os.PathLike[str], _ReadableBuffer]"
 
 
 # endregion
 
 
-_SourceData: _TypeAlias = "_t.Union[_ReadableBuffer, str]"
+_SourceData: _TypeAlias = "t.Union[_ReadableBuffer, str]"
 
 
 # ============================================================================
@@ -171,7 +166,7 @@ def _resolve_name(name: str, package: str, level: int) -> str:  # pragma: no cov
 # Adapted from importlib._bootstrap.
 # Changes:
 # - Account for warnings being different across versions.
-def _calc___package__(globals: _t.Mapping[str, _t.Any]) -> _t.Optional[str]:  # pragma: no cover (tested in stdlib)
+def _calc___package__(globals: t.Mapping[str, t.Any]) -> t.Optional[str]:  # pragma: no cover (tested in stdlib)
     """Calculate what __package__ should be.
 
     __package__ is not guaranteed to be defined or could be set to None
@@ -179,23 +174,23 @@ def _calc___package__(globals: _t.Mapping[str, _t.Any]) -> _t.Optional[str]:  # 
     """
 
     package: str | None = globals.get("__package__")
-    spec: _ModuleSpec | None = globals.get("__spec__")
+    spec: ModuleSpec | None = globals.get("__spec__")
 
     if package is not None:
         if spec is not None and package != spec.parent:
-            if _sys.version_info >= (3, 12):
+            if sys.version_info >= (3, 12):
                 category = DeprecationWarning
             else:
                 category = ImportWarning
 
-            _warnings.warn(f"__package__ != __spec__.parent ({package!r} != {spec.parent!r})", category, stacklevel=3)
+            warnings.warn(f"__package__ != __spec__.parent ({package!r} != {spec.parent!r})", category, stacklevel=3)
 
         return package
     elif spec is not None:
         return spec.parent
     else:
         msg = "can't resolve package from __spec__ or __package__, falling back on __name__ and __path__"
-        _warnings.warn(msg, ImportWarning, stacklevel=3)
+        warnings.warn(msg, ImportWarning, stacklevel=3)
 
         package = globals["__name__"]
         if "__path__" not in globals:
@@ -217,8 +212,8 @@ def _decode_source(source_bytes: _ReadableBuffer) -> str:  # pragma: no cover (t
     Universal newline support is used in the decoding.
     """
 
-    newline_decoder = _io.IncrementalNewlineDecoder(None, translate=True)
-    encoding = _tokenize.detect_encoding(_io.BytesIO(source_bytes).readline)[0]
+    newline_decoder = io.IncrementalNewlineDecoder(None, translate=True)
+    encoding = tokenize.detect_encoding(io.BytesIO(source_bytes).readline)[0]
     source: str = source_bytes.decode(encoding)  # pyright: ignore [reportUnknownMemberType, reportAttributeAccessIssue, reportUnknownVariableType]
     return newline_decoder.decode(source)  # pyright: ignore [reportUnknownArgumentType]
 
@@ -234,7 +229,7 @@ def _decode_source(source_bytes: _ReadableBuffer) -> str:  # pragma: no cover (t
 # NOTE: Technically, something like ast.AST & LocationAttrsProtocol would be more accurate, but:
 # 1. Python doesn't have intersections yet, and
 # 2. Using a local protocol without eagerly importing typing or having another module isn't doable until 3.12.
-_ASTWithLocation: _TypeAlias = "_t.Union[_ast.expr, _ast.stmt]"
+_ASTWithLocation: _TypeAlias = "t.Union[ast.expr, ast.stmt]"
 
 
 # NOTE: Make our generated variables more hygienic by prefixing their names with "_@di_". A few reasons for this choice:
@@ -257,21 +252,21 @@ _TEMP_ASNAMES = f"{_HYGIENE_PREFIX}_temp_asnames"
 _AST_LOC_ATTRS = ("lineno", "col_offset", "end_lineno", "end_col_offset")
 
 
-def _is_until_use_node(node: _ast.AST, /) -> bool:
+def _is_until_use_node(node: ast.AST, /) -> bool:
     """Check if the node matches ``with defer_imports.until_use: ...``."""
 
-    if not (isinstance(node, _ast.With) and len(node.items) == 1):
+    if not (isinstance(node, ast.With) and len(node.items) == 1):
         return False
 
     context_expr = node.items[0].context_expr
-    if not (isinstance(context_expr, _ast.Attribute) and context_expr.attr == "until_use"):
+    if not (isinstance(context_expr, ast.Attribute) and context_expr.attr == "until_use"):
         return False
 
     expr_value = context_expr.value
-    return isinstance(expr_value, _ast.Name) and expr_value.id == "defer_imports"
+    return isinstance(expr_value, ast.Name) and expr_value.id == "defer_imports"
 
 
-def _get_joined_source_lines(source: str, node: _ASTWithLocation) -> _t.Optional[str]:
+def _get_joined_source_lines(source: str, node: _ASTWithLocation) -> t.Optional[str]:
     """Get the source code lines of `source` that generated `node`, or None if `node` lacks location information."""
 
     try:
@@ -288,11 +283,11 @@ def _get_joined_source_lines(source: str, node: _ASTWithLocation) -> _t.Optional
 
     # Split a string into lines while ignoring form feed and other chars.
     # This mimics how the Python parser splits source code.
-    with _io.StringIO(source, newline=None) as source_buffer:
-        return "".join(_itertools.islice(source_buffer, lineno, end_lineno + 1))
+    with io.StringIO(source, newline=None) as source_buffer:
+        return "".join(itertools.islice(source_buffer, lineno, end_lineno + 1))
 
 
-class _ImportsInstrumenter(_ast.NodeTransformer):
+class _ImportsInstrumenter(ast.NodeTransformer):
     """AST transformer that instruments imports within ``with defer_imports.until_use: ...`` blocks.
 
     The results of those imports will be assigned to custom keys in the local namespace.
@@ -312,75 +307,73 @@ class _ImportsInstrumenter(_ast.NodeTransformer):
         self.escape_hatch_depth: int = 0
         self.did_any_instrumentation: bool = False
 
-    def _add_asname_trackers(self, import_nodes: list[_t.Union[_ast.Import, _ast.ImportFrom]]) -> list[_ast.stmt]:
+    def _add_asname_trackers(self, import_nodes: list[t.Union[ast.Import, ast.ImportFrom]]) -> list[ast.stmt]:
         """Instrument a *non-empty* list of imports."""
 
         self.did_any_instrumentation = True
         loc = {attr: getattr(import_nodes[0], attr) for attr in _AST_LOC_ATTRS}
 
-        new_nodes: list[_ast.stmt] = []
+        new_nodes: list[ast.stmt] = []
 
         # Create a temporary variable to hold the "asnames" for each import, i.e. what variable(s) the result(s) will be
         # saved into.
         for node in import_nodes:
             loc["lineno"], loc["end_lineno"] = node.lineno, node.end_lineno
 
-            if isinstance(node, _ast.Import):
+            if isinstance(node, ast.Import):
                 for alias in node.names:
-                    asnames_name = _ast.Name(_TEMP_ASNAMES, ctx=_ast.Store(), **loc)
-                    temp_asnames = _ast.Assign([asnames_name], value=_ast.Constant(alias.asname, **loc), **loc)
+                    asnames_name = ast.Name(_TEMP_ASNAMES, ctx=ast.Store(), **loc)
+                    temp_asnames = ast.Assign([asnames_name], value=ast.Constant(alias.asname, **loc), **loc)
                     new_nodes.append(temp_asnames)
-                    new_nodes.append(_ast.Import(names=[alias], **loc))
+                    new_nodes.append(ast.Import(names=[alias], **loc))
             else:
-                asnames_name = _ast.Name(_TEMP_ASNAMES, ctx=_ast.Store(), **loc)
-                asnames_vals: list[_ast.expr] = [_ast.Constant(alias.asname, **loc) for alias in node.names]
-                temp_asnames = _ast.Assign(
-                    [asnames_name], value=_ast.Tuple(asnames_vals, ctx=_ast.Load(), **loc), **loc
-                )
+                asnames_name = ast.Name(_TEMP_ASNAMES, ctx=ast.Store(), **loc)
+                asnames_vals: list[ast.expr] = [ast.Constant(alias.asname, **loc) for alias in node.names]
+                temp_asnames = ast.Assign([asnames_name], value=ast.Tuple(asnames_vals, ctx=ast.Load(), **loc), **loc)
                 new_nodes.append(temp_asnames)
                 new_nodes.append(node)
 
         # Clean up the temporary helper.
-        del_stmt = _ast.Delete(targets=[_ast.Name(_TEMP_ASNAMES, ctx=_ast.Del(), **loc)], **loc)
+        del_stmt = ast.Delete(targets=[ast.Name(_TEMP_ASNAMES, ctx=ast.Del(), **loc)], **loc)
         new_nodes.append(del_stmt)
 
         return new_nodes
 
-    def _wrap_imports_list(self, import_nodes: list[_t.Union[_ast.Import, _ast.ImportFrom]]) -> _ast.With:
+    def _wrap_imports_list(self, import_nodes: list[t.Union[ast.Import, ast.ImportFrom]]) -> ast.With:
         """Wrap a list of import nodes with a `defer_imports.until_use` block and instrument them."""
 
         loc = {attr: getattr(import_nodes[0], attr) for attr in _AST_LOC_ATTRS}
-        with_items = [_ast.withitem(context_expr=_ast.Name(_ACTUAL_CTX_ASNAME, ctx=_ast.Load(), **loc))]
-        return _ast.With(items=with_items, body=self._add_asname_trackers(import_nodes), **loc)
+        with_items = [ast.withitem(context_expr=ast.Name(_ACTUAL_CTX_ASNAME, ctx=ast.Load(), **loc))]
+        return ast.With(items=with_items, body=self._add_asname_trackers(import_nodes), **loc)
 
-    def _is_instrumentable_import(self, node: _ast.AST) -> bool:
+    def _is_instrumentable_import(self, node: ast.AST) -> bool:
         """Determine whether a node is a global import that should be instrumented."""
 
         return (
             self.escape_hatch_depth == 0
             # Must be an import node.
             and (
-                isinstance(node, _ast.Import)
+                isinstance(node, ast.Import)
                 or
                 # No wildcard or future "from" imports.
-                (isinstance(node, _ast.ImportFrom) and node.names[0].name != "*" and node.module != "__future__")
+                (isinstance(node, ast.ImportFrom) and node.names[0].name != "*" and node.module != "__future__")
             )
         )
 
-    def generic_visit(self, node: _ast.AST) -> _ast.AST:  # noqa: PLR0912
+    def generic_visit(self, node: ast.AST) -> ast.AST:  # noqa: PLR0912
         """Called if no explicit visitor function exists for a node.
 
         This differs from the regular generic_visit by conditionally intercepting global sequences of import statements
         to wrap them in ``with defer_imports.until_use`` blocks.
         """
 
-        for field, old_value in _ast.iter_fields(node):
+        for field, old_value in ast.iter_fields(node):
             if isinstance(old_value, list):
-                new_values: list[_t.Any] = []
+                new_values: list[t.Any] = []
                 imports_counter = 0
 
                 for value in old_value:  # pyright: ignore [reportUnknownVariableType]
-                    if isinstance(value, _ast.AST):
+                    if isinstance(value, ast.AST):
                         # DI addition: This if block.
                         if self.rewrite_whole_module:
                             if self._is_instrumentable_import(value):
@@ -393,7 +386,7 @@ class _ImportsInstrumenter(_ast.NodeTransformer):
 
                         if value is None:
                             continue
-                        if not isinstance(value, _ast.AST):
+                        if not isinstance(value, ast.AST):
                             new_values.extend(value)
                             continue
 
@@ -405,7 +398,7 @@ class _ImportsInstrumenter(_ast.NodeTransformer):
 
                 old_value[:] = new_values
 
-            elif isinstance(old_value, _ast.AST):
+            elif isinstance(old_value, ast.AST):
                 new_node = self.visit(old_value)
                 if new_node is None:
                     delattr(node, field)
@@ -414,14 +407,14 @@ class _ImportsInstrumenter(_ast.NodeTransformer):
 
         return node
 
-    def _visit_scope(self, node: _ast.AST) -> _ast.AST:
+    def _visit_scope(self, node: ast.AST) -> ast.AST:
         """Avoid visiting non-global scopes."""
 
         return node
 
     visit_FunctionDef = visit_AsyncFunctionDef = visit_Lambda = visit_ClassDef = _visit_scope
 
-    def _visit_eager_import_block(self, node: _ast.AST) -> _ast.AST:
+    def _visit_eager_import_block(self, node: ast.AST) -> ast.AST:
         """Track if the visitor is within a ``try-except`` block or a ``with`` statement."""
 
         self.escape_hatch_depth += 1
@@ -431,7 +424,7 @@ class _ImportsInstrumenter(_ast.NodeTransformer):
 
     visit_Try = _visit_eager_import_block
 
-    if _sys.version_info >= (3, 11):  # pragma: >=3.11 cover
+    if sys.version_info >= (3, 11):  # pragma: >=3.11 cover
         visit_TryStar = _visit_eager_import_block
 
     def _get_syntax_context(self, node: _ASTWithLocation) -> _SyntaxContext:
@@ -442,18 +435,18 @@ class _ImportsInstrumenter(_ast.NodeTransformer):
         .. [1] https://docs.python.org/3.14/library/exceptions.html#SyntaxError
         """
 
-        filepath = self.filepath if isinstance(self.filepath, (str, bytes, _os.PathLike)) else bytes(self.filepath)
+        filepath = self.filepath if isinstance(self.filepath, (str, bytes, os.PathLike)) else bytes(self.filepath)
         source = self.source if isinstance(self.source, str) else _decode_source(self.source)
         text = _get_joined_source_lines(source, node)
-        context = (_os.fsdecode(filepath), node.lineno, node.col_offset + 1, text)
+        context = (os.fsdecode(filepath), node.lineno, node.col_offset + 1, text)
 
-        if _sys.version_info >= (3, 10):  # pragma: >=3.10 cover
+        if sys.version_info >= (3, 10):  # pragma: >=3.10 cover
             end_col_offset = node.end_col_offset
             context += (node.end_lineno, (end_col_offset + 1) if (end_col_offset is not None) else None)
 
         return context
 
-    def _validate_until_use_body(self, nodes: list[_ast.stmt]) -> list[_t.Union[_ast.Import, _ast.ImportFrom]]:
+    def _validate_until_use_body(self, nodes: list[ast.stmt]) -> list[t.Union[ast.Import, ast.ImportFrom]]:
         """Validate that the statements within a `defer_imports.until_use` block are instrumentable.
 
         Raises
@@ -463,7 +456,7 @@ class _ImportsInstrumenter(_ast.NodeTransformer):
         """
 
         for node in nodes:
-            if not isinstance(node, (_ast.Import, _ast.ImportFrom)):
+            if not isinstance(node, (ast.Import, ast.ImportFrom)):
                 msg = "with defer_imports.until_use blocks must only contain import statements"
                 raise SyntaxError(msg, self._get_syntax_context(node))  # noqa: TRY004 # Syntax error displays better.
 
@@ -474,7 +467,7 @@ class _ImportsInstrumenter(_ast.NodeTransformer):
         # Warning: Don't mutate the list from outside the function to invalidate our type guard.
         return nodes  # pyright: ignore [reportReturnType]
 
-    def visit_With(self, node: _ast.With) -> _ast.AST:
+    def visit_With(self, node: ast.With) -> ast.AST:
         """Check that ``with defer_imports.until_use: ...`` blocks are valid and if so, hook all imports within.
 
         Raises
@@ -488,14 +481,14 @@ class _ImportsInstrumenter(_ast.NodeTransformer):
 
         # Replace the dummy context manager with the one that will actually replace __import__.
         loc = {attr: getattr(node.items[0].context_expr, attr) for attr in _AST_LOC_ATTRS}
-        node.items[0].context_expr = _ast.Name(_ACTUAL_CTX_ASNAME, ctx=_ast.Load(), **loc)
+        node.items[0].context_expr = ast.Name(_ACTUAL_CTX_ASNAME, ctx=ast.Load(), **loc)
 
         # Actually instrument the import nodes.
         node.body = self._add_asname_trackers(self._validate_until_use_body(node.body))
 
         return node
 
-    def visit_Module(self, node: _ast.Module) -> _ast.AST:
+    def visit_Module(self, node: ast.Module) -> ast.AST:
         """Insert imports and cleanup necessary to make `defer_imports.until_use` work properly.
 
         If the module is empty or `defer_imports.until_use` isn't actually used, do nothing.
@@ -515,12 +508,12 @@ class _ImportsInstrumenter(_ast.NodeTransformer):
         for position, sub in enumerate(node.body):  # noqa: B007 # position is used after the loop.
             if (
                 expect_docstring
-                and isinstance(sub, _ast.Expr)
-                and isinstance(sub.value, _ast.Constant)
+                and isinstance(sub, ast.Expr)
+                and isinstance(sub.value, ast.Constant)
                 and isinstance(sub.value.value, str)
             ):
                 expect_docstring = False
-            elif isinstance(sub, _ast.ImportFrom) and sub.module == "__future__" and sub.level == 0:
+            elif isinstance(sub, ast.ImportFrom) and sub.module == "__future__" and sub.level == 0:
                 pass
             else:
                 break
@@ -528,13 +521,13 @@ class _ImportsInstrumenter(_ast.NodeTransformer):
         loc = {attr: getattr(node.body[position], attr) for attr in _AST_LOC_ATTRS}
 
         # Then, add necessary defer_imports import.
-        ctx_alias = _ast.alias(_ACTUAL_CTX_NAME, _ACTUAL_CTX_ASNAME, **loc)
-        import_stmt = _ast.ImportFrom(module=__spec__.name, names=[ctx_alias], level=0, **loc)
+        ctx_alias = ast.alias(_ACTUAL_CTX_NAME, _ACTUAL_CTX_ASNAME, **loc)
+        import_stmt = ast.ImportFrom(module=__spec__.name, names=[ctx_alias], level=0, **loc)
         node.body.insert(position, import_stmt)
 
         # Finally, clean up the namespace via deletion.
         loc["lineno"], loc["end_lineno"] = node.body[-1].lineno, node.body[-1].end_lineno
-        del_stmt = _ast.Delete(targets=[_ast.Name(_ACTUAL_CTX_ASNAME, ctx=_ast.Del(), **loc)], **loc)
+        del_stmt = ast.Delete(targets=[ast.Name(_ACTUAL_CTX_ASNAME, ctx=ast.Del(), **loc)], **loc)
         node.body.append(del_stmt)
 
         return node
@@ -556,25 +549,25 @@ _BYTECODE_HEADER = f"defer_imports{_version}".encode()
 
 
 #: The current configuration for defer_imports's instrumentation.
-_current_config = _contextvars.ContextVar[tuple[str, ...]]("_current_config", default=())
+_current_config = contextvars.ContextVar[tuple[str, ...]]("_current_config", default=())
 
 
-def _walk_globals(node: _ast.AST) -> _t.Generator[_ast.AST, None, None]:
+def _walk_globals(node: ast.AST) -> t.Generator[ast.AST, None, None]:
     """Recursively yield descendent nodes of a tree starting at `node`, including `node` itself.
 
     *Child* nodes that introduce a new scope, such as class and function definitions, are skipped entirely.
     """
 
-    SCOPE_NODE_TYPES = (_ast.FunctionDef, _ast.AsyncFunctionDef, _ast.Lambda, _ast.ClassDef)
-    unvisited = _collections.deque([node])
+    SCOPE_NODE_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
+    unvisited = collections.deque([node])
     while unvisited:
         node = unvisited.popleft()
-        unvisited.extend(child for child in _ast.iter_child_nodes(node) if not isinstance(child, SCOPE_NODE_TYPES))
+        unvisited.extend(child for child in ast.iter_child_nodes(node) if not isinstance(child, SCOPE_NODE_TYPES))
         yield node
 
 
 # PYUPDATE: py3.14 - Consider inheriting from importlib.abc.SourceLoader instead since it's (probably) cheap again.
-class _DIFileLoader(_SourceFileLoader):
+class _DIFileLoader(SourceFileLoader):
     """A file loader that instruments ``.py`` files which use ``with defer_imports.until_use: ...``."""
 
     def get_data(self, path: str) -> bytes:
@@ -596,7 +589,7 @@ class _DIFileLoader(_SourceFileLoader):
 
         data = super().get_data(path)
 
-        if not path.endswith(tuple(_BYTECODE_SUFFIXES)):
+        if not path.endswith(tuple(BYTECODE_SUFFIXES)):
             return data
 
         if not data.startswith(b"defer_imports"):
@@ -620,7 +613,7 @@ class _DIFileLoader(_SourceFileLoader):
         .. [1] https://gregoryszorc.com/blog/2017/03/13/from-__past__-import-bytes_literals/
         """
 
-        if path.endswith(tuple(_BYTECODE_SUFFIXES)):
+        if path.endswith(tuple(BYTECODE_SUFFIXES)):
             data = _BYTECODE_HEADER + data
 
         return super().set_data(path, data, _mode=_mode)
@@ -628,7 +621,7 @@ class _DIFileLoader(_SourceFileLoader):
     # NOTE: In 3.12+, the path parameter should only accept bytes, not any buffer.
     # Ref: https://github.com/python/typeshed/issues/13881
     # NOTE: We're purposefully not supporting data being an AST object, as that's not the use case for this method.
-    def source_to_code(self, data: _SourceData, path: _ModulePath, *, _optimize: int = -1) -> _types.CodeType:  # pyright: ignore [reportIncompatibleMethodOverride]
+    def source_to_code(self, data: _SourceData, path: _ModulePath, *, _optimize: int = -1) -> types.CodeType:  # pyright: ignore [reportIncompatibleMethodOverride]
         """Compile the source `data` into a code object, possibly instrumenting it along the way.
 
         Parameters
@@ -640,7 +633,7 @@ class _DIFileLoader(_SourceFileLoader):
         if not data:
             return super().source_to_code(data, path, _optimize=_optimize)
 
-        orig_tree: _ast.Module = compile(data, path, "exec", _ast.PyCF_ONLY_AST, dont_inherit=True, optimize=_optimize)
+        orig_tree: ast.Module = compile(data, path, "exec", ast.PyCF_ONLY_AST, dont_inherit=True, optimize=_optimize)
 
         if not (self.defer_whole_module or any(map(_is_until_use_node, _walk_globals(orig_tree)))):
             return super().source_to_code(orig_tree, path, _optimize=_optimize)
@@ -649,19 +642,19 @@ class _DIFileLoader(_SourceFileLoader):
         new_tree = instrumenter.visit(orig_tree)
         return super().source_to_code(new_tree, path, _optimize=_optimize)
 
-    def create_module(self, spec: _ModuleSpec) -> _t.Optional[_types.ModuleType]:
+    def create_module(self, spec: ModuleSpec) -> t.Optional[types.ModuleType]:
         """Use default semantics for module creation. Also, get some state from the spec."""
 
         self.defer_whole_module: bool = spec.loader_state["defer_whole_module"]
         return super().create_module(spec)
 
 
-class _DIFileFinder(_FileFinder):
+class _DIFileFinder(FileFinder):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.path!r})"
 
     @staticmethod
-    def _is_full_module_rewrite(config: _t.Optional[tuple[str, ...]], fullname: str) -> bool:
+    def _is_full_module_rewrite(config: t.Optional[tuple[str, ...]], fullname: str) -> bool:
         """Determine whether all global imports should be instrumented *in addition to* `until_use`-wrapped imports."""
 
         return bool(config) and (
@@ -670,7 +663,7 @@ class _DIFileFinder(_FileFinder):
             or any((mod.endswith(".*") and fullname.startswith(mod[:-1])) for mod in config)
         )
 
-    def find_spec(self, fullname: str, target: _t.Optional[_types.ModuleType] = None) -> _t.Optional[_ModuleSpec]:
+    def find_spec(self, fullname: str, target: t.Optional[types.ModuleType] = None) -> t.Optional[ModuleSpec]:
         """Try to find a spec for the specified module.
 
         If found, attach some loader-specific state and potentially replace the loader.
@@ -687,13 +680,13 @@ class _DIFileFinder(_FileFinder):
             #
             # Those patched finders won't return a spec with a _DIFileLoader loader due to preset instance state.
             # Account for those with a very specific check so that we don't override user-defined loaders.
-            if loader.__class__ is _SourceFileLoader:
+            if loader.__class__ is SourceFileLoader:
                 loader.__class__ = _DIFileLoader
 
         return spec
 
 
-_PATH_HOOK = _DIFileFinder.path_hook((_DIFileLoader, _SOURCE_SUFFIXES))
+_PATH_HOOK = _DIFileFinder.path_hook((_DIFileLoader, SOURCE_SUFFIXES))
 
 
 @_final
@@ -711,7 +704,7 @@ class ImportHookContext:
 
     Parameters
     ----------
-    module_names: _t.Sequence[str], default=()
+    module_names: t.Sequence[str], default=()
         A set of modules to apply global-scope import statement instrumentation to.
 
         - If passed ``["*"]``, global-scope import statement instrumentation will occur in all modules imported
@@ -724,18 +717,18 @@ class ImportHookContext:
 
     __slots__ = ("_config", "_uninstall_after", "_config_token")
 
-    def __init_subclass__(cls, *args: object, **kwargs: object) -> _t.NoReturn:
+    def __init_subclass__(cls, *args: object, **kwargs: object) -> t.NoReturn:
         msg = f"Type {cls.__name__!r} is not an acceptable base type."
         raise TypeError(msg)
 
-    def __init__(self, /, module_names: _t.Sequence[str] = (), *, uninstall_after: bool = False) -> None:
+    def __init__(self, /, module_names: t.Sequence[str] = (), *, uninstall_after: bool = False) -> None:
         if isinstance(module_names, str):
             msg = "module_names should be a sequence of strings, not a string."
             raise TypeError(msg)
 
         self._config: tuple[str, ...] = tuple(module_names)
         self._uninstall_after: bool = uninstall_after
-        self._config_token: _contextvars.Token[tuple[str, ...]] | None = None
+        self._config_token: contextvars.Token[tuple[str, ...]] | None = None
 
     def __enter__(self, /) -> _Self:
         self.install()
@@ -749,11 +742,11 @@ class ImportHookContext:
     def install(self, /) -> None:
         """Install the custom import hook that allows `defer_imports.until_use` to work."""
 
-        if _PATH_HOOK not in _sys.path_hooks:
-            for i, hook in enumerate(_sys.path_hooks):
+        if _PATH_HOOK not in sys.path_hooks:
+            for i, hook in enumerate(sys.path_hooks):
                 # NOTE: This is a pretty fragile search criteria, but we don't have any good alternatives.
                 if hook.__name__ == "path_hook_for_FileFinder":
-                    _sys.path_hooks.insert(i, _PATH_HOOK)
+                    sys.path_hooks.insert(i, _PATH_HOOK)
                     break
             else:
                 msg = "No file-based path hook found to be superseded."
@@ -768,8 +761,8 @@ class ImportHookContext:
             #   This is what typeguard does, but it's more extreme in some ways.
             # - Clear sys.path_importer_cache instead of monkeypatching its values.
             #   This is recommended by the docs and is more "correct", but it can cause a big slowdown on startup.
-            for finder in _sys.path_importer_cache.values():
-                if (finder is not None) and (finder.__class__ is _FileFinder):
+            for finder in sys.path_importer_cache.values():
+                if (finder is not None) and (finder.__class__ is FileFinder):
                     finder.__class__ = _DIFileFinder
 
         self._config_token = _current_config.set(self._config)
@@ -785,16 +778,16 @@ class ImportHookContext:
         """Attempt to uninstall the custom import hook. If already uninstalled, does nothing."""
 
         try:
-            _sys.path_hooks.remove(_PATH_HOOK)
+            sys.path_hooks.remove(_PATH_HOOK)
         except ValueError:
             pass
 
         # Undo the monkeypatching done in self.install().
         # We don't have to invalidate the finder caches, which only contain potential module locations, because the
         # patch doesn't affect them.
-        for finder in _sys.path_importer_cache.values():
+        for finder in sys.path_importer_cache.values():
             if (finder is not None) and (finder.__class__ is _DIFileFinder):
-                finder.__class__ = _FileFinder
+                finder.__class__ = FileFinder
 
 
 import_hook = ImportHookContext
@@ -810,17 +803,14 @@ import_hook = ImportHookContext
 # ============================================================================
 
 
-_ImportArgs: _TypeAlias = "tuple[str, dict[str, _t.Any], dict[str, _t.Any], _t.Optional[str]]"
+_ImportArgs: _TypeAlias = "tuple[str, dict[str, t.Any], dict[str, t.Any], t.Optional[str]]"
 
-
-#: What builtins.__import__ last pointed to.
-_previous___import__ = _contextvars.ContextVar("_previous___import__", default=_builtins.__import__)
 
 #: Whether imports in import statements should be deferred.
 _is_deferred: bool = False
 
 #: A lock to guard _is_deferred.
-_is_deferred_lock = _threading.RLock()
+_is_deferred_lock = threading.RLock()
 
 
 class _TempDeferred:
@@ -867,19 +857,19 @@ def _accumulate_dotted_parts(dotted_name: str, start: int, /) -> set[str]:
 # nmsp.__contains__, and that causes a performance issue because _DIKey's very slow __eq__ always take priority over
 # str's. Thus, we avoid those routes.
 # PYUPDATE: py3.14 - Check that this fast path still works.
-if _sys.implementation.name == "cpython" and (3, 9) <= _sys.version_info < (3, 14):  # pragma: cpython cover
+if sys.implementation.name == "cpython" and (3, 9) <= sys.version_info < (3, 14):  # pragma: cpython cover
 
-    def _get_exact_key(name: str, dct: dict[str, _t.Any]) -> _t.Optional[str]:
+    def _get_exact_key(name: str, dct: dict[str, t.Any]) -> t.Optional[str]:
         keys = {name}.intersection(dct)
         return keys.pop() if keys else None
 
 else:  # pragma: cpython no cover
 
-    def _get_exact_key(name: str, dct: dict[str, _t.Any]) -> _t.Optional[str]:
+    def _get_exact_key(name: str, dct: dict[str, t.Any]) -> t.Optional[str]:
         return next(filter(name.__eq__, dct), None)
 
 
-def _handle_import_key(import_name: str, nmsp: dict[str, _t.Any], start_idx: _t.Optional[int] = None, /) -> None:
+def _handle_import_key(import_name: str, nmsp: dict[str, t.Any], start_idx: t.Optional[int] = None, /) -> None:
     """Ensure that a dotted import name (e.g., "a.b.c") is represented as a chain of deferred proxies
     in the target namespace.
     """
@@ -939,15 +929,15 @@ class _DIKey(str):
 
     __import_args: _ImportArgs
     __is_resolved: bool
-    __lock: _threading.Lock
-    __submod_names: _t.Optional[set[str]]
+    __lock: threading.Lock
+    __submod_names: t.Optional[set[str]]
 
-    def __new__(cls, obj: object, import_args: _ImportArgs, submod_names: _t.Optional[set[str]] = None, /) -> _Self:
+    def __new__(cls, obj: object, import_args: _ImportArgs, submod_names: t.Optional[set[str]] = None, /) -> _Self:
         self = super().__new__(cls, obj)
 
         self.__import_args = import_args
         self.__is_resolved = False
-        self.__lock = _threading.Lock()
+        self.__lock = threading.Lock()
         self.__submod_names = submod_names
 
         return self
@@ -994,7 +984,7 @@ class _DIKey(str):
         with temp_deferred:
             # 1. Perform the original __import__ and pray.
             # __eq__ trigger: Internal import machinery when it tries to assign a submodule to a parent module.
-            module: _types.ModuleType = _previous___import__.get()(imp_name, imp_globals, imp_locals, from_list, 0)
+            module: types.ModuleType = builtins.__import__(imp_name, imp_globals, imp_locals, from_list, 0)
 
             # 2. Replace the deferred key in the relevant namespace to avoid it sticking around.
             # __eq__ trigger: dict.pop().
@@ -1023,11 +1013,11 @@ class _DIKey(str):
 
 def _deferred___import__(
     name: str,
-    globals: dict[str, _t.Any],
-    locals: dict[str, _t.Any],
-    fromlist: _t.Optional[_t.Sequence[str]] = None,
+    globals: dict[str, t.Any],
+    locals: dict[str, t.Any],
+    fromlist: t.Optional[t.Sequence[str]] = None,
     level: int = 0,
-) -> _t.Union[_types.ModuleType, _DIProxy]:
+) -> t.Union[types.ModuleType, _DIProxy]:
     """A limited replacement for `__import__` that supports deferred imports by returning proxies.
 
     Should only be invoked by ``import`` statements.
@@ -1045,7 +1035,7 @@ def _deferred___import__(
     # Since we can't dependently annotate it that way, and annotating it as a union would require isinstance checks to
     # satisfy the type checker later on, keeping it as Any "satisfies" the type checker with less runtime cost.
     try:
-        asname: _t.Any = locals[_TEMP_ASNAMES]
+        asname: t.Any = locals[_TEMP_ASNAMES]
     except KeyError:
         msg = "attempted deferred import in a module not instrumented by defer_imports"
         raise ImportError(msg, name=name) from None
@@ -1067,6 +1057,7 @@ def _deferred___import__(
         name = _resolve_name(name, package, level)
 
     # Handle the various types of import statements.
+    # TODO: Figure out what kind of locking we need to do here.
     with _ModuleLockManager(name):
         if fromlist:
             # Case 1: from ... import ... [as ...]
@@ -1074,20 +1065,20 @@ def _deferred___import__(
             for from_name, from_asname in zip(fromlist, asname):
                 visible_name = from_asname or from_name
                 locals[_DIKey(visible_name, (name, globals, locals, from_name))] = locals.pop(visible_name, None)
-            return _DIProxy(name)
+            result = _DIProxy(name)
 
         elif "." not in name:
             # Case 2 & 3: import a [as c]
             visible_name = asname or name
             locals[_DIKey(visible_name, (name, globals, locals, None))] = locals.pop(visible_name, None)
-            return _DIProxy(name)
+            result = _DIProxy(name)
 
         elif asname:
             # Case 4: import a.b.c as d
             # It's less work to treat this as a "from" import, e.g. from a.b import c as d.
             parent_name, _, submod_as_from_name = name.rpartition(".")
             locals[_DIKey(asname, (parent_name, globals, locals, submod_as_from_name))] = locals.pop(asname, None)
-            return _DIProxy(parent_name)
+            result = _DIProxy(parent_name)
 
         else:
             # Case 5: import a.b
@@ -1097,14 +1088,17 @@ def _deferred___import__(
             if (existing_key is not None) and isinstance(existing_key, _DIKey):
                 # Case 5.1: The name of the parent module was imported via defer_imports in the same namespace.
                 existing_key._di_add_submodule_name(name)
-                return locals[parent_name]
+                result = locals[parent_name]
             else:
-                # Case 5.2: The name of the parent module doesn't exist in the same namespace or wasn't placed there by us.
+                # Case 5.2: The name of the parent module doesn't exist in the same namespace or wasn't placed there
+                # by us.
                 sub_names = _accumulate_dotted_parts(name, len(parent_name) + 1)
                 locals[_DIKey(parent_name, (parent_name, globals, locals, None), sub_names)] = locals.pop(
                     parent_name, None
                 )
-                return _DIProxy(parent_name)
+                result = _DIProxy(parent_name)
+
+    return result
 
 
 class _DIContext:
@@ -1123,21 +1117,36 @@ class _DIContext:
     As part of its implementation, this temporarily replaces `builtins.__import__`.
     """
 
-    __slots__ = ("_is_deferred_ctx", "_import_ctx_token")
+    __slots__ = ("_temp_deferred", "_original___import__")
 
     def __enter__(self, /) -> None:
-        self._is_deferred_ctx = _TempDeferred().__enter__()
-        self._import_ctx_token = _previous___import__.set(_builtins.__import__)
-        _builtins.__import__ = _deferred___import__
+        self._temp_deferred = _TempDeferred().__enter__()
+        self._original___import__ = builtins.__import__
+        builtins.__import__ = _deferred___import__
 
     def __exit__(self, *exc_info: object) -> None:
-        _previous___import__.reset(self._import_ctx_token)
-        _builtins.__import__ = _previous___import__.get()
-        self._is_deferred_ctx.__exit__(*exc_info)
+        builtins.__import__ = self._original___import__
+        self._temp_deferred.__exit__(*exc_info)
 
 
 #: The context manager that replaces until_use after instrumentation.
 _actual_until_use = _DIContext()
+
+
+class _NullContext:
+    """A placeholder context manager that does nothing on its own.
+
+    Should not be manually constructed: use through `defer_imports.until_use`.
+    """
+
+    def __enter__(self, /) -> None:
+        pass
+
+    def __exit__(self, *exc_info: object) -> None:
+        pass
+
+
+until_use = _NullContext()
 
 
 # endregion
