@@ -33,6 +33,24 @@ TYPE_CHECKING = False
 
 
 if TYPE_CHECKING:
+
+    class _ModuleLockManager:
+        def __init__(self, name: str) -> None: ...
+        def __enter__(self) -> None: ...
+        def __exit__(self, *exc_info: object) -> None: ...
+
+else:
+    try:
+        from _frozen_importlib import _ModuleLockManager
+    except ImportError:
+        try:
+            from importlib._bootstrap import _ModuleLockManager
+        except ImportError as exc:
+            msg = "Did not find importlib's internal module lock machinery."
+            raise RuntimeError(msg) from exc
+
+
+if TYPE_CHECKING:
     from typing_extensions import TypeAlias
 elif sys.version_info >= (3, 10):  # pragma: >=3.10 cover
     TypeAlias: t.TypeAlias = "t.TypeAlias"
@@ -55,7 +73,7 @@ else:  # pragma: <3.11 cover
 if TYPE_CHECKING:
     from typing_extensions import Buffer as ReadableBuffer
 elif sys.version_info >= (3, 12):  # pragma: >=3.12 cover
-    # NOTE: collections always imports collections.abc, but typeshed isn't aware of that (yet).
+    # collections always imports collections.abc, but typeshed isn't aware of that (yet).
     ReadableBuffer: t.TypeAlias = "collections.abc.Buffer"
 else:  # pragma: <3.12 cover
     ReadableBuffer: TypeAlias = "t.Union[bytes, bytearray, memoryview]"
@@ -80,29 +98,24 @@ else:
     del final
 
 
-if sys.version_info >= (3, 10):
+if sys.version_info >= (3, 10):  # pragma: >=3.10 cover
     _SyntaxContext: TypeAlias = (
         "tuple[t.Optional[str], t.Optional[int], t.Optional[int], t.Optional[str], t.Optional[int], t.Optional[int]]"
     )
-else:
+else:  # pragma: <3.10 cover
     _SyntaxContext: TypeAlias = "tuple[t.Optional[str], t.Optional[int], t.Optional[int], t.Optional[str]]"
 
 
 # compile()'s internals, and thus wrappers of it (e.g. ast.parse()), dropped support in 3.12 for non-bytes buffers as
 # the filename argument (see https://github.com/python/cpython/issues/98393).
-if sys.version_info >= (3, 12):
+if sys.version_info >= (3, 12):  # pragma: >=3.12 cover
     _ModulePath: TypeAlias = "t.Union[str, os.PathLike[str], bytes]"
-else:
+else:  # pragma: <3.12 cover
     _ModulePath: TypeAlias = "t.Union[str, os.PathLike[str], ReadableBuffer]"
 
 
 # endregion
 
-
-# NOTE: Technically, something like ast.AST & LocationAttrsProtocol would be more accurate, but:
-# 1. Python doesn't have intersections yet, and
-# 2. Using a local protocol without eagerly importing typing or having another module isn't doable until 3.12.
-_ASTWithLocation: TypeAlias = "t.Union[ast.expr, ast.stmt]"
 
 _SourceData: TypeAlias = "t.Union[ReadableBuffer, str]"
 
@@ -206,6 +219,12 @@ def _decode_source(source_bytes: ReadableBuffer) -> str:  # pragma: no cover (te
 # ============================================================================
 # region -------- AST transformation --------
 # ============================================================================
+
+
+# NOTE: Technically, something like ast.AST & LocationAttrsProtocol would be more accurate, but:
+# 1. Python doesn't have intersections yet, and
+# 2. Using a local protocol without eagerly importing typing or having another module isn't doable until 3.12.
+_ASTWithLocation: TypeAlias = "t.Union[ast.expr, ast.stmt]"
 
 
 # NOTE: Make our generated variables more hygienic by prefixing their names with "_@di_". A few reasons for this choice:
@@ -734,7 +753,7 @@ class ImportHookContext:
             #
             # Alternatives:
             # - Create and insert a new PathFinder subclass into sys.meta_path, or monkeypatch the existing one.
-            #   That would be more extreme in some ways, but it's the route that typeguard takes.
+            #   This is what typeguard does, but it's more extreme in some ways.
             # - Clear sys.path_importer_cache instead of monkeypatching its values.
             #   This is recommended by the docs and is more "correct", but it can cause a big slowdown on startup.
             for finder in sys.path_importer_cache.values():
@@ -848,7 +867,7 @@ else:  # pragma: cpython no cover
         return next(filter(name.__eq__, dct), None)
 
 
-def _handle_import_key(import_name: str, nmsp: dict[str, t.Any], /) -> None:
+def _handle_import_key(import_name: str, nmsp: dict[str, t.Any], start_idx: t.Optional[int] = None, /) -> None:
     """Ensure that a dotted import name (e.g., "a.b.c") is represented as a chain of deferred proxies
     in the target namespace.
     """
@@ -856,35 +875,33 @@ def _handle_import_key(import_name: str, nmsp: dict[str, t.Any], /) -> None:
     # NOTE: We can't use setattr() on modules directly because PyPy normalizes the attr key type to `str` in setattr().
     # Instead, we assign into the module dict.
 
-    start_idx = import_name.find(".") + 1
+    if start_idx is None:
+        start_idx = import_name.find(".") + 1
 
-    while True:
-        end_idx = import_name.find(".", start_idx)
-        at_final_part_of_name = end_idx == -1
+    end_idx = import_name.find(".", start_idx)
+    at_final_part_of_name = end_idx == -1
 
-        if not at_final_part_of_name:
-            submod_name = import_name[start_idx:end_idx]
+    if not at_final_part_of_name:
+        submod_name = import_name[start_idx:end_idx]
+    else:
+        submod_name = import_name[start_idx:]
+
+    if (existing_key := _get_exact_key(submod_name, nmsp)) is not None:
+        if not isinstance(existing_key, _DIKey):
+            # Recurse with a nested namespace.
+            nmsp = nmsp[submod_name].__dict__
+            start_idx = end_idx + 1
+            _handle_import_key(import_name, nmsp, start_idx)
         else:
-            submod_name = import_name[start_idx:]
+            existing_key._di_add_submodule_name(import_name)
 
-        if (existing_key := _get_exact_key(submod_name, nmsp)) is not None:
-            if not isinstance(existing_key, _DIKey):
-                # Keep looping, but with a more nested namespace.
-                nmsp = nmsp[submod_name].__dict__
-                start_idx = end_idx + 1
-                continue
-            else:
-                existing_key._di_add_submodule_name(import_name)
-                return
-        else:
-            if not at_final_part_of_name:
-                full_submod_name = import_name[:end_idx]
-                sub_names = _accumulate_dotted_parts(import_name, end_idx + 1)
-                nmsp[_DIKey(submod_name, (full_submod_name, nmsp, nmsp, None), sub_names)] = _DIProxy(full_submod_name)
-                return
-            else:
-                nmsp[_DIKey(submod_name, (import_name, nmsp, nmsp, None))] = _DIProxy(import_name)
-                return
+    elif not at_final_part_of_name:
+        full_submod_name = import_name[:end_idx]
+        sub_names = _accumulate_dotted_parts(import_name, end_idx + 1)
+        nmsp[_DIKey(submod_name, (full_submod_name, nmsp, nmsp, None), sub_names)] = _DIProxy(full_submod_name)
+
+    else:
+        nmsp[_DIKey(submod_name, (import_name, nmsp, nmsp, None))] = _DIProxy(import_name)
 
 
 class _DIProxy:
@@ -954,8 +971,8 @@ class _DIKey(str):
     def __resolve_import(self, /) -> None:
         """Resolve the import and replace the deferred key and placeholder in the relevant namespace with the result."""
 
-        # NOTE: We're using this to temporarily prevent _DIKey instances from resolving while we do things that may
-        # re-trigger their __eq__.
+        # We must temporarily prevent _DIKey instances from resolving while we do things that may re-trigger their
+        # __eq__.
         temp_deferred = _TempDeferred()
 
         raw_asname = str(self)
@@ -1006,10 +1023,10 @@ def _deferred___import__(
     Refer to `__import__` for more information on the expected arguments.
     """
 
-    # Ensure _DIKey instances won't resolve while we're creating/examining them in here.
+    # _DIKey instances must not resolve while we're creating/examining them in here.
     if not _is_deferred:
         msg = "attempted deferred import outside the context of a ``with defer_imports.until_use: ...`` block"
-        raise ImportError(msg)
+        raise ImportError(msg, name=name)
 
     # Thanks to our AST transformer, asname should be a tuple[str | None, ...] when fromlist is populated, or a
     # str | None otherwise.
@@ -1019,7 +1036,7 @@ def _deferred___import__(
         asname: t.Any = locals[_TEMP_ASNAMES]
     except KeyError:
         msg = "attempted deferred import in a module not instrumented by defer_imports"
-        raise ImportError(msg) from None
+        raise ImportError(msg, name=name) from None
 
     # Depend on the parser for some input validation of import statements. It should ensure that fromlist is all
     # strings, level >= 0, that kind of thing. The remaining validation and transformation below is adapted from
@@ -1038,41 +1055,44 @@ def _deferred___import__(
         name = _resolve_name(name, package, level)
 
     # Handle the various types of import statements.
-    if fromlist:
-        # Case 1: from ... import ... [as ...]
-        from_asname: str | None
-        for from_name, from_asname in zip(fromlist, asname):
-            visible_name = from_asname or from_name
-            locals[_DIKey(visible_name, (name, globals, locals, from_name))] = locals.pop(visible_name, None)
-        return _DIProxy(name)
+    with _ModuleLockManager(name):
+        if fromlist:
+            # Case 1: from ... import ... [as ...]
+            from_asname: str | None
+            for from_name, from_asname in zip(fromlist, asname):
+                visible_name = from_asname or from_name
+                locals[_DIKey(visible_name, (name, globals, locals, from_name))] = locals.pop(visible_name, None)
+            return _DIProxy(name)
 
-    elif "." not in name:
-        # Case 2 & 3: import a [as c]
-        visible_name = asname or name
-        locals[_DIKey(visible_name, (name, globals, locals, None))] = locals.pop(visible_name, None)
-        return _DIProxy(name)
+        elif "." not in name:
+            # Case 2 & 3: import a [as c]
+            visible_name = asname or name
+            locals[_DIKey(visible_name, (name, globals, locals, None))] = locals.pop(visible_name, None)
+            return _DIProxy(name)
 
-    elif asname:
-        # Case 4: import a.b.c as d
-        # It's less work to treat this as a "from" import, e.g. from a.b import c as d.
-        parent_name, _, submod_name = name.rpartition(".")
-        locals[_DIKey(asname, (parent_name, globals, locals, submod_name))] = locals.pop(asname, None)
-        return _DIProxy(parent_name)
-
-    else:
-        # Case 5: import a.b
-        parent_name = name.partition(".")[0]
-        existing_key = _get_exact_key(parent_name, locals)
-
-        if (existing_key is not None) and isinstance(existing_key, _DIKey):
-            # Case 5.1: The name of the parent module was imported via defer_imports in the same namespace.
-            existing_key._di_add_submodule_name(name)
-            return locals[parent_name]
-        else:
-            # Case 5.2: The name of the parent module doesn't exist in the same namespace or wasn't placed there by us.
-            sub_names = _accumulate_dotted_parts(name, len(parent_name) + 1)
-            locals[_DIKey(parent_name, (parent_name, globals, locals, None), sub_names)] = locals.pop(parent_name, None)
+        elif asname:
+            # Case 4: import a.b.c as d
+            # It's less work to treat this as a "from" import, e.g. from a.b import c as d.
+            parent_name, _, submod_as_from_name = name.rpartition(".")
+            locals[_DIKey(asname, (parent_name, globals, locals, submod_as_from_name))] = locals.pop(asname, None)
             return _DIProxy(parent_name)
+
+        else:
+            # Case 5: import a.b
+            parent_name = name.partition(".")[0]
+            existing_key = _get_exact_key(parent_name, locals)
+
+            if (existing_key is not None) and isinstance(existing_key, _DIKey):
+                # Case 5.1: The name of the parent module was imported via defer_imports in the same namespace.
+                existing_key._di_add_submodule_name(name)
+                return locals[parent_name]
+            else:
+                # Case 5.2: The name of the parent module doesn't exist in the same namespace or wasn't placed there by us.
+                sub_names = _accumulate_dotted_parts(name, len(parent_name) + 1)
+                locals[_DIKey(parent_name, (parent_name, globals, locals, None), sub_names)] = locals.pop(
+                    parent_name, None
+                )
+                return _DIProxy(parent_name)
 
 
 class _DIContext:
