@@ -69,12 +69,14 @@ else:  # pragma: <3.11 cover
         """Placeholder for typing.Self."""
 
 
+# collections always imports collections.abc in 3.13+ (which typeshed isn't aware of yet).
+# Ref: https://github.com/python/cpython/pull/125415
+# However, collections.abc.Buffer was added in 3.12. We settle on this for a middle ground.
 if TYPE_CHECKING:
     from typing_extensions import Buffer as ReadableBuffer
-elif sys.version_info >= (3, 12):  # pragma: >=3.12 cover
-    # collections always imports collections.abc, but typeshed isn't aware of that (yet).
+elif sys.version_info >= (3, 13):  # pragma: >=3.13 cover
     ReadableBuffer: t.TypeAlias = "collections.abc.Buffer"
-else:  # pragma: <3.12 cover
+else:  # pragma: <3.13 cover
     ReadableBuffer: TypeAlias = "t.Union[bytes, bytearray, memoryview]"
 
 
@@ -103,7 +105,8 @@ else:  # pragma: <3.10 cover
 
 
 # compile()'s internals, and thus wrappers of it (e.g. ast.parse()), dropped support in 3.12 for non-bytes buffers as
-# the filename argument (see https://github.com/python/cpython/issues/98393).
+# the filename argument.
+# Ref: https://github.com/python/cpython/issues/98393
 if sys.version_info >= (3, 12):  # pragma: >=3.12 cover
     _ModulePath: TypeAlias = "t.Union[str, os.PathLike[str], bytes]"
 else:  # pragma: <3.12 cover
@@ -218,19 +221,18 @@ def _decode_source(source_bytes: ReadableBuffer) -> str:  # pragma: no cover (te
 
 
 # NOTE: Technically, something like ast.AST & LocationAttrsProtocol would be more accurate, but:
-# 1. Python doesn't have intersections yet, and
-# 2. Using a local protocol without eagerly importing typing or having another module isn't doable until 3.12.
+# 1.  Python doesn't have intersections yet, and
+# 2.  Using a local protocol without eagerly importing typing or having another module isn't doable until 3.12.
 _ASTWithLocation: TypeAlias = "t.Union[ast.expr, ast.stmt]"
 
 
 # NOTE: Make our generated variables more hygienic by prefixing their names with "_@di_". A few reasons for this choice:
 #
-# 1. The "@" isn't a valid character for identifiers, so there won't be conflicts with "regular" user code.
-#    pytest does something similar.
-# 2. The "di" namespaces the symbols somewhat in case third parties augment the code further with similar codegen.
-#    pytest does something similiar.
-# 3. The starting "_" will prevent the symbols from being picked up by code that programmatically accesses a namespace
-#    during module execution but avoids symbols starting with an underscore.
+# 1.  The "@" isn't a valid character for Python identifiers, so there won't be conflicts with "regular" user code.
+#     pytest does something similar.
+# 2.  The "di" namespaces the symbols somewhat. pytest does something similiar.
+# 3.  The starting "_" will prevent the symbols from being picked up by code that programmatically accesses a namespace
+#     during module execution but avoids symbols starting with an underscore.
 #     - An example of a common pattern in the standard library that does this:
 #       __all__ = [name for name in globals() if name[:1] != "_"]  # noqa: ERA001
 _HYGIENE_PREFIX = "_@di_"
@@ -244,7 +246,7 @@ _AST_LOC_ATTRS = ("lineno", "col_offset", "end_lineno", "end_col_offset")
 
 
 def _is_until_use_node(node: ast.AST, /) -> bool:
-    """Check if the node matches ``with defer_imports.until_use: ...``."""
+    """Check if the node matches ``with defer_imports.until_use(): ...``."""
 
     if not (isinstance(node, ast.With) and len(node.items) == 1):
         return False
@@ -283,7 +285,7 @@ def _get_joined_source_lines(source: str, node: _ASTWithLocation) -> t.Optional[
 
 
 class _ImportsInstrumenter(ast.NodeTransformer):
-    """AST transformer that instruments imports within ``with defer_imports.until_use: ...`` blocks.
+    """AST transformer that instruments imports within ``with defer_imports.until_use(): ...`` blocks.
 
     The results of those imports will be assigned to custom keys in the local namespace.
     """
@@ -463,7 +465,7 @@ class _ImportsInstrumenter(ast.NodeTransformer):
         return nodes  # pyright: ignore [reportReturnType]
 
     def visit_With(self, node: ast.With) -> ast.AST:
-        """Check that ``with defer_imports.until_use: ...`` blocks are valid and if so, hook all imports within.
+        """Check that ``with defer_imports.until_use(): ...`` blocks are valid and if so, hook all imports within.
 
         Raises
         ------
@@ -563,7 +565,7 @@ def _walk_globals(node: ast.AST) -> t.Generator[ast.AST, None, None]:
 
 # PYUPDATE: py3.14 - Consider inheriting from importlib.abc.SourceLoader instead since it's (probably) cheap again.
 class _DIFileLoader(SourceFileLoader):
-    """A file loader that instruments ``.py`` files which use ``with defer_imports.until_use: ...``."""
+    """A file loader that instruments ``.py`` files which use ``with defer_imports.until_use(): ...``."""
 
     def get_data(self, path: str) -> bytes:
         """Return the data from `path` as raw bytes.
@@ -578,9 +580,9 @@ class _DIFileLoader(SourceFileLoader):
         """
 
         # NOTE: There are other options:
-        # 1. Monkeypatch `importlib.util.cache_from_source`, as beartype and typeguard do.
-        #    Ref: https://github.com/beartype/beartype/blob/e9eeb4e282f438e770520b99deadbe219a1c62dc/beartype/claw/_importlib/_clawimpload.py#L177-L312
-        # 2. Do whatever facebookincubator/cinderx's strict loader does.
+        # 1.  Monkeypatch `importlib.util.cache_from_source`, as beartype and typeguard do.
+        #     Ref: https://github.com/beartype/beartype/blob/e9eeb4e282f438e770520b99deadbe219a1c62dc/beartype/claw/_importlib/_clawimpload.py#L177-L312
+        # 2.  Do whatever facebookincubator/cinderx's strict loader does, which involves overriding get_code().
 
         data = super().get_data(path)
 
@@ -623,6 +625,8 @@ class _DIFileLoader(SourceFileLoader):
         ----------
         data: _SourceData
             A string or buffer type that `compile()` supports.
+        path: _ModulePath
+            The file from which `data` was read.
         """
 
         if not data:
@@ -778,8 +782,7 @@ class ImportHookContext:
             pass
 
         # Undo the monkeypatching done in self.install().
-        # We don't have to invalidate the finder caches, which only contain potential module locations, because the
-        # patch doesn't affect them.
+        # We don't have to invalidate the unaffected finder caches, which only contain potential module locations.
         for finder in sys.path_importer_cache.values():
             if (finder is not None) and (finder.__class__ is _DIFileFinder):
                 finder.__class__ = FileFinder
@@ -1023,7 +1026,7 @@ def _deferred___import__(
 
     # _DIKey instances must not resolve while we're creating/examining them in here.
     if not _is_deferred:
-        msg = "attempted deferred import outside the context of a ``with defer_imports.until_use: ...`` block"
+        msg = "attempted deferred import outside the context of a ``with defer_imports.until_use(): ...`` block"
         raise ImportError(msg, name=name)
 
     # Thanks to our AST transformer, asname should be a tuple[str | None, ...] when fromlist is populated, or a
@@ -1122,7 +1125,7 @@ class NullContext:
 
     Notes
     -----
-    As part of its implementation, this temporarily replaces `builtins.__import__`.
+    This temporarily replaces `builtins.__import__`.
     """
 
     def __enter__(self, /) -> None:
