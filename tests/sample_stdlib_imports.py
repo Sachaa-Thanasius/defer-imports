@@ -3,7 +3,7 @@
 import defer_imports
 
 
-with defer_imports.until_use:
+with defer_imports.until_use():
     import __future__
 
     # import _bootlocale  # Doesn't exist on 3.11 on Windows

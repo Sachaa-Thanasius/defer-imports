@@ -101,7 +101,7 @@ Assuming the path hook was registered normally (i.e. without providing any confi
 
     import defer_imports
 
-    with defer_imports.until_use:
+    with defer_imports.until_use():
         import inspect
         from typing import Final
 
@@ -124,7 +124,7 @@ Use Cases
     -   If imports are necessary to get symbols that are only used within annotations.
 
         -   Such imports can be unnecessarily expensive or cause import chains depending on how one's code is organized.
-        -   The current workaround for this is to perform the problematic imports within ``if typing.TYPE_CHECKING: ...`` blocks and then stringify the fake-imported, nonexistent symbols to prevent NameErrors at runtime; however, the resulting annotations will raise errors if ever introspected. Using ``with defer_imports.until_use: ...`` instead would ensure that the symbols will be imported and saved in the local namespace, but only upon introspection, making the imports non-circular and almost free in most circumstances.
+        -   The current workaround for this is to perform the problematic imports within ``if typing.TYPE_CHECKING: ...`` blocks and then stringify the fake-imported, nonexistent symbols to prevent NameErrors at runtime; however, the resulting annotations will raise errors if ever introspected. Using ``with defer_imports.until_use(): ...`` instead would ensure that the symbols will be imported and saved in the local namespace, but only upon introspection, making the imports non-circular and almost free in most circumstances.
 
 
 Features

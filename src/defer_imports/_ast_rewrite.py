@@ -235,7 +235,7 @@ _ASTWithLocation: TypeAlias = "t.Union[ast.expr, ast.stmt]"
 #       __all__ = [name for name in globals() if name[:1] != "_"]  # noqa: ERA001
 _HYGIENE_PREFIX = "_@di_"
 
-_ACTUAL_CTX_NAME = "_actual_until_use"
+_ACTUAL_CTX_NAME = "_DIContext"
 _ACTUAL_CTX_ASNAME = f"{_HYGIENE_PREFIX}{_ACTUAL_CTX_NAME}"
 _TEMP_ASNAMES = f"{_HYGIENE_PREFIX}_temp_asnames"
 
@@ -250,10 +250,14 @@ def _is_until_use_node(node: ast.AST, /) -> bool:
         return False
 
     context_expr = node.items[0].context_expr
-    if not (isinstance(context_expr, ast.Attribute) and context_expr.attr == "until_use"):
+    if not isinstance(context_expr, ast.Call):
         return False
 
-    expr_value = context_expr.value
+    func = context_expr.func
+    if not (isinstance(func, ast.Attribute) and func.attr == "until_use"):
+        return False
+
+    expr_value = func.value
     return isinstance(expr_value, ast.Name) and expr_value.id == "defer_imports"
 
 
@@ -334,8 +338,8 @@ class _ImportsInstrumenter(ast.NodeTransformer):
         """Wrap a list of import nodes with a `defer_imports.until_use` block and instrument them."""
 
         loc = {attr: getattr(import_nodes[0], attr) for attr in _AST_LOC_ATTRS}
-        with_items = [ast.withitem(context_expr=ast.Name(_ACTUAL_CTX_ASNAME, ctx=ast.Load(), **loc))]
-        return ast.With(items=with_items, body=self._add_asname_trackers(import_nodes), **loc)
+        call = ast.Call(func=ast.Name(_ACTUAL_CTX_ASNAME, ctx=ast.Load(), **loc), args=[], keywords=[], **loc)
+        return ast.With(items=[ast.withitem(context_expr=call)], body=self._add_asname_trackers(import_nodes), **loc)
 
     def _is_instrumentable_import(self, node: ast.AST) -> bool:
         """Determine whether a node is a global import that should be instrumented."""
@@ -472,7 +476,7 @@ class _ImportsInstrumenter(ast.NodeTransformer):
 
         # Replace the dummy context manager with the one that will actually replace __import__.
         loc = {attr: getattr(node.items[0].context_expr, attr) for attr in _AST_LOC_ATTRS}
-        node.items[0].context_expr = ast.Name(_ACTUAL_CTX_ASNAME, ctx=ast.Load(), **loc)
+        node.items[0].context_expr = ast.Call(ast.Name(_ACTUAL_CTX_ASNAME, ctx=ast.Load(), **loc), [], [], **loc)
 
         # Actually instrument the import nodes.
         node.body = self._add_asname_trackers(self._validate_until_use_body(node.body))
@@ -622,16 +626,16 @@ class _DIFileLoader(SourceFileLoader):
         """
 
         if not data:
-            return super().source_to_code(data, path, _optimize=_optimize)
+            return compile(data, path, "exec", dont_inherit=True, optimize=_optimize)
 
         orig_tree: ast.Module = compile(data, path, "exec", ast.PyCF_ONLY_AST, dont_inherit=True, optimize=_optimize)
 
         if not (self.defer_whole_module or any(map(_is_until_use_node, _walk_globals(orig_tree)))):
-            return super().source_to_code(orig_tree, path, _optimize=_optimize)
+            return compile(orig_tree, path, "exec", dont_inherit=True, optimize=_optimize)
 
         instrumenter = _ImportsInstrumenter(data, path, whole_module=self.defer_whole_module)
         new_tree = instrumenter.visit(orig_tree)
-        return super().source_to_code(new_tree, path, _optimize=_optimize)
+        return compile(new_tree, path, "exec", dont_inherit=True, optimize=_optimize)
 
     def create_module(self, spec: ModuleSpec) -> t.Optional[types.ModuleType]:
         """Use default semantics for module creation. Also, get some state from the spec."""
@@ -973,7 +977,7 @@ class _DIKey(str):
         from_list = (from_name,) if (from_name is not None) else ()
 
         with temp_deferred:
-            # 1. Perform the original __import__ and pray.
+            # 1. Perform the builtin __import__ and pray.
             # __eq__ trigger: Internal import machinery when it tries to assign a submodule to a parent module.
             module: types.ModuleType = builtins.__import__(imp_name, imp_globals, imp_locals, from_list, 0)
 
@@ -985,6 +989,7 @@ class _DIKey(str):
         if from_name is not None:
             imp_locals[raw_asname] = getattr(module, from_name)
         elif ("." in imp_name) and ("." not in raw_asname):
+            # Equvalent to functools.reduce(getattr, imp_name.split(".")[1:], module), but without an import.
             attr = module
             for attr_name in imp_name.split(".")[1:]:
                 attr = getattr(attr, attr_name)
@@ -1031,7 +1036,7 @@ def _deferred___import__(
         msg = "attempted deferred import in a module not instrumented by defer_imports"
         raise ImportError(msg, name=name) from None
 
-    # Depend on the parser for some input validation of import statements. It should ensure that fromlist is all
+    # Depend on the parser for some input validation for import statements. It should ensure that fromlist is all
     # strings, level >= 0, that kind of thing. The remaining validation and transformation below is adapted from
     # importlib.__import__() and importlib._bootstrap._sanity_check().
     if level > 0:  # pragma: no cover (tested in stdlib)
@@ -1073,26 +1078,38 @@ def _deferred___import__(
 
         else:
             # Case 5: import a.b
-            parent_name = name.partition(".")[0]
-            existing_key = _get_exact_key(parent_name, locals)
+            root_name = name.partition(".")[0]
+            existing_key = _get_exact_key(root_name, locals)
 
             if (existing_key is not None) and isinstance(existing_key, _DIKey):
-                # Case 5.1: The name of the parent module was imported via defer_imports in the same namespace.
+                # Case 5.1: The name of the root module was imported via defer_imports in the same namespace.
                 existing_key._di_add_submodule_name(name)
-                result = locals[parent_name]
+                result = locals[root_name]
             else:
-                # Case 5.2: The name of the parent module doesn't exist in the same namespace or wasn't placed there
-                # by us.
-                sub_names = _accumulate_dotted_parts(name, len(parent_name) + 1)
-                locals[_DIKey(parent_name, (parent_name, globals, locals, None), sub_names)] = locals.pop(
-                    parent_name, None
-                )
-                result = _DIProxy(parent_name)
+                # Case 5.2: The name of the root module isn't present or wasn't created/placed by us.
+                sub_names = _accumulate_dotted_parts(name, len(root_name) + 1)
+                locals[_DIKey(root_name, (root_name, globals, locals, None), sub_names)] = locals.pop(root_name, None)
+                result = _DIProxy(root_name)
 
     return result
 
 
-class _DIContext:
+class _DIContext:  # pyright: ignore [reportUnusedClass]
+    """The context manager that replaces `defer_imports.until_use` after instrumentation."""
+
+    __slots__ = ("_temp_deferred", "_original___import__")
+
+    def __enter__(self, /) -> None:
+        self._temp_deferred = _TempDeferred().__enter__()
+        self._original___import__ = builtins.__import__
+        builtins.__import__ = _deferred___import__
+
+    def __exit__(self, *exc_info: object) -> None:
+        builtins.__import__ = self._original___import__
+        self._temp_deferred.__exit__(*exc_info)
+
+
+class NullContext:
     """A context manager within which imports occur lazily. Not re-entrant. Use via `defer_imports.until_use`.
 
     If defer_imports isn't set up properly, i.e. `import_hook().install()` is not called first elsewhere, this should be
@@ -1108,28 +1125,6 @@ class _DIContext:
     As part of its implementation, this temporarily replaces `builtins.__import__`.
     """
 
-    __slots__ = ("_temp_deferred", "_original___import__")
-
-    def __enter__(self, /) -> None:
-        self._temp_deferred = _TempDeferred().__enter__()
-        self._original___import__ = builtins.__import__
-        builtins.__import__ = _deferred___import__
-
-    def __exit__(self, *exc_info: object) -> None:
-        builtins.__import__ = self._original___import__
-        self._temp_deferred.__exit__(*exc_info)
-
-
-#: The context manager that replaces until_use after instrumentation.
-_actual_until_use = _DIContext()
-
-
-class NullContext:
-    """A placeholder context manager that does nothing on its own.
-
-    Should not be manually constructed: use through `defer_imports.until_use`.
-    """
-
     def __enter__(self, /) -> None:
         pass
 
@@ -1137,7 +1132,7 @@ class NullContext:
         pass
 
 
-until_use = NullContext()
+until_use = NullContext
 
 
 # endregion

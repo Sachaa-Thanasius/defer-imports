@@ -44,7 +44,7 @@ del {_ACTUAL_CTX_ASNAME}
 """.rstrip()
 
 IMPORT_TEMPLATE = f"""\
-with {_ACTUAL_CTX_ASNAME}:
+with {_ACTUAL_CTX_ASNAME}():
     {{}}
     del {_TEMP_ASNAMES}
 """.rstrip()
@@ -214,7 +214,7 @@ common_ast_rewrite_cases = [
             """\
 import defer_imports
 
-with defer_imports.until_use:
+with defer_imports.until_use():
     import __future__
 """,
             module_template("import defer_imports", import_template(asnames_template(None), "import __future__")),
@@ -243,7 +243,7 @@ with defer_imports.until_use, nullcontext():
 
 import defer_imports
 
-with defer_imports.until_use:
+with defer_imports.until_use():
     import inspect
 """,
             f'"""{SAMPLE_DOCSTRING}"""\n'
@@ -256,7 +256,7 @@ from __future__ import annotations
 
 import defer_imports
 
-with defer_imports.until_use:
+with defer_imports.until_use():
     import inspect
 """,
             "from __future__ import annotations\n"
@@ -267,7 +267,7 @@ with defer_imports.until_use:
             """\
 import defer_imports
 
-with defer_imports.until_use:
+with defer_imports.until_use():
     import inspect
 """,
             module_template("import defer_imports", import_template(asnames_template(None), "import inspect")),
@@ -277,7 +277,7 @@ with defer_imports.until_use:
             """\
 import defer_imports
 
-with defer_imports.until_use:
+with defer_imports.until_use():
     import inspect as i
 """,
             module_template("import defer_imports", import_template(asnames_template("i"), "import inspect as i")),
@@ -287,7 +287,7 @@ with defer_imports.until_use:
             """\
 import defer_imports
 
-with defer_imports.until_use:
+with defer_imports.until_use():
     import sys, os as so
 """,
             module_template(
@@ -300,7 +300,7 @@ with defer_imports.until_use:
             """\
 import defer_imports
 
-with defer_imports.until_use:
+with defer_imports.until_use():
     import importlib
     import importlib.abc
 """,
@@ -316,7 +316,7 @@ with defer_imports.until_use:
             """\
 import defer_imports
 
-with defer_imports.until_use:
+with defer_imports.until_use():
     from . import a
 """,
             module_template("import defer_imports", import_template(asnames_template((None,)), "from . import a")),
@@ -458,7 +458,7 @@ import bar
             """\
 import defer_imports
 import foo
-with defer_imports.until_use:
+with defer_imports.until_use():
     import hello
 import bar
 """,
@@ -527,7 +527,7 @@ class TestImport:
         source = """\
 import defer_imports
 
-with defer_imports.until_use:
+with defer_imports.until_use():
     import inspect
 """
         module = create_sample_module(tmp_path, source, SourceFileLoader)
@@ -544,7 +544,7 @@ with defer_imports.until_use:
         source = """\
 import defer_imports
 
-with defer_imports.until_use:
+with defer_imports.until_use():
     import inspect
 """
         module = create_sample_module(tmp_path, source)
@@ -564,7 +564,7 @@ with defer_imports.until_use:
         source = """\
 import defer_imports
 
-with defer_imports.until_use:
+with defer_imports.until_use():
     import inspect as gin
 """
         module = create_sample_module(tmp_path, source)
@@ -593,7 +593,7 @@ with defer_imports.until_use:
         source = """\
 import defer_imports
 
-with defer_imports.until_use:
+with defer_imports.until_use():
     import importlib.abc
 """
         module = create_sample_module(tmp_path, source)
@@ -611,7 +611,7 @@ with defer_imports.until_use:
         source = """\
 import defer_imports
 
-with defer_imports.until_use:
+with defer_imports.until_use():
     import collections.abc as xyz
 """
         module = create_sample_module(tmp_path, source)
@@ -656,7 +656,7 @@ with defer_imports.until_use:
         source = """\
 import defer_imports
 
-with defer_imports.until_use:
+with defer_imports.until_use():
     from inspect import isfunction, signature
 """
         module = create_sample_module(tmp_path, source)
@@ -683,7 +683,7 @@ with defer_imports.until_use:
         source = """\
 import defer_imports
 
-with defer_imports.until_use:
+with defer_imports.until_use():
     from inspect import Signature as MySignature
 """
         module = create_sample_module(tmp_path, source)
@@ -711,7 +711,7 @@ with defer_imports.until_use:
         source = """\
 import defer_imports
 
-with defer_imports.until_use:
+with defer_imports.until_use():
     import asyncio
 """
         module = create_sample_module(tmp_path, source)
@@ -729,7 +729,7 @@ with defer_imports.until_use:
         source = """\
 import defer_imports
 
-with defer_imports.until_use:
+with defer_imports.until_use():
     print("Hello world")
 """
         module = create_sample_module(tmp_path, source, exec_mod=False)
@@ -750,7 +750,7 @@ with defer_imports.until_use:
         source = """\
 import defer_imports
 
-with defer_imports.until_use:
+with defer_imports.until_use():
     from typing import *
 """
         module = create_sample_module(tmp_path, source, exec_mod=False)
@@ -771,7 +771,7 @@ with defer_imports.until_use:
         source = """\
 import defer_imports
 
-with defer_imports.until_use:
+with defer_imports.until_use():
     a = 1 + \
         2 + \
         3; b = 2
@@ -795,7 +795,7 @@ with defer_imports.until_use:
 import defer_imports
 
 importlib = None
-with defer_imports.until_use:
+with defer_imports.until_use():
     import importlib
 """
         module = create_sample_module(tmp_path, source)
@@ -807,7 +807,7 @@ with defer_imports.until_use:
         source = """\
 import defer_imports
 
-with defer_imports.until_use:
+with defer_imports.until_use():
     import importlib
     import importlib.abc
     import importlib.util
@@ -846,7 +846,7 @@ with defer_imports.until_use:
 import defer_imports
 
 concurrent = None
-with defer_imports.until_use:
+with defer_imports.until_use():
     import concurrent.futures.process
 """
         module = create_sample_module(tmp_path, source)
@@ -879,7 +879,7 @@ with defer_imports.until_use:
         source = """\
 import defer_imports
 
-with defer_imports.until_use:
+with defer_imports.until_use():
     import asyncio
     import asyncio.base_events
     import asyncio.base_futures
@@ -895,7 +895,7 @@ with defer_imports.until_use:
         source = """\
 import defer_imports
 
-with defer_imports.until_use:
+with defer_imports.until_use():
     import asyncio
     from asyncio import base_events
     from asyncio import base_futures
@@ -942,7 +942,7 @@ with defer_imports.until_use:
                     (
                         "import defer_imports",
                         "",
-                        "with defer_imports.until_use:",
+                        "with defer_imports.until_use():",
                         "    from . import a",
                         "    from .a import A",
                         "    from .b import B",
@@ -984,7 +984,7 @@ with defer_imports.until_use:
                     (
                         "import defer_imports",
                         "",
-                        "with defer_imports.until_use:",
+                        "with defer_imports.until_use():",
                         "    import circular_pkg.main",
                     )
                 ),
@@ -1046,7 +1046,7 @@ with defer_imports.until_use:
                     (
                         "import defer_imports",
                         "",
-                        "with defer_imports.until_use:",
+                        "with defer_imports.until_use():",
                         "    from .b import B",
                     )
                 ),
@@ -1077,7 +1077,7 @@ with defer_imports.until_use:
                     (
                         "import defer_imports",
                         "",
-                        "with defer_imports.until_use:",
+                        "with defer_imports.until_use():",
                         "    from .exp import Expensive",
                         "",
                         "type ManyExpensive = tuple[Expensive, ...]",
@@ -1107,7 +1107,7 @@ with defer_imports.until_use:
         source = """\
 import defer_imports
 
-with defer_imports.until_use:
+with defer_imports.until_use():
     import inspect
 """
         module = create_sample_module(tmp_path, source)

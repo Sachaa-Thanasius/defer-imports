@@ -582,7 +582,7 @@ def main() -> None:
     # ---- defer_imports-instrumented and defer_imports-hooked imports (local)
     sample_defer_contents = _CONTEXT_MANAGER_TEMPLATE.format(
         import_stmt="import defer_imports",
-        ctx_manager="with defer_imports.until_use:",
+        ctx_manager="with defer_imports.until_use():",
     )
     sample_defer_path = bench_path / "sample_defer_local.py"
     sample_defer_path.write_text(sample_defer_contents, encoding="utf-8")
