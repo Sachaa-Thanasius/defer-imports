@@ -37,34 +37,35 @@ NestedMapping = collections.abc.Mapping[str, typing.Union["NestedMapping", str]]
 
 SAMPLE_DOCSTRING = "Module docstring here"
 
-MODULE_TEMPLATE = f"""\
-from defer_imports._ast_rewrite import {_ACTUAL_CTX_NAME} as {_ACTUAL_CTX_ASNAME}
-{{}}
-del {_ACTUAL_CTX_ASNAME}
-""".rstrip()
-
-IMPORT_TEMPLATE = f"""\
-with {_ACTUAL_CTX_ASNAME}():
-    {{}}
-    del {_TEMP_ASNAMES}
-""".rstrip()
-
 
 def module_template(*lines: str) -> str:
-    return MODULE_TEMPLATE.format("\n".join(lines))
+    return "\n".join(
+        (
+            f"from defer_imports._ast_rewrite import {_ACTUAL_CTX_NAME} as {_ACTUAL_CTX_ASNAME}",
+            "\n".join(lines),
+            f"del {_ACTUAL_CTX_ASNAME}",
+        )
+    )
 
 
 def import_template(*lines: str) -> str:
-    return IMPORT_TEMPLATE.format("\n    ".join(lines))
+    return "\n".join(
+        (
+            f"with {_ACTUAL_CTX_ASNAME}():",
+            "\n".join(f"    {line}" for line in lines),
+            f"    del {_TEMP_ASNAMES}",
+        )
+    )
 
 
-asnames_template = f"{_TEMP_ASNAMES} = {{!r}}".format
+def asnames_template(arg: object = None) -> str:
+    return f"{_TEMP_ASNAMES} = {arg!r}"
 
 
 def normalize_ws(text: str) -> str:
     """Remove empty lines and normalize line endings to "\\n"."""
 
-    return "\n".join(filter(str.strip, text.splitlines()))
+    return "\n".join(line for line in text.splitlines() if line.strip())
 
 
 def create_dir_tree(path: Path, dir_contents: NestedMapping) -> None:
@@ -217,7 +218,7 @@ import defer_imports
 with defer_imports.until_use():
     import __future__
 """,
-            module_template("import defer_imports", import_template(asnames_template(None), "import __future__")),
+            module_template("import defer_imports", import_template(asnames_template(), "import __future__")),
             id="top-level __future__ import",
         ),
         pytest.param(
@@ -247,7 +248,7 @@ with defer_imports.until_use():
     import inspect
 """,
             f'"""{SAMPLE_DOCSTRING}"""\n'
-            + module_template("import defer_imports", import_template(asnames_template(None), "import inspect")),
+            + module_template("import defer_imports", import_template(asnames_template(), "import inspect")),
             id="docstring then regular import",
         ),
         pytest.param(
@@ -260,7 +261,7 @@ with defer_imports.until_use():
     import inspect
 """,
             "from __future__ import annotations\n"
-            + module_template("import defer_imports", import_template(asnames_template(None), "import inspect")),
+            + module_template("import defer_imports", import_template(asnames_template(), "import inspect")),
             id="from __future__ then regular import",
         ),
         pytest.param(
@@ -270,7 +271,7 @@ import defer_imports
 with defer_imports.until_use():
     import inspect
 """,
-            module_template("import defer_imports", import_template(asnames_template(None), "import inspect")),
+            module_template("import defer_imports", import_template(asnames_template(), "import inspect")),
             id="regular import",
         ),
         pytest.param(
@@ -292,7 +293,7 @@ with defer_imports.until_use():
 """,
             module_template(
                 "import defer_imports",
-                import_template(asnames_template(None), "import sys", asnames_template("so"), "import os as so"),
+                import_template(asnames_template(), "import sys", asnames_template("so"), "import os as so"),
             ),
             id="regular import with rename 2",
         ),
@@ -306,9 +307,7 @@ with defer_imports.until_use():
 """,
             module_template(
                 "import defer_imports",
-                import_template(
-                    asnames_template(None), "import importlib", asnames_template(None), "import importlib.abc"
-                ),
+                import_template(asnames_template(), "import importlib", asnames_template(), "import importlib.abc"),
             ),
             id="mixed imports",
         ),
@@ -340,18 +339,18 @@ def test_regular_ast_rewrite(source: str, expected_rewrite: str):
         *common_ast_rewrite_cases,
         pytest.param(
             "import inspect",
-            module_template(import_template(asnames_template(None), "import inspect")),
+            module_template(import_template(asnames_template(), "import inspect")),
             id="regular import",
         ),
         pytest.param(
             "\n".join(("import hello", "import world", "import foo")),
             module_template(
                 import_template(
-                    asnames_template(None),
+                    asnames_template(),
                     "import hello",
-                    asnames_template(None),
+                    asnames_template(),
                     "import world",
-                    asnames_template(None),
+                    asnames_template(),
                     "import foo",
                 )
             ),
@@ -367,9 +366,9 @@ print("hello")
 import foo
 """,
             module_template(
-                import_template(asnames_template(None), "import hello", asnames_template(None), "import world"),
+                import_template(asnames_template(), "import hello", asnames_template(), "import world"),
                 "print('hello')",
-                import_template(asnames_template(None), "import foo"),
+                import_template(asnames_template(), "import foo"),
             ),
             id="multiple imports separated by statement 1",
         ),
@@ -384,10 +383,10 @@ def do_the_thing(a: int) -> int:
 import foo
 """,
             module_template(
-                import_template(asnames_template(None), "import hello", asnames_template(None), "import world"),
+                import_template(asnames_template(), "import hello", asnames_template(), "import world"),
                 "def do_the_thing(a: int) -> int:",
                 "    return a",
-                import_template(asnames_template(None), "import foo"),
+                import_template(asnames_template(), "import foo"),
             ),
             id="multiple imports separated by statement 2",
         ),
@@ -400,7 +399,7 @@ def do_the_thing(a: int) -> int:
     return a
 """,
             module_template(
-                import_template(asnames_template(None), "import hello"),
+                import_template(asnames_template(), "import hello"),
                 "def do_the_thing(a: int) -> int:",
                 "    import world",
                 "    return a",
@@ -414,9 +413,9 @@ from world import *
 import foo
 """,
             module_template(
-                import_template(asnames_template(None), "import hello"),
+                import_template(asnames_template(), "import hello"),
                 "from world import *",
-                import_template(asnames_template(None), "import foo"),
+                import_template(asnames_template(), "import foo"),
             ),
             id="avoids doing anything with wildcard imports",
         ),
@@ -430,12 +429,12 @@ finally:
 import bar
 """,
             module_template(
-                import_template(asnames_template(None), "import foo"),
+                import_template(asnames_template(), "import foo"),
                 "try:",
                 "    import hello",
                 "finally:",
                 "    pass",
-                import_template(asnames_template(None), "import bar"),
+                import_template(asnames_template(), "import bar"),
             ),
             id="avoids imports in try-finally",
         ),
@@ -447,10 +446,10 @@ with nullcontext():
 import bar
 """,
             module_template(
-                import_template(asnames_template(None), "import foo"),
+                import_template(asnames_template(), "import foo"),
                 "with nullcontext():",
                 "    import hello",
-                import_template(asnames_template(None), "import bar"),
+                import_template(asnames_template(), "import bar"),
             ),
             id="avoids imports in non-defer_imports.until_use with block",
         ),
@@ -463,9 +462,9 @@ with defer_imports.until_use():
 import bar
 """,
             module_template(
-                import_template(asnames_template(None), "import defer_imports", asnames_template(None), "import foo"),
-                import_template(asnames_template(None), "import hello"),
-                import_template(asnames_template(None), "import bar"),
+                import_template(asnames_template(), "import defer_imports", asnames_template(), "import foo"),
+                import_template(asnames_template(), "import hello"),
+                import_template(asnames_template(), "import bar"),
             ),
             id="still instruments imports in defer_imports.until_use with block",
         ),
@@ -1112,7 +1111,7 @@ with defer_imports.until_use():
 """
         module = create_sample_module(tmp_path, source)
 
-        num_threads = 20  # Need more to trigger the pypy issue.
+        num_threads = 20
         barrier = threading.Barrier(num_threads)
 
         results: list[object] = []

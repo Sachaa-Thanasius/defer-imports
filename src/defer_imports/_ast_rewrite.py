@@ -930,12 +930,8 @@ class _DIKey(str):
         if is_eq is not True:
             return is_eq
 
-        if self.__is_resolved:
-            return True
-
         # Only the first thread to grab the lock should resolve the deferred import.
         with self.__lock:
-            # Check that another thread didn't already resolve the import while this one was waiting on the lock.
             if self.__is_resolved:
                 return True
 
@@ -967,7 +963,7 @@ class _DIKey(str):
             module: types.ModuleType = builtins.__import__(imp_name, imp_globals, imp_locals, from_list, 0)
 
             # 2. Replace the deferred key in the relevant namespace to avoid it sticking around.
-            # __eq__ trigger: dict.pop().
+            # __eq__ trigger: dict.pop()
             imp_locals[raw_asname] = imp_locals.pop(raw_asname)
 
         # 3. Resolve any requested attribute access, then replace the proxy with the result in the relevant namespace.
@@ -985,7 +981,7 @@ class _DIKey(str):
         # 4. Create nested keys and proxies as needed in the resolved module.
         if self.__submod_names:
             with temp_deferred:
-                # __eq__ trigger: _handle_import_key().
+                # __eq__ trigger: _handle_import_key()
                 for submod_name in self.__submod_names:
                     _handle_import_key(submod_name, module.__dict__)
 
@@ -1005,11 +1001,6 @@ def _deferred___import__(
 
     Refer to `__import__` for more information on the expected arguments.
     """
-
-    # _DIKey instances must not resolve while we're creating/examining them in here.
-    if not _is_deferred:
-        msg = "attempted deferred import outside the context of a ``with defer_imports.until_use(): ...`` block"
-        raise ImportError(msg, name=name)
 
     # Thanks to our AST transformer, asname should be a tuple[str | None, ...] when fromlist is populated, or a
     # str | None otherwise.
@@ -1062,6 +1053,12 @@ def _deferred___import__(
     else:
         # Case 5: import a.b
         root_name = name.partition(".")[0]
+
+        # _get_exact_key() can trigger _DIKey.__eq__, which can trigger resolution.
+        if not _is_deferred:
+            msg = "attempted deferred import outside the context of a ``with defer_imports.until_use(): ...`` block"
+            raise ImportError(msg, name=name)
+
         existing_key = _get_exact_key(root_name, locals)
 
         if (existing_key is not None) and isinstance(existing_key, _DIKey):
