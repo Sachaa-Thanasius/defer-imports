@@ -569,17 +569,17 @@ _CONTEXT_MANAGER_TEMPLATE = f"""\
 
 def main() -> None:
     bench_path = Path("bench").resolve()
-    tests_path = bench_path.with_name("tests")
+    tests_path = Path("tests").resolve()
 
     # ---- regular imports
     sample_reg_contents = "\n".join((_PYRIGHT_IGNORE_DIRECTIVES, _GENERATED_BY_COMMENT, _STDLIB_IMPORTS))
     sample_reg_path = bench_path / "sample_regular.py"
     sample_reg_path.write_text(sample_reg_contents, encoding="utf-8")
 
-    # ---- defer_imports-instrumented and defer_imports-hooked imports (global)
+    # ---- defer_imports-influenced imports (global)
     shutil.copy(sample_reg_path, sample_reg_path.with_name("sample_defer_global.py"))
 
-    # ---- defer_imports-instrumented and defer_imports-hooked imports (local)
+    # ---- defer_imports-influenced imports (local)
     sample_defer_contents = _CONTEXT_MANAGER_TEMPLATE.format(
         import_stmt="import defer_imports",
         ctx_manager="with defer_imports.until_use():",

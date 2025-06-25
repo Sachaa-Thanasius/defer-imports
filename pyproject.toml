@@ -46,6 +46,7 @@ dev = [
 
 [tool.pytest.ini_options]
 addopts = ["--import-mode=importlib", "--strict-markers", "--strict-config"]
+filterwarnings = ["error"]
 
 [tool.coverage.run]
 plugins = ["covdefaults"]

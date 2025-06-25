@@ -1115,12 +1115,19 @@ with defer_imports.until_use():
         num_threads = 20  # Need more to trigger the pypy issue.
         barrier = threading.Barrier(num_threads)
 
-        def access_module_attr(b: threading.Barrier):
-            b.wait()
-            signature = module.inspect.signature
-            assert callable(signature)
+        results: list[object] = []
+
+        def access_module_attr(barrier: threading.Barrier):
+            barrier.wait()
+            try:
+                inspect_signature = module.inspect.signature
+            except Exception as exc:  # noqa: BLE001
+                results.append(exc)
+            else:
+                results.append(inspect_signature)
 
         threads: list[threading.Thread] = []
+
         for _ in range(num_threads):
             thread = threading.Thread(target=access_module_attr, args=(barrier,))
             threads.append(thread)
@@ -1128,3 +1135,7 @@ with defer_imports.until_use():
 
         for thread in threads:
             thread.join()
+
+        from inspect import signature
+
+        assert results == [signature] * num_threads

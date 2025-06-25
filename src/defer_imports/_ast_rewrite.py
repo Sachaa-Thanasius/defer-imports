@@ -32,24 +32,6 @@ TYPE_CHECKING = False
 
 
 if TYPE_CHECKING:
-
-    class _ModuleLockManager:
-        def __init__(self, name: str) -> None: ...
-        def __enter__(self) -> None: ...
-        def __exit__(self, *exc_info: object) -> None: ...
-
-else:
-    try:
-        from _frozen_importlib import _ModuleLockManager
-    except ImportError:
-        try:
-            from importlib._bootstrap import _ModuleLockManager
-        except ImportError as exc:
-            msg = "Did not find importlib's internal module lock machinery."
-            raise RuntimeError(msg) from exc
-
-
-if TYPE_CHECKING:
     from typing_extensions import TypeAlias
 elif sys.version_info >= (3, 10):  # pragma: >=3.10 cover
     TypeAlias: t.TypeAlias = "t.TypeAlias"
@@ -954,11 +936,12 @@ class _DIKey(str):
         # Only the first thread to grab the lock should resolve the deferred import.
         with self.__lock:
             # Check that another thread didn't already resolve the import while this one was waiting on the lock.
-            if not self.__is_resolved:
-                self.__resolve_import()
-                self.__is_resolved = True
+            if self.__is_resolved:
+                return True
 
-        return True
+            self.__resolve_import()
+            self.__is_resolved = True
+            return True
 
     __hash__ = str.__hash__
 
@@ -971,8 +954,7 @@ class _DIKey(str):
     def __resolve_import(self, /) -> None:
         """Resolve the import and replace the deferred key and placeholder in the relevant namespace with the result."""
 
-        # We must temporarily prevent _DIKey instances from resolving while we do things that may re-trigger their
-        # __eq__.
+        # We must temporarily prevent _DIKeys from resolving while we do things that may re-trigger their __eq__.
         temp_deferred = _TempDeferred()
 
         raw_asname = str(self)
@@ -1056,43 +1038,41 @@ def _deferred___import__(
         name = _resolve_name(name, package, level)
 
     # Handle the various types of import statements.
-    # TODO: Figure out what kind of locking we need to do here.
-    with _ModuleLockManager(name):
-        if fromlist:
-            # Case 1: from ... import ... [as ...]
-            from_asname: str | None
-            for from_name, from_asname in zip(fromlist, asname):
-                visible_name = from_asname or from_name
-                locals[_DIKey(visible_name, (name, globals, locals, from_name))] = locals.pop(visible_name, None)
-            result = _DIProxy(name)
+    if fromlist:
+        # Case 1: from ... import ... [as ...]
+        from_asname: str | None
+        for from_name, from_asname in zip(fromlist, asname):
+            visible_name = from_asname or from_name
+            locals[_DIKey(visible_name, (name, globals, locals, from_name))] = locals.pop(visible_name, None)
+        result = _DIProxy(name)
 
-        elif "." not in name:
-            # Case 2 & 3: import a [as c]
-            visible_name = asname or name
-            locals[_DIKey(visible_name, (name, globals, locals, None))] = locals.pop(visible_name, None)
-            result = _DIProxy(name)
+    elif "." not in name:
+        # Case 2 & 3: import a [as c]
+        visible_name = asname or name
+        locals[_DIKey(visible_name, (name, globals, locals, None))] = locals.pop(visible_name, None)
+        result = _DIProxy(name)
 
-        elif asname:
-            # Case 4: import a.b.c as d
-            # It's less work to treat this as a "from" import, e.g. from a.b import c as d.
-            parent_name, _, submod_as_from_name = name.rpartition(".")
-            locals[_DIKey(asname, (parent_name, globals, locals, submod_as_from_name))] = locals.pop(asname, None)
-            result = _DIProxy(parent_name)
+    elif asname:
+        # Case 4: import a.b.c as d
+        # It's less work to treat this as a "from" import, e.g. from a.b import c as d.
+        parent_name, _, submod_as_from_name = name.rpartition(".")
+        locals[_DIKey(asname, (parent_name, globals, locals, submod_as_from_name))] = locals.pop(asname, None)
+        result = _DIProxy(parent_name)
 
+    else:
+        # Case 5: import a.b
+        root_name = name.partition(".")[0]
+        existing_key = _get_exact_key(root_name, locals)
+
+        if (existing_key is not None) and isinstance(existing_key, _DIKey):
+            # Case 5.1: The name of the root module was imported via defer_imports in the same namespace.
+            existing_key._di_add_submodule_name(name)
+            result = locals[root_name]
         else:
-            # Case 5: import a.b
-            root_name = name.partition(".")[0]
-            existing_key = _get_exact_key(root_name, locals)
-
-            if (existing_key is not None) and isinstance(existing_key, _DIKey):
-                # Case 5.1: The name of the root module was imported via defer_imports in the same namespace.
-                existing_key._di_add_submodule_name(name)
-                result = locals[root_name]
-            else:
-                # Case 5.2: The name of the root module isn't present or wasn't created/placed by us.
-                sub_names = _accumulate_dotted_parts(name, len(root_name) + 1)
-                locals[_DIKey(root_name, (root_name, globals, locals, None), sub_names)] = locals.pop(root_name, None)
-                result = _DIProxy(root_name)
+            # Case 5.2: The name of the root module isn't present or wasn't created/placed by us.
+            sub_names = _accumulate_dotted_parts(name, len(root_name) + 1)
+            locals[_DIKey(root_name, (root_name, globals, locals, None), sub_names)] = locals.pop(root_name, None)
+            result = _DIProxy(root_name)
 
     return result
 
