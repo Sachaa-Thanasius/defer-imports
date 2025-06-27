@@ -867,19 +867,15 @@ def _handle_import_key(import_name: str, nmsp: dict[str, t.Any], start_idx: t.Op
     existing_key = _get_exact_key(submod_name, nmsp)
 
     if existing_key is not None:
-        if not isinstance(existing_key, _DIKey):
-            # Recurse with a nested namespace.
-            nmsp = nmsp[submod_name].__dict__
-            start_idx = end_idx + 1
-            _handle_import_key(import_name, nmsp, start_idx)
-        else:
+        if isinstance(existing_key, _DIKey):
             existing_key._di_add_submodule_name(import_name)
-
+        else:
+            # Recurse with a nested namespace.
+            _handle_import_key(import_name, nmsp[submod_name].__dict__, end_idx + 1)
     elif not at_final_part:
         full_submod_name = import_name[:end_idx]
         sub_names = _accumulate_dotted_parts(import_name, end_idx + 1)
         nmsp[_DIKey(submod_name, (full_submod_name, nmsp, nmsp, None), sub_names)] = _DIProxy(full_submod_name)
-
     else:
         nmsp[_DIKey(submod_name, (import_name, nmsp, nmsp, None))] = _DIProxy(import_name)
 
