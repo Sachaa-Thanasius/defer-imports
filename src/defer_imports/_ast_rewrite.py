@@ -671,7 +671,7 @@ _PATH_HOOK = _DIFileFinder.path_hook((_DIFileLoader, SOURCE_SUFFIXES))
 
 
 @final
-class ImportHookContext:
+class import_hook:
     """An installer and configurer for defer_imports's import hook.
 
     Before this is called, `defer_imports.until_use` will be a no-op.
@@ -768,9 +768,6 @@ class ImportHookContext:
         for finder in sys.path_importer_cache.values():
             if (finder is not None) and (finder.__class__ is _DIFileFinder):
                 finder.__class__ = FileFinder
-
-
-import_hook = ImportHookContext
 
 
 # endregion
@@ -1083,7 +1080,7 @@ class _DIContext:  # pyright: ignore [reportUnusedClass]
         self._temp_deferred.__exit__(*exc_info)
 
 
-class NullContext:
+class until_use:
     """A context manager within which imports occur lazily. Not re-entrant. Use via `defer_imports.until_use`.
 
     If defer_imports isn't set up properly, i.e. `import_hook().install()` is not called first elsewhere, this should be
@@ -1104,9 +1101,6 @@ class NullContext:
 
     def __exit__(self, *exc_info: object) -> None:
         pass
-
-
-until_use = NullContext
 
 
 # endregion

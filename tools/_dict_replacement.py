@@ -2,8 +2,12 @@
 
 An actual version would have to be written in C for various reasons, e.g. to guard critical sections.
 
-Ref: https://discuss.python.org/t/pep-690-lazy-imports-again/19661/30
-Ref: https://peps.python.org/pep-0690/#implementation
+PEP 690 Reference:
+- https://discuss.python.org/t/pep-690-lazy-imports-again/19661/30
+- https://peps.python.org/pep-0690/#implementation
+
+Other Resources:
+- https://discuss.python.org/t/module-dict-subclass/69084
 """
 
 from __future__ import annotations

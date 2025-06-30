@@ -3,6 +3,7 @@ import collections
 import collections.abc
 import importlib.util
 import sys
+import sysconfig
 import threading
 import typing
 import unittest.mock
@@ -1097,6 +1098,10 @@ with defer_imports.until_use():
         assert str(module.ManyExpensive.__value__) == "tuple[type_stmt_pkg.exp.Expensive, ...]"
         assert expected_proxy_repr not in repr(vars(module))
 
+    @pytest.mark.xfail(
+        sys.version_info >= (3, 13) and sysconfig.get_config_var("Py_GIL_DISABLED") == 1,
+        reason="Not safe without the GIL.",
+    )
     def test_thread_safety(self, tmp_path: Path):
         """Test that trying to access a lazily loaded import from multiple threads doesn't cause race conditions.
 
