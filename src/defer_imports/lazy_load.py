@@ -317,7 +317,7 @@ _meta_path_lock = _threading.Lock()
 
 
 @_final
-class LazyFinderContext:
+class until_module_use:
     """A context manager within which some imports of modules will occur "lazily". Not re-entrant.
 
     Caveats:
@@ -345,9 +345,6 @@ class LazyFinderContext:
             for i, finder in enumerate(_sys.meta_path):
                 if isinstance(finder, _LazyFinder):
                     _sys.meta_path[i] = finder._finder
-
-
-until_module_use = LazyFinderContext
 
 
 # Ensure our type annotations are valid if evaluated at runtime.
