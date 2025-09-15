@@ -47,7 +47,7 @@ To do its work, ``defer-imports`` must hook into the Python import system. Inclu
 
 .. code-block:: python
 
-    import defer_imports.ast_rewrite
+    import defer_imports
 
     # For all usage, import statements *within the module the hook is installed from* 
     # are not affected. In this case, that would be this module.
@@ -62,7 +62,7 @@ Regardless of passed configuration, the import hook will cause imports contained
 
 .. code-block:: python
 
-    import defer_imports.ast_rewrite
+    import defer_imports
 
     # Ex 1. Henceforth, instrument all import statements *only* in modules whose names
     # are in the given sequence of strings.
