@@ -30,7 +30,7 @@ Issues = "https://github.com/Sachaa-Thanasius/defer-imports/issues"
 Source = "https://github.com/Sachaa-Thanasius/defer-imports"
 
 [dependency-groups]
-test = ["pytest>=8"]
+test = ["pytest>=8", "regex"]
 cov = ["coverage>=7", "covdefaults"]
 profile = ["yelp-gprof2dot"]
 dev = [
@@ -111,7 +111,6 @@ select = [
     "UP",
     "W",
     "YTT",
-    # "FBT",
 ]
 extend-ignore = [
     # ---- General
@@ -120,7 +119,6 @@ extend-ignore = [
     "C90",     # McCabe complexity.
     "ANN204",  # Special method return types are usually implicit and/or known by type checker.
     "ANN401",  # Any is needed for some annotations.
-    "UP038",   # isinstance performs better with tuples than unions.
     "PT001",   # pytest recommends against empty parentheses on pytest.fixture.
     "TC001",   # Don't eagerly put things in TYPE_CHECKING blocks.
     "TC002",   # Don't eagerly put things in TYPE_CHECKING blocks.

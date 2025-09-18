@@ -188,6 +188,13 @@ def test_path_hook_installation():
         assert len(sys.path_hooks) == before_length
 
 
+def test_path_hook_with_extension_module():
+    """Test that extension modules still work. Ref: #18."""
+
+    with defer_imports.import_hook():
+        import regex  # noqa: F401
+
+
 common_ast_rewrite_cases = [
     pytest.param(
         *[""] * 2,

@@ -6,7 +6,16 @@ import contextvars
 import sys
 import threading
 import types
-from importlib.machinery import BYTECODE_SUFFIXES, SOURCE_SUFFIXES, FileFinder, ModuleSpec, SourceFileLoader
+from importlib.machinery import (
+    BYTECODE_SUFFIXES,
+    EXTENSION_SUFFIXES,
+    SOURCE_SUFFIXES,
+    ExtensionFileLoader,
+    FileFinder,
+    ModuleSpec,
+    SourceFileLoader,
+    SourcelessFileLoader,
+)
 
 from . import __version__ as _version, lazy_load as _lazy_load
 
@@ -667,7 +676,14 @@ class _DIFileFinder(FileFinder):
         return spec
 
 
-_PATH_HOOK = _DIFileFinder.path_hook((_DIFileLoader, SOURCE_SUFFIXES))
+# NOTE: This doesn't support Apple-specific extensions, and the API to get all supported file loader-suffix combos
+# is private: importlib._bootstrap_external._get_supported_file_loaders().
+# PYUPDATE: Check if there's a easy public API for adding Apple-specific extension support.
+_PATH_HOOK = _DIFileFinder.path_hook(
+    (ExtensionFileLoader, EXTENSION_SUFFIXES),
+    (_DIFileLoader, SOURCE_SUFFIXES),
+    (SourcelessFileLoader, BYTECODE_SUFFIXES),
+)
 
 
 @final
