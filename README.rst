@@ -15,9 +15,9 @@ defer-imports
     :alt: PyPI supported Python versions
 
 
-A library that implements `PEP 690`_–esque lazy imports in pure Python.
+**WARNING: This is still in development. It is NOT ready for use as a dependency in a production setting. If you're still keen to experiment, have at it.**
 
-**Note: This is still in development.**
+A library that implements `PEP 690`_–esque lazy imports in pure Python.
 
 
 .. contents::
