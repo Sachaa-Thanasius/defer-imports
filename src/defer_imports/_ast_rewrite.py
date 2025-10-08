@@ -21,7 +21,6 @@ from . import __version__ as _version, lazy_load as _lazy_load
 
 
 with _lazy_load.until_module_use():
-    import collections
     import io
     import itertools
     import os
@@ -33,7 +32,7 @@ with _lazy_load.until_module_use():
 # ============================================================================
 # region -------- Compatibility shims --------
 #
-# Version-dependent or hidden-from-type-checking imports and definitions.
+# Imports and definitions that depend on version or hide from type checkers.
 # ============================================================================
 
 
@@ -60,14 +59,14 @@ else:  # pragma: <3.11 cover
         """Placeholder for typing.Self."""
 
 
-# collections always imports collections.abc in 3.13+ (which typeshed isn't aware of yet).
-# Ref: https://github.com/python/cpython/pull/125415
-# However, collections.abc.Buffer was added in 3.12. We settle on this for a middle ground.
 if TYPE_CHECKING:
     from typing_extensions import Buffer as ReadableBuffer
-elif sys.version_info >= (3, 13):  # pragma: >=3.13 cover
+elif sys.version_info >= (3, 12):  # pragma: >=3.12 cover
+    with _lazy_load.until_module_use():
+        import collections.abc
+
     ReadableBuffer: t.TypeAlias = "collections.abc.Buffer"
-else:  # pragma: <3.13 cover
+else:  # pragma: <3.12 cover
     ReadableBuffer: TypeAlias = "t.Union[bytes, bytearray, memoryview]"
 
 
@@ -540,23 +539,33 @@ _BYTECODE_HEADER = f"defer_imports{_version}".encode()
 _current_config = contextvars.ContextVar[tuple[str, ...]]("_current_config", default=())
 
 
+_SCOPE_NODE_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
+
+
 def _walk_globals(node: ast.AST) -> t.Generator[ast.AST, None, None]:
     """Recursively yield descendent nodes of a tree starting at `node`, including `node` itself.
 
     *Child* nodes that introduce a new scope, such as class and function definitions, are skipped entirely.
     """
 
-    SCOPE_NODE_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
-    unvisited = collections.deque([node])
-    while unvisited:
-        node = unvisited.popleft()
-        unvisited.extend(child for child in ast.iter_child_nodes(node) if not isinstance(child, SCOPE_NODE_TYPES))
-        yield node
+    yield node
+
+    for child in ast.iter_child_nodes(node):
+        if not isinstance(child, _SCOPE_NODE_TYPES):
+            yield from _walk_globals(child)
 
 
 # PYUPDATE: py3.14 - Consider inheriting from importlib.abc.SourceLoader instead since it's (probably) cheap again.
 class _DIFileLoader(SourceFileLoader):
     """A file loader that instruments ``.py`` files which use ``with defer_imports.until_use(): ...``."""
+
+    # NOTE: There are alternatives to the get_data/set_data usage below:
+    # 1.  Monkeypatch `importlib.util.cache_from_source`, as beartype and typeguard do.
+    #     Ref: https://github.com/beartype/beartype/blob/e9eeb4e282f438e770520b99deadbe219a1c62dc/beartype/claw/_importlib/_clawimpload.py#L177-L312
+    # 2.  Override get_code() and use importlib internals in there as needed, as meta's cinderx strict loader does.
+    #     Ref: https://github.com/facebookincubator/cinderx/blob/f710e0df7d437c9565c499adc7c18951ec707123/cinderx/PythonLib/cinderx/compiler/strict/loader.py#L406-L529
+    #     -   In fairness to this approach, pytest recreates importlib internals to do similar things, so it's not out
+    #         of the question. The downside is a ton of additional complexity and code to keep synced with upstream.
 
     def get_data(self, path: str) -> bytes:
         """Return the data from `path` as raw bytes.
@@ -569,11 +578,6 @@ class _DIFileLoader(SourceFileLoader):
             If the path points to a bytecode file with an invalid `defer_imports`-specific header.
             `importlib.machinery.SourceLoader.get_code()` expects this error from this function.
         """
-
-        # NOTE: There are other options:
-        # 1.  Monkeypatch `importlib.util.cache_from_source`, as beartype and typeguard do.
-        #     Ref: https://github.com/beartype/beartype/blob/e9eeb4e282f438e770520b99deadbe219a1c62dc/beartype/claw/_importlib/_clawimpload.py#L177-L312
-        # 2.  Do whatever facebookincubator/cinderx's strict loader does, which involves overriding get_code().
 
         data = super().get_data(path)
 
@@ -625,6 +629,7 @@ class _DIFileLoader(SourceFileLoader):
 
         orig_tree: ast.Module = compile(data, path, "exec", ast.PyCF_ONLY_AST, dont_inherit=True, optimize=_optimize)
 
+        # TODO: Check if the string "defer_imports.until_use" is in the source before checking the AST?
         if not (self.defer_whole_module or any(map(_is_until_use_node, _walk_globals(orig_tree)))):
             return compile(orig_tree, path, "exec", dont_inherit=True, optimize=_optimize)
 
@@ -1111,6 +1116,8 @@ class until_use:
     -----
     This temporarily replaces `builtins.__import__`.
     """
+
+    __slots__ = ()
 
     def __enter__(self, /) -> None:
         pass

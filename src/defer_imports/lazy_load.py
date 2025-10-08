@@ -12,7 +12,7 @@ __all__ = ("until_module_use",)
 # ============================================================================
 # region -------- Compatibility shims --------
 #
-# Version-dependent or hidden-from-type-checking imports and definitions.
+# Imports and definitions that depend on version or hide from type checkers.
 # ============================================================================
 
 
@@ -303,10 +303,10 @@ class _LazyFinder:
         return getattr(original_finder, name)
 
     def __setattr__(self, name: str, value: _t.Any, /) -> None:
-        return setattr(self._finder, name, value)
+        return setattr(object.__getattribute__(self, "_finder"), name, value)
 
     def __delattr__(self, name: str, /) -> None:
-        return delattr(self._finder, name)
+        return delattr(object.__getattribute__(self, "_finder"), name)
 
 
 # endregion
