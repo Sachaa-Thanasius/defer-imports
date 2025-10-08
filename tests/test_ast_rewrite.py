@@ -17,7 +17,7 @@ import defer_imports
 from defer_imports._ast_rewrite import (
     _ACTUAL_CTX_ASNAME,
     _ACTUAL_CTX_NAME,
-    _BYTECODE_HEADER,
+    _OPTIMIZATION,
     _PATH_HOOK,
     _TEMP_ASNAMES,
     _accumulate_dotted_parts,
@@ -711,8 +711,8 @@ with defer_imports.until_use():
 
     @pytest.mark.skipif(sys.dont_write_bytecode, reason="Bytecode caching is needed.")
     def test_deferred_header_in_instrumented_pycache(self, tmp_path: Path):
-        """Test that the defer_imports-specific bytecode header is being prepended to the bytecode cache files of
-        defer_imports-instrumented modules.
+        """Test that a defer_imports-specific bytecode cache file is being created for defer_imports-instrumented
+        modules.
         """
 
         source = """\
@@ -725,12 +725,8 @@ with defer_imports.until_use():
         assert module.__spec__ is not None
         assert module.__spec__.origin is not None
 
-        expected_cache = Path(importlib.util.cache_from_source(module.__spec__.origin))
+        expected_cache = Path(importlib.util.cache_from_source(module.__spec__.origin, optimization=_OPTIMIZATION))
         assert expected_cache.is_file()
-
-        with expected_cache.open("rb") as fp:
-            header = fp.read(len(_BYTECODE_HEADER))
-        assert header == _BYTECODE_HEADER
 
     def test_error_if_non_import(self, tmp_path: Path):
         source = """\

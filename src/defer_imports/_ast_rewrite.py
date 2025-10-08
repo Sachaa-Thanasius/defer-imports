@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import _imp
 import ast
 import builtins
 import contextvars
+import importlib.util
 import sys
 import threading
 import types
@@ -26,7 +28,6 @@ with _lazy_load.until_module_use():
     import os
     import tokenize
     import typing as t
-    import warnings
 
 
 # ============================================================================
@@ -37,6 +38,52 @@ with _lazy_load.until_module_use():
 
 
 TYPE_CHECKING = False
+
+# PYUPDATE: Check that these are consistent with upstream.
+if TYPE_CHECKING:
+
+    def _calc___package__(globals: t.Mapping[str, t.Any]) -> t.Optional[str]: ...
+    def _resolve_name(name: str, package: str, level: int) -> str: ...
+    def _verbose_message(message: str, *args: object, verbosity: int = 1) -> None: ...
+
+else:
+    from importlib._bootstrap import (
+        _calc___package__,
+        _resolve_name,
+        _verbose_message,
+    )
+
+
+# PYUPDATE: Check that these are consistent with upstream.
+if TYPE_CHECKING:
+
+    def _classify_pyc(data: bytes, name: str, exc_details: t.Mapping[str, object]) -> int: ...
+    def _code_to_hash_pyc(code: types.CodeType, source_hash: bytes, checked: bool = True) -> bytearray: ...
+    def _code_to_timestamp_pyc(code: types.CodeType, mtime: int = 0, source_size: int = 0) -> bytearray: ...
+    def _compile_bytecode(
+        data: ReadableBuffer,
+        name: t.Optional[str] = None,
+        bytecode_path: t.Optional[str] = None,
+        source_path: t.Optional[str] = None,
+    ) -> types.CodeType: ...
+    def _validate_hash_pyc(data: bytes, source_hash: bytes, name: str, exc_details: t.Mapping[str, object]) -> None: ...
+    def _validate_timestamp_pyc(
+        data: bytes,
+        source_mtime: int,
+        source_size: int,
+        name: str,
+        exc_details: t.Mapping[str, object],
+    ) -> None: ...
+
+else:
+    from importlib._bootstrap_external import (
+        _classify_pyc,
+        _code_to_hash_pyc,
+        _code_to_timestamp_pyc,
+        _compile_bytecode,
+        _validate_hash_pyc,
+        _validate_timestamp_pyc,
+    )
 
 
 if TYPE_CHECKING:
@@ -133,54 +180,6 @@ _SourceData: TypeAlias = "t.Union[ReadableBuffer, str]"
 # If any changes are made to the adapted constructs, a short summary of those
 # changes accompanies their definitions.
 # ============================================================================
-
-
-# Adapted from importlib._bootstrap.
-def _resolve_name(name: str, package: str, level: int) -> str:  # pragma: no cover (tested in stdlib)
-    """Resolve a relative module name to an absolute one."""
-
-    bits = package.rsplit(".", level - 1)
-    if len(bits) < level:
-        msg = "attempted relative import beyond top-level package"
-        raise ImportError(msg)
-    base = bits[0]
-    return f"{base}.{name}" if name else base
-
-
-# Adapted from importlib._bootstrap.
-# Changes:
-# - Account for warnings being different across versions.
-def _calc___package__(globals: t.Mapping[str, t.Any]) -> t.Optional[str]:  # pragma: no cover (tested in stdlib)
-    """Calculate what __package__ should be.
-
-    __package__ is not guaranteed to be defined or could be set to None
-    to represent that its proper value is unknown.
-    """
-
-    package: str | None = globals.get("__package__")
-    spec: ModuleSpec | None = globals.get("__spec__")
-
-    if package is not None:
-        if spec is not None and package != spec.parent:
-            if sys.version_info >= (3, 12):
-                category = DeprecationWarning
-            else:
-                category = ImportWarning
-
-            warnings.warn(f"__package__ != __spec__.parent ({package!r} != {spec.parent!r})", category, stacklevel=3)
-
-        return package
-    elif spec is not None:
-        return spec.parent
-    else:
-        msg = "can't resolve package from __spec__ or __package__, falling back on __name__ and __path__"
-        warnings.warn(msg, ImportWarning, stacklevel=3)
-
-        package = globals["__name__"]
-        if "__path__" not in globals:
-            package = package.rpartition(".")[0]  # pyright: ignore [reportOptionalMemberAccess]
-
-        return package
 
 
 # Adapted from importlib._bootstrap_external.
@@ -531,8 +530,8 @@ class _ImportsInstrumenter(ast.NodeTransformer):
 # ============================================================================
 
 
-#: Custom header for defer_imports-instrumented bytecode files. Differs for every version.
-_BYTECODE_HEADER = f"defer_imports{_version}".encode()
+#: Custom optimization suffix for defer_imports-instrumented bytecode files. Differs for every version.
+_OPTIMIZATION = f"deferimports{''.join(_version.split('.'))}"
 
 
 #: The current configuration for defer_imports's instrumentation.
@@ -558,57 +557,6 @@ def _walk_globals(node: ast.AST) -> t.Generator[ast.AST, None, None]:
 # PYUPDATE: py3.14 - Consider inheriting from importlib.abc.SourceLoader instead since it's (probably) cheap again.
 class _DIFileLoader(SourceFileLoader):
     """A file loader that instruments ``.py`` files which use ``with defer_imports.until_use(): ...``."""
-
-    # NOTE: There are alternatives to the get_data/set_data usage below:
-    # 1.  Monkeypatch `importlib.util.cache_from_source`, as beartype and typeguard do.
-    #     Ref: https://github.com/beartype/beartype/blob/e9eeb4e282f438e770520b99deadbe219a1c62dc/beartype/claw/_importlib/_clawimpload.py#L177-L312
-    # 2.  Override get_code() and use importlib internals in there as needed, as meta's cinderx strict loader does.
-    #     Ref: https://github.com/facebookincubator/cinderx/blob/f710e0df7d437c9565c499adc7c18951ec707123/cinderx/PythonLib/cinderx/compiler/strict/loader.py#L406-L529
-    #     -   In fairness to this approach, pytest recreates importlib internals to do similar things, so it's not out
-    #         of the question. The downside is a ton of additional complexity and code to keep synced with upstream.
-
-    def get_data(self, path: str) -> bytes:
-        """Return the data from `path` as raw bytes.
-
-        If `path` points to a bytecode file, validate that it has a `defer_imports`-specific header.
-
-        Raises
-        ------
-        OSError
-            If the path points to a bytecode file with an invalid `defer_imports`-specific header.
-            `importlib.machinery.SourceLoader.get_code()` expects this error from this function.
-        """
-
-        data = super().get_data(path)
-
-        if not path.endswith(tuple(BYTECODE_SUFFIXES)):
-            return data
-
-        if not data.startswith(b"defer_imports"):
-            msg = '"defer_imports" header missing from bytecode'
-            raise OSError(msg)
-
-        if not data.startswith(_BYTECODE_HEADER):
-            msg = '"defer_imports" header is outdated'
-            raise OSError(msg)
-
-        return data[len(_BYTECODE_HEADER) :]
-
-    def set_data(self, path: str, data: ReadableBuffer, *, _mode: int = 0o666) -> None:
-        """Write bytes data to a file.
-
-        If the file is a bytecode one, add a `defer_imports`-specific header to it. That way, instrumented bytecode
-        can be identified and invalidated later if necessary [1]_.
-
-        References
-        ----------
-        .. [1] https://gregoryszorc.com/blog/2017/03/13/from-__past__-import-bytes_literals/
-        """
-
-        if path.endswith(tuple(BYTECODE_SUFFIXES)):
-            data = _BYTECODE_HEADER + data
-
-        return super().set_data(path, data, _mode=_mode)
 
     # NOTE: In 3.12+, the path parameter should only accept bytes, not any buffer.
     # Ref: https://github.com/python/typeshed/issues/13881
@@ -636,6 +584,80 @@ class _DIFileLoader(SourceFileLoader):
         instrumenter = _ImportsInstrumenter(data, path, whole_module=self.defer_whole_module)
         new_tree = instrumenter.visit(orig_tree)
         return compile(new_tree, path, "exec", dont_inherit=True, optimize=_optimize)
+
+    def get_code(self, fullname: str) -> types.CodeType:  # noqa: PLR0912, PLR0915
+        source_path = self.get_filename(fullname)
+        source_mtime = None
+        source_bytes = None
+        source_hash = None
+        hash_based = False
+        check_source = True
+
+        try:
+            # NOTE: Passing this optimization is the only major difference from the base method.
+            bytecode_path = importlib.util.cache_from_source(source_path, optimization=_OPTIMIZATION)
+        except NotImplementedError:
+            bytecode_path = None
+        else:
+            try:
+                st = self.path_stats(source_path)
+            except OSError:
+                pass
+            else:
+                source_mtime = int(st["mtime"])
+                try:
+                    data = self.get_data(bytecode_path)
+                except OSError:
+                    pass
+                else:
+                    exc_details = {
+                        "name": fullname,
+                        "path": bytecode_path,
+                    }
+                    try:
+                        flags = _classify_pyc(data, fullname, exc_details)
+                        bytes_data = memoryview(data)[16:]
+                        hash_based = flags & 0b1 != 0
+                        if hash_based:
+                            check_source = flags & 0b10 != 0
+                            if _imp.check_hash_based_pycs != "never" and (
+                                check_source or _imp.check_hash_based_pycs == "always"
+                            ):
+                                source_bytes = self.get_data(source_path)
+                                source_hash = importlib.util.source_hash(source_bytes)
+                                _validate_hash_pyc(data, source_hash, fullname, exc_details)
+                        else:
+                            _validate_timestamp_pyc(
+                                data,
+                                source_mtime,
+                                st["size"],
+                                fullname,
+                                exc_details,
+                            )
+                    except (ImportError, EOFError):
+                        pass
+                    else:
+                        _verbose_message("{} matches {}", bytecode_path, source_path)
+                        return _compile_bytecode(bytes_data, fullname, bytecode_path, source_path)
+
+        if source_bytes is None:
+            source_bytes = self.get_data(source_path)
+        code_object = self.source_to_code(source_bytes, source_path)
+        _verbose_message("code object from {}", source_path)
+
+        if (not sys.dont_write_bytecode) and (bytecode_path is not None) and (source_mtime is not None):
+            if hash_based:
+                if source_hash is None:
+                    source_hash = importlib.util.source_hash(source_bytes)
+                data = _code_to_hash_pyc(code_object, source_hash, check_source)
+            else:
+                data = _code_to_timestamp_pyc(code_object, source_mtime, len(source_bytes))
+            try:
+                self._cache_bytecode(source_path, bytecode_path, data)  # pyright: ignore[reportUnknownMemberType, reportAttributeAccessIssue]
+            except NotImplementedError:
+                pass
+
+        return code_object
 
     def create_module(self, spec: ModuleSpec) -> t.Optional[types.ModuleType]:
         """Use default semantics for module creation. Also, get some state from the spec."""
